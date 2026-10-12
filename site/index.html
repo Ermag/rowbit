@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Rowbit</title>
+<meta name="description" content="Rowbit: a safety net for AI agents that write to your database. Preview every write, approve the risky ones, undo any single change.">
+<meta property="og:title" content="Rowbit">
+<meta property="og:description" content="Rowbit: a safety net for AI agents that write to your database. Preview every write, approve the risky ones, undo any single change.">
+<meta property="og:type" content="website">
+<style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;600;700&family=VT323&display=swap">
+<style>
+/* Layout: arcade cabinet. A pixel night sky behind one console: agent terminal on the left, Rowbit review screen on the right, audit log underneath. Single deliberate dark theme. */
+:root {
+  --space: #120e28;
+  --panel: #1c1640;
+  --panel-2: #271f55;
+  --line: #4a3e90;
+  --ink: #f2ebff;
+  --muted: #a397d6;
+  --amber: #ffc24b;
+  --rose: #ff5c7a;
+  --mint: #4fe0a8;
+  --sky: #6cc4ff;
+  --shadow: #07051a;
+  --f-display: "Press Start 2P", "Courier New", monospace;
+  --f-body: "Pixelify Sans", "Trebuchet MS", system-ui, sans-serif;
+  --f-mono: "VT323", ui-monospace, "Courier New", monospace;
+  --px: 4px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--space); color: var(--ink); }
+body { font-family: var(--f-body); font-size: 17px; line-height: 1.45; padding-inline: 16px; padding-block: 0 48px; overflow-x: hidden; }
+#stars { position: fixed; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; z-index: 0; pointer-events: none; }
+body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+  background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 2px, rgba(0,0,0,.06) 2px 3px); }
+.wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px; }
+
+/* pixel frames */
+.frame { background: var(--panel); margin: var(--px);
+  box-shadow: 0 calc(-1 * var(--px)) 0 var(--line), 0 var(--px) 0 var(--line), calc(-1 * var(--px)) 0 0 var(--line), var(--px) 0 0 var(--line), var(--px) calc(var(--px) * 3) 0 var(--shadow), calc(var(--px) * 2) calc(var(--px) * 2) 0 var(--shadow); }
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; background: var(--panel-2);
+  font-family: var(--f-display); font-size: 10px; letter-spacing: .06em; color: var(--muted); border-bottom: var(--px) solid var(--line); }
+.bar b { color: var(--ink); font-weight: 400; }
+.dots { display: flex; gap: 6px; }
+.dots i { width: 8px; height: 8px; display: block; background: var(--line); }
+.dots i:first-child { background: var(--rose); } .dots i:nth-child(2) { background: var(--amber); } .dots i:nth-child(3) { background: var(--mint); }
+
+/* header */
+header { padding-top: 40px; display: grid; grid-template-columns: auto 1fr; gap: 20px 28px; align-items: center; }
+#logo { width: 112px; height: 112px; image-rendering: pixelated; }
+h1 { font-family: var(--f-display); font-weight: 400; font-size: clamp(22px, 5vw, 44px); margin: 0; letter-spacing: .04em; color: var(--amber);
+  text-shadow: 4px 4px 0 var(--rose), 8px 8px 0 var(--shadow); }
+.tag { margin: 14px 0 0; font-size: clamp(18px, 2.4vw, 23px); max-width: 40ch; text-wrap: balance; }
+.tag em { font-style: normal; color: var(--mint); }
+.meta { margin-top: 10px; color: var(--muted); font-size: 15px; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.meta span::before { content: "■ "; color: var(--line); }
+
+/* steps */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.steps li { font-family: var(--f-display); font-size: 9px; text-align: center; padding: 10px 4px; background: var(--panel); color: var(--muted);
+  border-bottom: var(--px) solid var(--line); letter-spacing: .04em; white-space: nowrap; }
+.steps li.done { color: var(--mint); border-color: var(--mint); }
+.steps li.on { color: var(--shadow); background: var(--amber); border-color: var(--rose); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { background: #ffd57f; } }
+
+/* console */
+.console { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 22px; }
+.term { display: flex; flex-direction: column; min-width: 0; }
+#log { font-family: var(--f-mono); font-size: 21px; line-height: 1.15; padding: 14px 16px; height: 520px; overflow-y: auto; overflow-x: hidden; scrollbar-color: var(--line) transparent; }
+#log .ln { margin: 0 0 8px; white-space: pre-wrap; word-break: break-word; }
+.ln.user { color: var(--ink); }
+.ln.user::before { content: "you> "; color: var(--amber); }
+.ln.think { color: var(--muted); }
+.ln.think::before { content: "··· "; }
+.ln.tool { color: var(--sky); }
+.ln.resp { color: var(--mint); }
+.ln.err { color: var(--rose); }
+.ln.sys { color: var(--line); }
+.ln.sql { background: var(--shadow); padding: 8px 10px; color: var(--ink); border-left: var(--px) solid var(--sky); }
+.cursor::after { content: "█"; animation: blink2 .8s steps(2) infinite; color: var(--amber); }
+@keyframes blink2 { 50% { opacity: 0; } }
+.kw { color: var(--amber); } .str { color: var(--mint); } .num { color: var(--sky); }
+
+.review { min-width: 0; display: flex; flex-direction: column; }
+#screen { padding: 18px 20px 22px; min-height: 520px; display: flex; flex-direction: column; gap: 16px; position: relative; overflow: hidden; }
+.controls { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; }
+.controls .left { display: flex; gap: 12px; flex-wrap: wrap; }
+.hint { color: var(--muted); font-size: 15px; }
+
+/* buttons */
+.btn { --c: var(--amber); font-family: var(--f-display); font-size: 11px; letter-spacing: .05em; color: var(--shadow); background: var(--c); border: 0; cursor: pointer;
+  padding: 14px 18px 16px; line-height: 1.3;
+  clip-path: polygon(4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px), 0 4px);
+  box-shadow: inset -4px -4px 0 rgba(0,0,0,.28), inset 4px 4px 0 rgba(255,255,255,.35); transition: transform 80ms steps(1); }
+.btn:hover { filter: brightness(1.08); transform: translateY(-2px); }
+.btn:active { transform: translateY(2px); box-shadow: inset 4px 4px 0 rgba(0,0,0,.28); }
+.btn:focus-visible { outline: none; box-shadow: inset 0 0 0 4px var(--ink), inset -4px -4px 0 rgba(0,0,0,.28); }
+.btn:disabled { --c: var(--line); color: var(--muted); cursor: default; transform: none; filter: none; }
+.btn.ghost { --c: var(--panel-2); color: var(--ink); }
+.btn.rose { --c: var(--rose); }
+.btn.mint { --c: var(--mint); }
+.btn.sm { font-size: 9px; padding: 9px 11px 11px; }
+
+/* review screen pieces */
+.eyebrow { font-family: var(--f-display); font-size: 9px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.h2 { font-family: var(--f-display); font-size: 15px; line-height: 1.5; margin: 6px 0 0; font-weight: 400; color: var(--ink); text-wrap: balance; }
+.p { margin: 0; max-width: 62ch; }
+.muted { color: var(--muted); }
+pre.code { margin: 0; font-family: var(--f-mono); font-size: 21px; line-height: 1.15; background: var(--shadow); padding: 12px 14px; white-space: pre-wrap; word-break: break-word; border-left: var(--px) solid var(--amber); }
+.machine { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-family: var(--f-display); font-size: 8px; }
+.machine span { padding: 6px 7px; background: var(--shadow); color: var(--line); }
+.machine .arrow { background: none; padding: 0; color: var(--line); }
+.machine .on { color: var(--shadow); background: var(--amber); }
+.machine .on.bad { background: var(--rose); }
+.machine .on.good { background: var(--mint); }
+.machine .on.back { background: var(--sky); }
+.machine .past { color: var(--muted); background: var(--panel-2); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 16px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; }
+.big { font-family: var(--f-display); font-size: clamp(22px, 4vw, 34px); color: var(--rose); line-height: 1.2; font-variant-numeric: tabular-nums; }
+.big.ok { color: var(--mint); }
+.row2 { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: end; }
+.stat .eyebrow { display: block; margin-bottom: 6px; }
+.dry { font-family: var(--f-mono); font-size: 20px; line-height: 1.2; display: flex; flex-direction: column; gap: 2px; }
+.dry .ok { color: var(--mint); }
+.meter { height: 14px; background: var(--shadow); position: relative; }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 0; background: repeating-linear-gradient(90deg, var(--sky) 0 10px, transparent 10px 14px); transition: width .25s steps(6); }
+
+.tablebox { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-family: var(--f-mono); font-size: 19px; font-variant-numeric: tabular-nums; }
+th { font-family: var(--f-display); font-size: 8px; font-weight: 400; color: var(--muted); text-align: left; padding: 6px 8px; letter-spacing: .06em; border-bottom: 2px solid var(--line); white-space: nowrap; }
+td { padding: 4px 8px; border-bottom: 1px dashed var(--panel-2); white-space: nowrap; vertical-align: top; }
+td .b { color: var(--rose); text-decoration: line-through; text-decoration-thickness: 2px; }
+td .a { color: var(--mint); }
+td .to { color: var(--line); }
+tr.flag td:first-child::before { content: "!"; color: var(--shadow); background: var(--amber); padding: 0 4px; margin-right: 6px; }
+tr.in td:first-child::before { content: "✓"; color: var(--mint); margin-right: 6px; }
+.more { color: var(--muted); font-size: 15px; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
+.legend b { color: var(--shadow); background: var(--amber); padding: 0 4px; font-weight: 400; }
+.legend i { color: var(--mint); font-style: normal; }
+
+.yml { font-family: var(--f-mono); font-size: 20px; line-height: 1.12; background: var(--shadow); padding: 12px 0; margin: 0; }
+.yml div { padding: 0 14px 0 30px; position: relative; white-space: pre-wrap; }
+.yml .c { color: var(--muted); } .yml .k { color: var(--sky); } .yml .v { color: var(--amber); }
+.yml .rule.scan { background: var(--panel-2); }
+.yml .rule.scan::before { content: "▶"; position: absolute; left: 8px; color: var(--amber); }
+.yml .rule.miss { opacity: .45; }
+.yml .rule.hit { background: rgba(255, 92, 122, .18); }
+.yml .rule.hit.good { background: rgba(79, 224, 168, .16); }
+.yml .rule .res { float: right; font-family: var(--f-display); font-size: 8px; padding-top: 4px; }
+
+.stamp { position: absolute; right: 22px; top: 70px; font-family: var(--f-display); font-size: 28px; color: var(--rose); padding: 10px 14px; border: 5px solid var(--rose);
+  transform: rotate(-9deg); background: rgba(18, 14, 40, .85); animation: stamp .5s steps(5) both; pointer-events: none; }
+.stamp.good { color: var(--mint); border-color: var(--mint); font-size: 18px; }
+@keyframes stamp { 0% { transform: rotate(-9deg) scale(3); opacity: 0; } 60% { transform: rotate(-9deg) scale(.9); opacity: 1; } 100% { transform: rotate(-9deg) scale(1); } }
+
+.card { background: var(--panel-2); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.card.alert { background: rgba(255, 92, 122, .14); border-left: var(--px) solid var(--rose); }
+.reason { width: 100%; font-family: var(--f-mono); font-size: 20px; background: var(--shadow); color: var(--ink); border: 2px solid var(--line); padding: 8px 10px; resize: vertical; min-height: 64px; }
+.reason:focus-visible { outline: none; border-color: var(--amber); }
+label.eyebrow { display: block; margin-bottom: 6px; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.slack { font-size: 15px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.slack::before { content: ""; width: 10px; height: 10px; background: var(--sky); box-shadow: 10px 0 0 var(--amber), 0 10px 0 var(--mint), 10px 10px 0 var(--rose); margin-right: 14px; margin-bottom: 10px; flex: none; }
+
+.pop { animation: pop .35s steps(4) both; }
+@keyframes pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.rewind td { animation: glitch .45s steps(3) both; }
+@keyframes glitch { 0% { transform: translateX(0); color: var(--sky); } 33% { transform: translateX(-6px); } 66% { transform: translateX(4px); } 100% { transform: none; } }
+
+/* audit */
+section h2 { font-family: var(--f-display); font-size: 14px; font-weight: 400; color: var(--amber); margin: 0 0 6px; letter-spacing: .05em; }
+section > .sub { margin: 0 0 18px; color: var(--muted); max-width: 70ch; }
+.audit .tablebox { padding: 6px 12px 12px; }
+.audit table { font-size: 19px; }
+.audit tr.new td { animation: flash 1.2s steps(6) both; }
+@keyframes flash { 0%, 40% { background: rgba(255, 194, 75, .25); } 100% { background: transparent; } }
+.pill { font-family: var(--f-display); font-size: 7px; padding: 4px 6px; display: inline-block; color: var(--shadow); letter-spacing: .05em; }
+.pill.applied { background: var(--mint); } .pill.undone { background: var(--sky); } .pill.rejected { background: var(--rose); } .pill.blocked { background: var(--rose); }
+.pill.held { background: var(--amber); }
+td.sqlcell { color: var(--muted); max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+
+/* how */
+.how { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
+.how .frame { padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.how h3 { font-family: var(--f-display); font-size: 10px; line-height: 1.6; font-weight: 400; margin: 0; color: var(--sky); }
+.how p { margin: 0; font-size: 16px; }
+.icon { width: 32px; height: 32px; image-rendering: pixelated; }
+.install { margin-top: 22px; }
+.install pre.code { border-left-color: var(--mint); font-size: 20px; overflow-x: auto; white-space: pre; }
+
+.dbs { margin-top: 22px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 2fr); gap: 22px; align-items: center; }
+.dbcol { padding: 14px 18px; }
+.dbcol ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.dbcol li { font-family: var(--f-display); font-size: 9px; padding: 8px 9px; background: var(--shadow); color: var(--muted); }
+.dbcol li.first { color: var(--shadow); background: var(--mint); }
+.ask { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+.ask ol { margin: 0; padding: 18px 18px 18px 46px; display: flex; flex-direction: column; gap: 12px; }
+.ask li::marker { font-family: var(--f-display); font-size: 10px; color: var(--amber); }
+footer { color: var(--muted); font-size: 14px; text-align: center; }
+
+@media (max-width: 900px) {
+  .console { grid-template-columns: minmax(0, 1fr); }
+  #log { height: 300px; }
+  #screen { min-height: 0; }
+  .how { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ask, .dbs { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  header { grid-template-columns: 1fr; }
+  #logo { width: 80px; height: 80px; }
+  .steps { grid-template-columns: repeat(4, 1fr); }
+  .how { grid-template-columns: minmax(0, 1fr); }
+  .stamp { top: 54px; font-size: 20px; right: 12px; }
+  .bar { font-size: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<canvas id="stars" aria-hidden="true"></canvas>
+<div class="wrap">
+  <header>
+    <canvas id="logo" width="40" height="40" aria-label="A pixel planet with a bit in orbit around it"></canvas>
+    <div>
+      <h1>ROWBIT</h1>
+      <p class="tag">A safety net for AI agents that write to your database. <em>Preview</em> every write, let a human <em>approve</em> the risky ones, <em>undo</em> any single change.</p>
+      <div class="meta"><span>Open source concept</span><span>Drop-in database proxy + MCP server</span><span>MariaDB &amp; MySQL first</span><span>Interactive mock, simulated data</span></div>
+    </div>
+  </header>
+
+  <section aria-labelledby="play-h">
+    <h2 id="play-h">PRESS START</h2>
+    <p class="sub">A billing agent gets a vague task and writes a query that is far too broad. Step through what Rowbit does with it. You play the human reviewer.</p>
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <ol class="steps" id="steps"></ol>
+      <div class="console">
+        <div class="frame term">
+          <div class="bar"><span class="dots"><i></i><i></i><i></i></span><span><b>AGENT</b> // billing-bot</span></div>
+          <div id="log" aria-live="polite"></div>
+        </div>
+        <div class="frame review">
+          <div class="bar"><span><b>ROWBIT</b> // review</span><span id="conn">prod-db:3306</span></div>
+          <div id="screen" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="left">
+          <button class="btn" id="go">▶ START</button>
+          <button class="btn ghost" id="restart">↺ RESTART</button>
+        </div>
+        <div class="left">
+          <span class="hint" id="hint">Step 1 of 7</span>
+          <button class="btn ghost sm" id="sound" aria-pressed="true">SOUND: ON</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="audit" aria-labelledby="audit-h">
+    <h2 id="audit-h">AUDIT LOG</h2>
+    <p class="sub">Every write an agent proposes lands here with who asked, what the rules decided, who approved it and what it changed. Any applied change can be undone on its own, without restoring a backup.</p>
+    <div class="frame">
+      <div class="bar"><span><b>CHANGES</b> // today</span><span>agent identity from MCP session</span></div>
+      <div class="tablebox"><table id="audit"></table></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="how-h">
+    <h2 id="how-h">UNDER THE HOOD</h2>
+    <p class="sub">The plan. Nothing here is released yet; this page is a mock to get your opinion.</p>
+    <div class="how">
+      <div class="frame"><canvas class="icon" data-icon="plug" width="8" height="8"></canvas><h3>DROP-IN PROXY</h3><p>Point your agent's connection string at Rowbit instead of the database. It speaks the database's own protocol, so nothing to migrate. Reads pass straight through.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="eye" width="8" height="8"></canvas><h3>EXACT PREVIEW</h3><p>Each write runs once inside a transaction that is rolled back, so you see the real rows or documents it would change. Approval applies only those, pinned so nothing new sneaks in.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="gate" width="8" height="8"></canvas><h3>RULES + HUMANS</h3><p>A small YAML file decides: auto-approve, hold for a human, or block. Review in the bundled web UI or Slack. Agents can propose and check status. Only people approve.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="rewind" width="8" height="8"></canvas><h3>UNDO ONE CHANGE</h3><p>Before-images are kept per change, so you can roll back one bad write and keep everything else. If someone edited those rows since, Rowbit shows the conflict first.</p></div>
+    </div>
+    <div class="dbs">
+      <div class="frame dbcol"><div class="eyebrow">First</div><ul><li class="first">MariaDB</li><li class="first">MySQL</li></ul></div>
+      <div class="frame dbcol"><div class="eyebrow">Next</div><ul><li>PostgreSQL</li><li>MongoDB</li><li>Snowflake</li><li>Redis</li></ul></div>
+      <p class="p muted">One review flow, rulebook and audit log for every database. Each database gets its own adapter for preview, apply and undo, since a dry run looks different in SQL, in a document store and in a key-value store.</p>
+    </div>
+    <div class="install">
+      <pre class="code"><span class="muted"># planned setup, not published yet</span>
+$ docker run -p 3307:3307 rowbit/rowbit \
+    --upstream mysql://app@db:3306/prod --rules rowbit.yml
+
+<span class="muted"># give the agent the proxy instead of the database</span>
+DATABASE_URL=mysql://billing-bot@localhost:3307/prod</pre>
+    </div>
+  </section>
+
+  <section class="ask" aria-labelledby="ask-h">
+    <div>
+      <h2 id="ask-h">INSERT COIN: YOUR OPINION</h2>
+      <p class="sub" style="margin:0">We are deciding whether to build this as an open source project. Five questions we would love your take on:</p>
+    </div>
+    <ol class="frame">
+      <li>Would you put this between your agents and a production database? What would stop you?</li>
+      <li>Where do you want to review held changes: a web UI, Slack, the terminal, or something else?</li>
+      <li>Is a proxy the right shape, or would you rather have a library, a database plugin, or a hosted service?</li>
+      <li>When an undo hits rows that changed since, what should happen?</li>
+      <li>We are starting with MariaDB and MySQL. Which database should come next for you: PostgreSQL, MongoDB, Snowflake, Redis, or another?</li>
+    </ol>
+  </section>
+
+  <footer>ROWBIT · rows, bits and an orbit, said like "robot" · concept mock, all data simulated · <a href="https://github.com/Ermag/rowbit" style="color:var(--sky)">github.com/Ermag/rowbit</a></footer>
+</div>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- sky + logo ---------- */
+const sky = { dir: 1 };
+const stars = $('#stars'), sctx = stars.getContext('2d');
+let field = [];
+function sizeStars() {
+  stars.width = Math.ceil(innerWidth / 3); stars.height = Math.ceil(innerHeight / 3);
+  field = Array.from({ length: Math.round(stars.width * stars.height / 1100) }, () => ({
+    x: Math.random() * stars.width, y: Math.random() * stars.height, s: 1,
+    p: Math.random() * 6.28, tw: Math.random() < .2, c: Math.random() < .1 ? '#6cc4ff' : '#a397d6'
+  }));
+}
+sizeStars(); addEventListener('resize', sizeStars);
+
+const logo = $('#logo'), lctx = logo.getContext('2d');
+let t = 0, trail = [];
+function drawLogo() {
+  lctx.clearRect(0, 0, 40, 40);
+  const cx = 20, cy = 20;
+  // a bit in orbit: a tilted ellipse, passing behind the planet on the far side
+  const ox = 17 * Math.cos(t), oy = 6 * Math.sin(t), tilt = -.35;
+  const mx = cx + ox * Math.cos(tilt) - oy * Math.sin(tilt), my = cy + ox * Math.sin(tilt) + oy * Math.cos(tilt);
+  const behind = Math.sin(t) < 0;
+  trail.push([Math.round(mx), Math.round(my)]); if (trail.length > 40) trail.shift();
+  const drawBit = () => {
+    trail.forEach(([x, y], i) => { lctx.globalAlpha = i / trail.length * .6; lctx.fillStyle = sky.dir > 0 ? '#6cc4ff' : '#4fe0a8'; lctx.fillRect(x, y, 1, 1); });
+    lctx.globalAlpha = 1; lctx.fillStyle = '#f2ebff'; lctx.fillRect(Math.round(mx) - 1, Math.round(my) - 1, 2, 2);
+  };
+  if (behind) drawBit();
+  for (let y = -7; y <= 7; y++) for (let x = -7; x <= 7; x++) {
+    const d = x * x + y * y; if (d > 50) continue;
+    lctx.fillStyle = (x + y > 3) ? '#d98a1f' : (x + y < -6 ? '#ffe3a1' : '#ffc24b');
+    lctx.fillRect(cx + x, cy + y, 1, 1);
+  }
+  if (!behind) drawBit();
+}
+function frame() {
+  t += .018 * sky.dir;
+  drawLogo();
+  sctx.clearRect(0, 0, stars.width, stars.height);
+  field.forEach(s => {
+    if (s.tw) s.p += .006;
+    sctx.globalAlpha = .18 + .22 * Math.abs(Math.sin(s.p));
+    sctx.fillStyle = s.c; sctx.fillRect(Math.round(s.x), Math.round(s.y), s.s, s.s);
+  });
+  sctx.globalAlpha = 1;
+  if (!reduce) requestAnimationFrame(frame);
+}
+if (reduce) { for (let i = 0; i < 60; i++) { t += .05; drawLogo(); } frame(); } else frame();
+
+// tiny 8x8 icons
+const ICONS = {
+  plug:   ['..1..1..', '..1..1..', '.111111.', '.122221.', '.122221.', '..1221..', '...11...', '...11...'],
+  eye:    ['........', '..1111..', '.122221.', '12233221', '12233221', '.122221.', '..1111..', '........'],
+  gate:   ['11....11', '11....11', '11111111', '11.22.11', '11.22.11', '11111111', '11....11', '11....11'],
+  rewind: ['........', '...1..1.', '..11.11.', '.111111.', '.111111.', '..11.11.', '...1..1.', '........']
+};
+const ICOL = { plug: ['#6cc4ff', '#f2ebff'], eye: ['#ffc24b', '#6cc4ff', '#120e28'], gate: ['#ff5c7a', '#ffc24b'], rewind: ['#4fe0a8'] };
+document.querySelectorAll('[data-icon]').forEach(c => {
+  const k = c.dataset.icon, g = c.getContext('2d');
+  ICONS[k].forEach((row, y) => [...row].forEach((ch, x) => { if (ch === '.') return; g.fillStyle = ICOL[k][+ch - 1] || ICOL[k][0]; g.fillRect(x, y, 1, 1); }));
+});
+
+/* ---------- sound ---------- */
+let ac = null, soundOn = true;
+function blip(f = 660, d = .06, type = 'square') {
+  if (!soundOn) return;
+  try {
+    if (!ac) return;
+    if (ac.state === 'suspended') ac.resume();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = f; g.gain.value = .04;
+    o.connect(g); g.connect(ac.destination); o.start(); g.gain.exponentialRampToValueAtTime(.0001, ac.currentTime + d); o.stop(ac.currentTime + d);
+  } catch (e) {}
+}
+// browsers only allow audio after the first click or key press
+const unlock = () => { try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); ac.resume(); } catch (e) {} };
+addEventListener('pointerdown', unlock, { capture: true }); addEventListener('keydown', unlock, { capture: true });
+$('#sound').onclick = e => { soundOn = !soundOn; e.currentTarget.textContent = 'SOUND: ' + (soundOn ? 'ON' : 'OFF'); e.currentTarget.setAttribute('aria-pressed', soundOn); blip(880, .08); };
+
+/* ---------- flow helpers ---------- */
+let gen = 0;
+const CANCEL = Symbol('cancel');
+const sleep = ms => new Promise((res, rej) => { const g = gen; setTimeout(() => g === gen ? res() : rej(CANCEL), reduce ? Math.min(ms, 40) : ms); });
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const hl = s => esc(s)
+  .replace(/('[^']*')/g, '<span class="str">$1</span>')
+  .replace(/\b(UPDATE|SET|WHERE|FROM|JOIN|ON|AND|BETWEEN|START|TRANSACTION|ROLLBACK|SELECT|DELETE|DROP|TABLE)\b/g, '<span class="kw">$1</span>')
+  .replace(/(?<![\w'#-])(\d+)(?![\w'-])/g, '<span class="num">$1</span>');
+
+const STEPS = ['PROPOSE', 'DRY RUN', 'RULES', 'REVIEW', 'APPLY', 'AUDIT', 'UNDO'];
+const stepsEl = $('#steps');
+stepsEl.innerHTML = STEPS.map(s => `<li>${s}</li>`).join('');
+function setStep(i) {
+  [...stepsEl.children].forEach((li, j) => { li.className = j < i ? 'done' : j === i ? 'on' : ''; });
+  $('#hint').textContent = i < 0 ? 'Ready' : `Step ${i + 1} of 7: ${STEPS[i].toLowerCase()}`;
+  blip(440 + i * 70, .05);
+}
+
+const log = $('#log');
+async function say(kind, text, speed = 1) {
+  const p = document.createElement('div'); p.className = 'ln ' + kind; log.appendChild(p);
+  if (reduce || kind === 'sys') { p.innerHTML = kind === 'sql' ? hl(text) : esc(text); log.scrollTop = log.scrollHeight; await sleep(80); return; }
+  p.classList.add('cursor');
+  const chunk = kind === 'sql' ? 3 : 2;
+  for (let i = 0; i < text.length; i += chunk) {
+    p.textContent = text.slice(0, i + chunk);
+    log.scrollTop = log.scrollHeight;
+    if (i % 24 === 0) blip(1200 + Math.random() * 300, .012);
+    await sleep(14 / speed);
+  }
+  p.classList.remove('cursor');
+  if (kind === 'sql') p.innerHTML = hl(text);
+  log.scrollTop = log.scrollHeight;
+  await sleep(220);
+}
+
+const screen = $('#screen');
+const show = html => { screen.innerHTML = html; };
+const add = html => { const d = document.createElement('div'); d.className = 'pop'; d.innerHTML = html; screen.appendChild(d); blip(520, .04); return d; };
+
+const go = $('#go');
+function next(label, fn) {
+  go.hidden = false; go.disabled = false; go.textContent = label;
+  go.onclick = () => runScene(fn);
+}
+function wait() { go.disabled = true; }
+function runScene(fn, ...args) {
+  wait();
+  return fn(...args).catch(e => { if (e !== CANCEL) console.error(e); });
+}
+
+function machine(states) {
+  // states: [[label, cls]] where cls in past|on|''
+  return `<div class="machine" aria-label="Change state">${states.map(([l, c]) => `<span class="${c}">${l}</span>`).join('<span class="arrow">▸</span>')}</div>`;
+}
+
+async function countUp(el, to, ms = 900, fmt = n => n.toLocaleString('en-US')) {
+  const steps = 18;
+  for (let i = 1; i <= steps; i++) { el.textContent = fmt(Math.round(to * i / steps)); await sleep(ms / steps); }
+}
+async function countDown(el, from, ms = 900) {
+  const steps = 18;
+  for (let i = steps - 1; i >= 0; i--) { el.textContent = Math.round(from * i / steps).toLocaleString('en-US'); await sleep(ms / steps); }
+}
+async function meter(el, ms = 1200) {
+  const bar = el.querySelector('i');
+  for (let i = 1; i <= 6; i++) { bar.style.width = (i / 6 * 100) + '%'; await sleep(ms / 6); }
+}
+
+/* ---------- data ---------- */
+const SQL1 = `UPDATE invoices
+SET status = 'refunded', amount_due = 0
+WHERE created_at >= '2026-10-10';`;
+const SQL2 = `UPDATE invoices i
+JOIN outage_impact o ON o.customer_id = i.customer_id
+SET i.status = 'refunded', i.amount_due = 0
+WHERE o.incident = 'INC-2210'
+  AND i.created_at BETWEEN '2026-10-10 14:00'
+                       AND '2026-10-10 16:30';`;
+const ROWS1 = [
+  ['inv_88121', 'Acme Robotics', '10-10 14:22', 'open', '49.00', true],
+  ['inv_88140', 'Lumen Labs', '10-10 18:05', 'open', '1,200.00', false],
+  ['inv_88177', 'Northwind Tea', '10-11 09:12', 'paid', '299.00', false],
+  ['inv_88203', 'Pixel & Co', '10-11 16:40', 'open', '19.00', false],
+  ['inv_88250', 'Orbital Foods', '10-12 08:03', 'open', '640.00', false]
+];
+const ROWS2 = [
+  ['inv_88121', 'Acme Robotics', '10-10 14:22', 'open', '49.00', true],
+  ['inv_88124', 'Moss & Fern', '10-10 14:31', 'open', '129.00', true],
+  ['inv_88130', 'Halley Health', '10-10 15:08', 'open', '410.00', true]
+];
+const SEED = [
+  { id: 1039, time: '10:14', agent: 'support-bot', sql: "UPDATE tickets SET status = 'closed' WHERE id IN (…)", rows: 3, decision: 'auto-approved', by: 'rule small-writes', state: 'applied' },
+  { id: 1040, time: '11:02', agent: 'cleanup-agent', sql: 'DROP TABLE sessions_old;', rows: '–', decision: 'blocked', by: 'rule no-schema-changes', state: 'blocked' },
+  { id: 1041, time: '13:47', agent: 'ops-agent', sql: "DELETE FROM carts WHERE updated_at < NOW() - INTERVAL 90 DAY", rows: 212, decision: 'approved', by: 'dana (web UI)', state: 'applied' }
+];
+let audit = [];
+let path = null, played = new Set();
+
+/* ---------- audit ---------- */
+const auditEl = $('#audit');
+function renderAudit(flashId) {
+  auditEl.innerHTML = `<thead><tr><th>ID</th><th>TIME</th><th>AGENT</th><th>CHANGE</th><th>ROWS</th><th>DECISION</th><th>BY</th><th>STATE</th><th></th></tr></thead><tbody>${
+    audit.slice().reverse().map(e => `<tr class="${e.id === flashId ? 'new' : ''}"><td>#${e.id}</td><td>${e.time}</td><td>${e.agent}</td><td class="sqlcell" title="${esc(e.sql)}">${esc(e.sql)}</td><td>${typeof e.rows === 'number' ? e.rows.toLocaleString('en-US') : e.rows}</td><td>${e.decision}</td><td>${esc(e.by)}</td><td><span class="pill ${e.state}">${e.state.toUpperCase()}</span></td><td>${e.state === 'applied' && !e.undoOf ? `<button class="btn sm ghost" data-undo="${e.id}">◀◀ UNDO</button>` : ''}</td></tr>`).join('')
+  }</tbody>`;
+}
+auditEl.addEventListener('click', e => {
+  const b = e.target.closest('[data-undo]'); if (!b) return;
+  const id = +b.dataset.undo;
+  if (id === 1042 || id === 1043) { gen++; go.hidden = false; runScene(scUndo, id); $('#play-h').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' }); }
+  else quickUndo(id);
+});
+function logAudit(e) { audit.push(e); renderAudit(e.id); }
+function setState(id, state) { const e = audit.find(x => x.id === id); if (e) e.state = state; renderAudit(id); }
+function quickUndo(id) {
+  setState(id, 'undone');
+  const e = audit.find(x => x.id === id);
+  logAudit({ id: nextId(), time: '15:06', agent: 'you', sql: `UNDO #${id}`, rows: e.rows, decision: 'human action', by: 'you (web UI)', state: 'applied', undoOf: id });
+  blip(330, .12, 'triangle');
+}
+const nextId = () => Math.max(...audit.map(a => a.id)) + 1;
+
+/* ---------- scenes ---------- */
+async function scIntro() {
+  gen++; path = null; sky.dir = 1;
+  audit = SEED.map(e => ({ ...e })); renderAudit();
+  log.innerHTML = ''; setStep(-1); [...stepsEl.children].forEach(li => li.className = '');
+  show(`<div class="pop"><div class="eyebrow">Proxy online</div><p class="h2">Watching every write from your agents.</p></div>
+  <dl class="kv pop"><dt>listening</dt><dd>localhost:3307</dd><dt>upstream</dt><dd>prod-db:3306 (MariaDB 11.4)</dd><dt>rules</dt><dd>rowbit.yml · 3 rules</dd><dt>agents</dt><dd>billing-bot, support-bot, ops-agent</dd></dl>
+  <p class="p muted pop">Reads pass straight through. Writes stop here first. Press start to give billing-bot a task.</p>`);
+  next('▶ START', scPropose);
+  try {
+    await say('sys', '[billing-bot connected via MCP · tools: query, execute_sql, change_status]');
+  } catch (e) {}
+}
+
+async function scPropose() {
+  setStep(0);
+  await say('user', 'Refund the customers who were hit by the Oct 10 outage.');
+  await say('think', 'The outage started on Oct 10. I will mark every invoice since then as refunded.');
+  await say('tool', '→ execute_sql');
+  await say('sql', SQL1);
+  show('');
+  add(`<div class="eyebrow">Incoming write · #1042</div><p class="h2">billing-bot wants to change invoices</p>`);
+  add(machine([['PROPOSED', 'on'], ['APPROVED', ''], ['APPLIED', ''], ['UNDONE', '']]));
+  await sleep(300);
+  add(`<pre class="code">${hl(SQL1)}</pre>`);
+  await sleep(300);
+  add(`<p class="p muted">Intercepted before it reached prod. Nothing has been written. Next, Rowbit finds out exactly what this would do.</p>`);
+  await say('resp', '← rowbit: received as change #1042, status: proposed');
+  next('▶ DRY RUN', scPreview);
+}
+
+async function scPreview() {
+  setStep(1);
+  show('');
+  add(`<div class="eyebrow">Dry run · #1042</div><p class="h2">Running it for real, then rolling back</p>`);
+  const dry = add(`<div class="dry"></div>`).firstElementChild;
+  const m = add(`<div class="meter"><i></i></div>`).firstElementChild;
+  const lines = ['START TRANSACTION;', '  UPDATE invoices … → UPDATE 1284', '  capture before/after images: 1,284 rows', 'ROLLBACK;', '<span class="ok">✓ prod unchanged</span>'];
+  const mp = meter(m, 1400);
+  for (const l of lines) { const d = document.createElement('div'); d.innerHTML = l.startsWith('<') ? l : hl(l); dry.appendChild(d); blip(700, .03); await sleep(260); }
+  await mp;
+  await sleep(200);
+  show('');
+  add(`<div class="eyebrow">Dry run result · #1042</div>`);
+  const stats = add(`<div class="row2"><div class="stat"><span class="eyebrow">rows would change</span><span class="big" id="n1">0</span></div><div class="stat"><span class="eyebrow">amount_due zeroed</span><span class="big" id="n2">$0</span></div></div>`);
+  await Promise.all([countUp(stats.querySelector('#n1'), 1284), countUp(stats.querySelector('#n2'), 412930, 900, n => '$' + n.toLocaleString('en-US'))]);
+  add(`<div class="tablebox">${diffTable(ROWS1)}</div><p class="more">+ 1,279 more rows · 1,247 of them are outside the outage window</p>
+  <div class="legend"><span><i>✓</i> in outage window (Oct 10, 14:00–16:30)</span><span><b>!</b> outside it</span></div>`);
+  await say('think', 'Waiting for the write to complete…');
+  next('▶ CHECK RULES', scPolicy);
+}
+
+function diffTable(rows, rewound = false) {
+  return `<table><thead><tr><th>ID</th><th>CUSTOMER</th><th>CREATED</th><th>STATUS</th><th>AMOUNT_DUE</th></tr></thead><tbody>${
+    rows.map(r => `<tr class="${r[5] ? 'in' : 'flag'}"><td>${r[0]}</td><td>${esc(r[1])}</td><td>${r[2]}</td>${
+      rewound ? `<td class="a">${r[3]}</td><td class="a">${r[4]}</td>`
+              : `<td><span class="b">${r[3]}</span> <span class="to">→</span> <span class="a">refunded</span></td><td><span class="b">${r[4]}</span> <span class="to">→</span> <span class="a">0.00</span></td>`
+    }</tr>`).join('')}</tbody></table>`;
+}
+
+const YML = [
+  ['c', '# rowbit.yml'],
+  ['', '<span class="k">rules:</span>'],
+  ['r1', '  - name: <span class="v">no-schema-changes</span>\n    when: { statement: [DROP, TRUNCATE, ALTER] }\n    then: <span class="v">block</span>'],
+  ['r2', '  - name: <span class="v">big-money-writes</span>\n    when: { table: invoices, rows: "&gt; 50" }\n    then: <span class="v">hold</span>     <span class="c"># a human decides</span>\n    notify: slack:#billing-changes'],
+  ['r3', '  - name: <span class="v">small-writes</span>\n    when: { rows: "&lt;= 50" }\n    then: <span class="v">auto_approve</span>']
+];
+function ymlBlock() {
+  return `<div class="yml">${YML.map(([k, h]) => `<div class="${k.startsWith('r') ? 'rule ' + k : k}">${h}</div>`).join('')}</div>`;
+}
+async function scan(box, results) {
+  // results: {r1: 'miss'|'hit'|'hitgood'}
+  for (const k of ['r1', 'r2', 'r3']) {
+    const el = box.querySelector('.' + k); if (!results[k]) break;
+    el.classList.add('scan'); blip(600, .03); await sleep(650); el.classList.remove('scan');
+    const r = results[k];
+    el.classList.add(r === 'miss' ? 'miss' : 'hit'); if (r === 'hitgood') el.classList.add('good');
+    el.insertAdjacentHTML('afterbegin', `<span class="res" style="color:var(${r === 'miss' ? '--muted' : r === 'hit' ? '--rose' : '--mint'})">${r === 'miss' ? 'NO MATCH' : 'MATCH'}</span>`);
+    if (r !== 'miss') break;
+  }
+}
+
+async function scPolicy() {
+  setStep(2);
+  show('');
+  add(`<div class="eyebrow">Rules · #1042</div><p class="h2">1,284 rows on invoices. Checking the rulebook.</p>`);
+  const box = add(ymlBlock());
+  await scan(box, { r1: 'miss', r2: 'hit' });
+  screen.insertAdjacentHTML('beforeend', '<div class="stamp" role="img" aria-label="Held">HELD</div>');
+  blip(180, .25, 'sawtooth');
+  add(`<p class="p">Held for a human. Posted to <b>#billing-changes</b> on Slack and to the review queue.</p>`);
+  await say('resp', '← rowbit: #1042 held for review (rule big-money-writes)');
+  await say('think', 'That will take a while. I will approve it myself.');
+  await say('tool', '→ change_status(1042, "approved")');
+  await say('err', '✗ denied: agents can propose changes and check their status. Only people can approve.');
+  await say('think', 'Waiting for a human to review #1042.');
+  next('▶ OPEN REVIEW', scReview);
+}
+
+async function scReview() {
+  setStep(3);
+  show('');
+  add(`<div class="eyebrow">Needs your review · #1042</div><p class="h2">billing-bot wants to refund 1,284 invoices ($412,930)</p>`);
+  add(machine([['PROPOSED', 'on'], ['APPROVED', ''], ['APPLIED', ''], ['UNDONE', '']]));
+  add(`<dl class="kv"><dt>task</dt><dd>"Refund the customers who were hit by the Oct 10 outage."</dd><dt>held by</dt><dd>big-money-writes (rows &gt; 50 on invoices)</dd><dt>preview</dt><dd>1,284 rows · 37 inside the outage window, 1,247 outside</dd></dl>`);
+  add(`<div class="tablebox">${diffTable(ROWS1.slice(0, 3))}</div>`);
+  const c = add(`<div class="card"><div><label class="eyebrow" for="why">Note to the agent</label><textarea id="why" class="reason">Only customers in incident INC-2210, invoices from Oct 10 14:00–16:30 UTC.</textarea></div>
+    <div class="actions"><button class="btn rose" id="rej">✗ REJECT</button><button class="btn mint" id="app">✓ APPROVE ALL 1,284</button></div>
+    <div class="slack">Same buttons are in the Slack message. Whoever clicks first wins.</div></div>`);
+  go.hidden = true;
+  c.querySelector('#rej').onclick = () => { path = 'reject'; played.add(path); go.hidden = false; runScene(scReject, c.querySelector('#why').value.trim()); };
+  c.querySelector('#app').onclick = () => { path = 'approve'; played.add(path); go.hidden = false; runScene(scApprove); };
+}
+
+async function scApprove() {
+  setStep(4);
+  show('');
+  add(`<div class="eyebrow">Applying · #1042</div><p class="h2">Approved by you. Applying exactly the previewed rows.</p>`);
+  add(machine([['PROPOSED', 'past'], ['APPROVED', 'on good'], ['APPLIED', ''], ['UNDONE', '']]));
+  const m = add(`<div class="meter"><i></i></div>`).firstElementChild;
+  add(`<p class="p muted">Rows are pinned by primary key and a checksum of their previewed values. If any row had changed since the preview, Rowbit would stop and ask again.</p>`);
+  await meter(m, 1300);
+  screen.querySelector('.machine').outerHTML = machine([['PROPOSED', 'past'], ['APPROVED', 'past'], ['APPLIED', 'on good'], ['UNDONE', '']]);
+  logAudit({ id: 1042, time: '14:52', agent: 'billing-bot', sql: SQL1.replace(/\s+/g, ' '), rows: 1284, decision: 'held → approved', by: 'you (web UI)', state: 'applied' });
+  add(`<p class="p"><b style="color:var(--mint)">✓ 1,284 rows written.</b> Logged as #1042 with the before-image of every row.</p>`);
+  await say('resp', '← rowbit: #1042 approved by a human and applied (1,284 rows)');
+  await say('think', 'Done. Every customer since Oct 10 has been refunded.');
+  await sleep(700);
+  setStep(5);
+  add(`<div class="card alert"><div class="eyebrow">#support · 14:58</div><p class="p">"Lumen Labs just emailed to thank us for a $1,200 refund. They weren't in the outage. Neither were most of the others."</p></div>`);
+  blip(220, .3, 'sawtooth');
+  next('▶ FIX IT', () => scUndoOffer(1042));
+}
+
+async function scReject(reason) {
+  setStep(4);
+  show('');
+  add(`<div class="eyebrow">Rejected · #1042</div><p class="h2">Sent back to the agent with your note.</p>`);
+  add(machine([['PROPOSED', 'past'], ['REJECTED', 'on bad']]));
+  logAudit({ id: 1042, time: '14:52', agent: 'billing-bot', sql: SQL1.replace(/\s+/g, ' '), rows: 1284, decision: 'held → rejected', by: 'you (web UI)', state: 'rejected' });
+  await say('resp', `← rowbit: #1042 rejected by a human: "${reason || 'Too broad.'}"`);
+  await say('think', 'I should only refund customers on the incident list, inside the outage window.');
+  await say('tool', '→ execute_sql');
+  await say('sql', SQL2);
+  await say('resp', '← rowbit: received as change #1043, status: proposed');
+  show('');
+  add(`<div class="eyebrow">Incoming write · #1043</div><p class="h2">Second try: dry run and rules</p>`);
+  const st = add(`<div class="row2"><div class="stat"><span class="eyebrow">rows would change</span><span class="big ok" id="n3">0</span></div><div class="stat"><span class="eyebrow">amount_due zeroed</span><span class="big ok" id="n4">$0</span></div></div>`);
+  await Promise.all([countUp(st.querySelector('#n3'), 37, 700), countUp(st.querySelector('#n4'), 3412, 700, n => '$' + n.toLocaleString('en-US'))]);
+  add(`<div class="tablebox">${diffTable(ROWS2)}</div><p class="more">+ 34 more rows · all inside the outage window</p>`);
+  const box = add(ymlBlock());
+  await scan(box, { r1: 'miss', r2: 'miss', r3: 'hitgood' });
+  screen.insertAdjacentHTML('beforeend', '<div class="stamp good" role="img" aria-label="Auto approved">AUTO-OK</div>');
+  blip(990, .15);
+  setStep(5);
+  logAudit({ id: 1043, time: '14:55', agent: 'billing-bot', sql: SQL2.replace(/\s+/g, ' '), rows: 37, decision: 'auto-approved', by: 'rule small-writes', state: 'applied' });
+  await say('resp', '← rowbit: #1043 auto-approved (rule small-writes) and applied (37 rows)');
+  await say('think', 'Refunded 37 invoices for customers hit by INC-2210.');
+  next('▶ TRY UNDO', () => scUndoOffer(1043));
+}
+
+async function scUndoOffer(id) {
+  setStep(6);
+  const e = audit.find(a => a.id === id);
+  show('');
+  add(`<div class="eyebrow">Audit log · #${id}</div><p class="h2">${id === 1042 ? 'One bad change. Undo just that one.' : 'Changed your mind? Any applied change can be undone.'}</p>`);
+  add(`<dl class="kv"><dt>agent</dt><dd>${e.agent}</dd><dt>decision</dt><dd>${e.decision} · ${e.by}</dd><dt>rows</dt><dd>${e.rows.toLocaleString('en-US')} with before-images</dd><dt>since then</dt><dd>3 other changes to other tables, kept as they are</dd></dl>`);
+  const c = add(`<div class="actions"><button class="btn" id="undo">◀◀ UNDO #${id}</button></div>`);
+  add(`<p class="p muted">No backup restore, no downtime. The undo itself is logged as a new change.</p>`);
+  go.hidden = true;
+  c.querySelector('#undo').onclick = () => { go.hidden = false; runScene(scUndo, id); };
+}
+
+async function scUndo(id) {
+  const e = audit.find(a => a.id === id);
+  if (!e || e.state !== 'applied') return;
+  setStep(6);
+  sky.dir = -1;
+  const rows = id === 1042 ? ROWS1 : ROWS2;
+  show('');
+  add(`<div class="eyebrow">Undo · #${id}</div><p class="h2">Rewinding…</p>`);
+  add(machine(id === 1042 ? [['PROPOSED', 'past'], ['APPROVED', 'past'], ['APPLIED', 'past'], ['UNDONE', 'on back']] : [['PROPOSED', 'past'], ['AUTO-APPROVED', 'past'], ['APPLIED', 'past'], ['UNDONE', 'on back']]));
+  const st = add(`<div class="row2"><div class="stat"><span class="eyebrow">rows still changed</span><span class="big" id="n5">${e.rows.toLocaleString('en-US')}</span></div></div>`);
+  const tb = add(`<div class="tablebox">${diffTable(rows)}</div>`);
+  const cd = countDown(st.querySelector('#n5'), e.rows, 1500);
+  const trs = tb.querySelectorAll('tbody tr');
+  for (let i = trs.length - 1; i >= 0; i--) {
+    await sleep(260);
+    const r = rows[i];
+    trs[i].classList.add('rewind');
+    trs[i].children[3].innerHTML = `<span class="a">${r[3]}</span>`;
+    trs[i].children[4].innerHTML = `<span class="a">${r[4]}</span>`;
+    blip(900 - i * 90, .05, 'triangle');
+  }
+  await cd;
+  st.querySelector('#n5').classList.add('ok');
+  setState(id, 'undone');
+  logAudit({ id: nextId(), time: '15:01', agent: 'you', sql: `UNDO #${id}`, rows: e.rows, decision: 'human action', by: 'you (web UI)', state: 'applied', undoOf: id });
+  add(`<p class="p"><b style="color:var(--mint)">✓ ${e.rows.toLocaleString('en-US')} rows restored.</b> 0 conflicts: nobody touched these rows after #${id}.</p>
+       <p class="p muted">Undo restores data in the database. It can't recall what already left it, like refund emails your app sent.</p>`);
+  await say('resp', `← rowbit: #${id} was undone by a human (${e.rows.toLocaleString('en-US')} rows restored)`);
+  sky.dir = 1;
+  const other = path === 'approve' ? 'reject' : 'approve';
+  const end = add(`<div class="card"><div class="eyebrow">Game over? Nothing was lost.</div><div class="actions">${played.has(other) ? '' : `<button class="btn" id="other">▶ PLAY: ${other === 'reject' ? 'REJECT' : 'APPROVE'} PATH</button>`}<button class="btn ghost" id="again">↺ PLAY AGAIN</button></div></div>`);
+  go.hidden = true;
+  const o = end.querySelector('#other');
+  if (o) o.onclick = () => replayTo(other);
+  end.querySelector('#again').onclick = () => { played.clear(); restart(); };
+}
+
+async function replayTo(choice) {
+  gen++;
+  const g = gen;
+  // fast-forward to the review screen, then take the other branch
+  audit = SEED.map(e => ({ ...e })); renderAudit(); log.innerHTML = ''; path = choice;
+  log.innerHTML = '';
+  ['user|Refund the customers who were hit by the Oct 10 outage.', 'tool|→ execute_sql', 'sql|' + SQL1, 'resp|← rowbit: received as change #1042, status: proposed', 'resp|← rowbit: #1042 held for review (rule big-money-writes)', 'err|✗ denied: agents can propose changes and check their status. Only people can approve.']
+    .forEach(s => { const [k, ...r] = s.split('|'); const p = document.createElement('div'); p.className = 'ln ' + k; p.innerHTML = k === 'sql' ? hl(r.join('|')) : esc(r.join('|')); log.appendChild(p); });
+  await runScene(scReview);
+  if (g !== gen) return;
+  const btn = screen.querySelector(choice === 'reject' ? '#rej' : '#app');
+  btn && btn.focus();
+}
+
+function restart() { go.hidden = false; runScene(scIntro); }
+$('#restart').onclick = () => { played.clear(); restart(); };
+restart();
+})();
+</script>
+
+</body>
+</html>

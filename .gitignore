@@ -1,0 +1,24 @@
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Rust
+target/
+
+# Node
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Env and secrets
+.env
+.env.*
+
+# Local registry placeholder sources (kept out of the repo)
+placeholders/
