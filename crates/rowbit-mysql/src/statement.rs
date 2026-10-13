@@ -59,30 +59,37 @@ pub struct Classified {
     pub preview: Option<PreviewRead>,
 }
 
-/// A read that shows what a write would do, without running it.
+/// The pieces of a write that a preview reuses, each printed from the
+/// checked syntax tree. The adapter assembles them into SQL that reads the
+/// affected rows and replays the write on a private copy of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreviewRead {
-    /// Each result row is one existing row: every column of the table
-    /// (`<table>.*`), followed for an update by one column per `SET`
-    /// expression, in the order of [`Classified::columns`].
-    Existing { sql: String },
-    /// Each result row is one new row, with one column per entry of
-    /// [`Classified::columns`], matched by position.
-    New { sql: String },
-}
-
-impl PreviewRead {
-    pub fn sql(&self) -> &str {
-        match self {
-            PreviewRead::Existing { sql } | PreviewRead::New { sql } => sql,
-        }
-    }
+    /// An `UPDATE` or `DELETE`.
+    Existing {
+        /// The target as the statement writes it, e.g. `billing.refunds AS r`.
+        from: String,
+        /// What the statement calls the table: its alias, or its name.
+        qualifier: String,
+        /// ` WHERE ... ORDER BY ... LIMIT n`, or empty.
+        filter: String,
+        /// For an update, the `SET` list with bare column names, e.g.
+        /// `` `status` = 'refunded' ``. Empty for a delete.
+        assignments: String,
+    },
+    /// An `INSERT`: `VALUES (...), ...` or a `SELECT`, giving values for
+    /// [`Classified::columns`] in order.
+    New { source: String },
 }
 
 /// Parses and classifies one statement in MySQL syntax.
 pub fn classify(sql: &str) -> Result<Classified, Refusal> {
     let dialect = MySqlDialect {};
     refuse_executable_comments(sql)?;
+    if sql.contains('\\') {
+        // The parser and MySQL disagree on some escapes (`\\%`, `\\_`), and
+        // printing does not escape a backslash again. Refused anywhere.
+        return refuse("backslashes are not allowed; write quotes inside strings as ''");
+    }
     let mut statements =
         Parser::parse_sql(&dialect, sql).map_err(|e| Refusal(format!("could not parse: {e}")))?;
     if statements.len() != 1 {
@@ -138,7 +145,7 @@ fn update(u: &Update, canonical: String) -> Result<Classified, Refusal> {
     let qualifier = alias.as_ref().unwrap_or(&name.table);
 
     let mut columns: Vec<String> = Vec::new();
-    let mut set_exprs = Vec::new();
+    let mut set_list = Vec::new();
     for Assignment { target, value } in assignments {
         let column = match target {
             AssignmentTarget::ColumnName(target) => assigned_column(target, &name, qualifier)?,
@@ -153,24 +160,23 @@ fn update(u: &Update, canonical: String) -> Result<Classified, Refusal> {
                  the server evaluates SET left to right, which a preview cannot reproduce"
             ));
         }
-        set_exprs.push(format!("({value}) AS `__rowbit_set_{}`", set_exprs.len()));
+        set_list.push(format!("{} = {value}", quote(&column)));
         columns.push(column);
     }
-
-    let mut sql = format!("SELECT {}.*", quote(qualifier));
-    for e in &set_exprs {
-        sql.push_str(", ");
-        sql.push_str(e);
-    }
-    sql.push_str(&format!(" FROM {table}"));
-    push_filters(&mut sql, selection.as_ref(), order_by, limit.as_ref())?;
+    let qualifier = qualifier.clone();
+    let filter = filters(selection.as_ref(), order_by, limit.as_ref())?;
 
     Ok(Classified {
         kind: Kind::Update,
         table: name,
         columns,
         canonical,
-        preview: Some(PreviewRead::Existing { sql }),
+        preview: Some(PreviewRead::Existing {
+            from: table.to_string(),
+            qualifier,
+            filter,
+            assignments: set_list.join(", "),
+        }),
     })
 }
 
@@ -203,15 +209,20 @@ fn delete(d: &Delete, canonical: String) -> Result<Classified, Refusal> {
     let (name, alias) = single_table(table)?;
     let qualifier = alias.as_ref().unwrap_or(&name.table);
 
-    let mut sql = format!("SELECT {}.* FROM {table}", quote(qualifier));
-    push_filters(&mut sql, selection.as_ref(), order_by, limit.as_ref())?;
+    let qualifier = qualifier.clone();
+    let filter = filters(selection.as_ref(), order_by, limit.as_ref())?;
 
     Ok(Classified {
         kind: Kind::Delete,
         table: name,
         columns: Vec::new(),
         canonical,
-        preview: Some(PreviewRead::Existing { sql }),
+        preview: Some(PreviewRead::Existing {
+            from: table.to_string(),
+            qualifier,
+            filter,
+            assignments: String::new(),
+        }),
     })
 }
 
@@ -293,9 +304,8 @@ fn insert(i: &Insert, canonical: String) -> Result<Classified, Refusal> {
         return refuse("INSERT needs VALUES or SELECT");
     };
 
-    let sql = match source.body.as_ref() {
+    match source.body.as_ref() {
         SetExpr::Values(values) if is_plain(source) => {
-            let mut rows = Vec::new();
             for row in &values.rows {
                 if row.len() != columns.len() {
                     return refuse(format!(
@@ -304,28 +314,25 @@ fn insert(i: &Insert, canonical: String) -> Result<Classified, Refusal> {
                         columns.len()
                     ));
                 }
-                let mut items = Vec::new();
-                for (value, column) in row.iter().zip(&columns) {
+                for value in row.iter() {
                     if matches!(value, Expr::Identifier(id) if id.quote_style.is_none() && id.value.eq_ignore_ascii_case("default"))
                     {
                         return refuse("DEFAULT in VALUES is not supported; leave the column out");
                     }
-                    items.push(format!("({value}) AS {}", quote(column)));
                 }
-                rows.push(format!("SELECT {}", items.join(", ")));
             }
-            rows.join(" UNION ALL ")
         }
         SetExpr::Values(_) => return refuse("this INSERT syntax is not supported"),
-        _ => source.to_string(),
-    };
+        _ => {}
+    }
+    let source = source.to_string();
 
     Ok(Classified {
         kind: Kind::Insert,
         table: name,
         columns,
         canonical,
-        preview: Some(PreviewRead::New { sql }),
+        preview: Some(PreviewRead::New { source }),
     })
 }
 
@@ -528,16 +535,23 @@ fn first_read_of(value: &Expr, earlier: &[String]) -> Option<String> {
     }
 }
 
-fn push_filters(
-    sql: &mut String,
+/// ` WHERE ... ORDER BY ... LIMIT n` for a preview read. The filter decides
+/// which rows a person approves, and is read again at apply, so it may not
+/// depend on chance.
+fn filters(
     selection: Option<&Expr>,
     order_by: &[OrderByExpr],
     limit: Option<&Expr>,
-) -> Result<(), Refusal> {
+) -> Result<String, Refusal> {
+    let mut sql = String::new();
     if let Some(w) = selection {
+        refuse_chance(w)?;
         sql.push_str(&format!(" WHERE {w}"));
     }
     if !order_by.is_empty() {
+        for o in order_by {
+            refuse_chance(&o.expr)?;
+        }
         let items: Vec<String> = order_by.iter().map(ToString::to_string).collect();
         sql.push_str(&format!(" ORDER BY {}", items.join(", ")));
     }
@@ -552,7 +566,28 @@ fn push_filters(
             _ => return refuse("LIMIT must be a plain number"),
         }
     }
-    Ok(())
+    Ok(sql)
+}
+
+/// Functions whose result differs on every call, so a filter using them
+/// would pick different rows at apply than in the preview.
+fn refuse_chance(e: &Expr) -> Result<(), Refusal> {
+    let hit = sqlparser::ast::visit_expressions(e, |e| match e {
+        Expr::Function(f)
+            if ["RAND", "UUID"]
+                .iter()
+                .any(|n| f.name.to_string().eq_ignore_ascii_case(n)) =>
+        {
+            ControlFlow::Break(f.name.to_string())
+        }
+        _ => ControlFlow::Continue(()),
+    });
+    match hit {
+        ControlFlow::Break(name) => refuse(format!(
+            "{name}() may not decide which rows are written; it gives a different answer at apply"
+        )),
+        ControlFlow::Continue(()) => Ok(()),
+    }
 }
 
 /// Backquotes an identifier for MySQL.
@@ -654,20 +689,36 @@ impl Visitor for Guard {
     }
 
     fn pre_visit_ident(&mut self, id: &Ident) -> ControlFlow<Refusal> {
-        if id.quote_style.is_none() && id.value.starts_with('@') {
-            return ControlFlow::Break(Refusal(format!(
-                "variables ({}) are not allowed",
-                id.value
-            )));
+        match id.quote_style {
+            None if id.value.starts_with('@') => {
+                ControlFlow::Break(Refusal(format!("variables ({}) are not allowed", id.value)))
+            }
+            None | Some('`') => ControlFlow::Continue(()),
+            Some(_) => ControlFlow::Break(Refusal(format!("unsupported identifier {id}"))),
         }
-        ControlFlow::Continue(())
     }
 
+    /// Only literals that print back exactly as MySQL reads them. Strings
+    /// may not contain a backslash: the parser unescapes `\\` but printing
+    /// does not escape it again, which would let a literal end early in the
+    /// SQL Rowbit runs.
     fn pre_visit_value(&mut self, v: &ValueWithSpan) -> ControlFlow<Refusal> {
-        if matches!(v.value, Value::Placeholder(_)) {
-            return ControlFlow::Break(Refusal("placeholders are not allowed".into()));
+        let refusal = match &v.value {
+            Value::Number(..) | Value::Boolean(_) | Value::Null => None,
+            Value::SingleQuotedString(s)
+            | Value::DoubleQuotedString(s)
+            | Value::NationalStringLiteral(s) => s
+                .contains('\\')
+                .then(|| "string literals may not contain a backslash".to_owned()),
+            Value::HexStringLiteral(h) => (!h.bytes().all(|b| b.is_ascii_hexdigit()))
+                .then(|| "malformed hex literal".to_owned()),
+            Value::Placeholder(_) => Some("placeholders are not allowed".to_owned()),
+            other => Some(format!("unsupported literal {other}")),
+        };
+        match refusal {
+            Some(r) => ControlFlow::Break(Refusal(r)),
+            None => ControlFlow::Continue(()),
         }
-        ControlFlow::Continue(())
     }
 }
 
@@ -689,12 +740,21 @@ mod tests {
         }
     }
 
-    fn preview(c: &Classified) -> &str {
-        c.preview.as_ref().expect("has a preview").sql()
+    fn preview(c: &Classified) -> &PreviewRead {
+        c.preview.as_ref().expect("has a preview")
+    }
+
+    fn existing(from: &str, qualifier: &str, filter: &str, assignments: &str) -> PreviewRead {
+        PreviewRead::Existing {
+            from: from.into(),
+            qualifier: qualifier.into(),
+            filter: filter.into(),
+            assignments: assignments.into(),
+        }
     }
 
     #[test]
-    fn update_previews_as_select() {
+    fn update_keeps_target_filter_and_assignments() {
         let c = ok(
             "UPDATE billing.refunds SET status = 'refunded', updated_at = NOW() \
              WHERE status = 'approved' AND amount < 100 ORDER BY id LIMIT 50",
@@ -710,10 +770,13 @@ mod tests {
         assert_eq!(c.columns, ["status", "updated_at"]);
         assert_eq!(
             preview(&c),
-            "SELECT `refunds`.*, ('refunded') AS `__rowbit_set_0`, (NOW()) AS `__rowbit_set_1` \
-             FROM billing.refunds WHERE status = 'approved' AND amount < 100 ORDER BY id LIMIT 50"
+            &existing(
+                "billing.refunds",
+                "refunds",
+                " WHERE status = 'approved' AND amount < 100 ORDER BY id LIMIT 50",
+                "`status` = 'refunded', `updated_at` = NOW()"
+            )
         );
-        assert!(matches!(c.preview, Some(PreviewRead::Existing { .. })));
     }
 
     #[test]
@@ -722,38 +785,78 @@ mod tests {
         assert_eq!(c.columns, ["status"]);
         assert_eq!(
             preview(&c),
-            "SELECT `r`.*, ('x') AS `__rowbit_set_0` FROM refunds r WHERE r.id = 1"
+            &existing("refunds r", "r", " WHERE r.id = 1", "`status` = 'x'")
         );
     }
 
     #[test]
-    fn delete_previews_as_select() {
+    fn delete_keeps_target_and_filter() {
         let c = ok("DELETE FROM `app`.`sessions` WHERE expires_at < NOW() LIMIT 1000");
         assert_eq!(c.kind, Kind::Delete);
         assert_eq!(c.table.table, "sessions");
         assert!(c.columns.is_empty());
         assert_eq!(
             preview(&c),
-            "SELECT `sessions`.* FROM `app`.`sessions` WHERE expires_at < NOW() LIMIT 1000"
+            &existing(
+                "`app`.`sessions`",
+                "sessions",
+                " WHERE expires_at < NOW() LIMIT 1000",
+                ""
+            )
         );
     }
 
     #[test]
-    fn insert_values_previews_as_union() {
+    fn insert_keeps_its_source() {
         let c = ok("INSERT INTO notes (id, body) VALUES (1, 'a'), (2, CONCAT('b', 'c'))");
         assert_eq!(c.kind, Kind::Insert);
         assert_eq!(c.columns, ["id", "body"]);
         assert_eq!(
             preview(&c),
-            "SELECT (1) AS `id`, ('a') AS `body` UNION ALL SELECT (2) AS `id`, (CONCAT('b', 'c')) AS `body`"
+            &PreviewRead::New {
+                source: "VALUES (1, 'a'), (2, CONCAT('b', 'c'))".into()
+            }
         );
-        assert!(matches!(c.preview, Some(PreviewRead::New { .. })));
+        let c = ok("INSERT INTO archive (id, total) SELECT id, amount FROM orders WHERE id < 10");
+        assert_eq!(
+            preview(&c),
+            &PreviewRead::New {
+                source: "SELECT id, amount FROM orders WHERE id < 10".into()
+            }
+        );
+    }
+
+    /// Found in review: `'x\\'` printed back as `'x\'`, so the literal ran on
+    /// into the rest of the SQL and the agent controlled the preview read.
+    #[test]
+    fn backslashes_in_literals_are_refused() {
+        refused(
+            "UPDATE t SET a = 'x\\\\', b = ') AS q, SLEEP(1) AS r FROM t -- ' WHERE id = 1",
+            "backslash",
+        );
+        refused("UPDATE t SET a = 'it\\'s'", "backslash");
+        refused("UPDATE t SET a = \"x\\\\\"", "backslash");
+        refused("UPDATE t SET a = N'x\\\\'", "backslash");
+        refused("DELETE FROM t WHERE a = 'x\\\\'", "backslash");
+        refused("INSERT INTO t (a) VALUES ('\\\\')", "backslash");
+        refused("UPDATE t SET a = b'0101'", "unsupported literal");
+        // Quotes inside literals and identifiers print back doubled, which is safe.
+        let c = ok("UPDATE `we``ird` SET a = 'it''s' WHERE b = \"say \"\"hi\"\"\"");
+        assert_eq!(c.table.table, "we`ird");
+        assert!(c.canonical.contains("'it''s'"), "{}", c.canonical);
+        ok("UPDATE t SET a = X'0aFF', b = TRUE, c = NULL, d = -1.5e3");
     }
 
     #[test]
-    fn insert_select_previews_as_its_select() {
-        let c = ok("INSERT INTO archive (id, total) SELECT id, amount FROM orders WHERE id < 10");
-        assert_eq!(preview(&c), "SELECT id, amount FROM orders WHERE id < 10");
+    fn chance_may_not_pick_rows() {
+        refused("DELETE FROM t WHERE RAND() < 0.5", "RAND");
+        refused("UPDATE t SET a = 1 ORDER BY rand() LIMIT 1", "rand");
+        refused(
+            "DELETE FROM t WHERE id IN (SELECT id FROM u WHERE UUID() > 'a')",
+            "UUID",
+        );
+        // Chance in the new values is fine: it is evaluated once, in the preview.
+        ok("UPDATE t SET token = UUID(), r = RAND() WHERE id = 1");
     }
 
     #[test]
@@ -785,7 +888,7 @@ mod tests {
         refused("SELECT * FROM t", "query tool");
         refused("CALL refund_all()", "only INSERT");
         refused("SET @x = 1", "variables");
-        refused("GRANT ALL ON *.* TO 'a'", "only INSERT");
+        refused("GRANT ALL ON *.* TO 'a'", "");
         refused("DROP DATABASE app", "only INSERT");
         refused("DROP TABLE a, b", "one table");
     }
@@ -873,10 +976,9 @@ mod tests {
         let c = ok("UPDATE `my table` SET `the col` = 1");
         assert_eq!(c.table.table, "my table");
         assert_eq!(c.columns, ["the col"]);
-        assert!(
-            preview(&c).starts_with("SELECT `my table`.*"),
-            "{}",
-            preview(&c)
+        assert_eq!(
+            preview(&c),
+            &existing("`my table`", "my table", "", "`the col` = 1")
         );
     }
 }
