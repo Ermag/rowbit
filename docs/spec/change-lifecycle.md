@@ -95,8 +95,10 @@ The preview never runs the agent's write. Rowbit derives a read from the stateme
 |---|---|
 | `UPDATE` | `SELECT` the primary key, every column, and each `SET` expression, from the table, with the statement's `WHERE`, `ORDER BY` and `LIMIT`. The `SET` results are the after images. |
 | `DELETE` | `SELECT` the primary key and every column with the statement's `WHERE`, `ORDER BY` and `LIMIT`. There are no after images. |
-| `INSERT ... VALUES` | `SELECT` each row of values, filled in with column defaults. There are no before images. |
-| `INSERT ... SELECT` | Run the `SELECT`, filled in with column defaults. |
+| `INSERT ... VALUES` | `SELECT` each row of values. There are no before images. |
+| `INSERT ... SELECT` | Run the `SELECT`. |
+
+For an insert, the preview holds the columns the statement names. Columns it leaves out get their defaults when the row is written. Every primary key column must be named, unless the key is a single `AUTO_INCREMENT` column.
 
 Before reading, Rowbit checks the target table in `information_schema` and refuses to preview (`PolicyBlocked`) when:
 
@@ -104,6 +106,8 @@ Before reading, Rowbit checks the target table in `information_schema` and refus
 - the table's engine is not InnoDB, since apply and undo depend on rolling back,
 - the table has triggers, or another table references it with `ON DELETE` or `ON UPDATE` `CASCADE` or `SET NULL` and the statement touches the referenced columns, because those effects would not appear in the preview and undo could not reverse them,
 - the preview matches more rows than the configured limit (default 10,000).
+
+`information_schema` only shows triggers and foreign keys that Rowbit's database user has privileges on, so that user needs the `TRIGGER` privilege on the tables agents write to, and `SELECT` on the tables that reference them.
 
 It records:
 
