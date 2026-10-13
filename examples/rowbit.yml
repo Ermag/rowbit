@@ -1,0 +1,39 @@
+# Rowbit policy, schema version 0. See docs/spec/policy.md.
+version: 0
+
+agents:
+  refund-bot:
+    description: Marks approved refund requests as refunded in the billing database.
+    # When no rule matches. hold or block, never allow.
+    default: block
+    rules:
+      - name: small-refund-batches
+        when:
+          statement: update
+          table: billing.refunds
+          columns: status
+          rows: { max: 50 }
+          sum: { column: amount, max: 500 }
+        then: allow
+
+      - name: refunds-need-a-person
+        when:
+          table: billing.refunds
+        then: hold
+        reason: Large or unusual refund batches are reviewed by billing.
+
+  support-bot:
+    description: Updates ticket status and notes.
+    rules:
+      - name: tickets
+        when:
+          statement: [insert, update]
+          table: support.tickets
+          rows: { max: 20 }
+        then: allow
+      - name: never-touch-billing
+        when:
+          table: billing.*
+        then: block
+        reason: Support agents do not write to billing.
+    # default: hold (unmatched changes wait for a person)

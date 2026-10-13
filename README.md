@@ -23,8 +23,16 @@ Rowbit sits between your agents and your database.
 
 | Path | What |
 |---|---|
+| `crates/` | Rust workspace: `rowbit-core`, `rowbit-policy`, `rowbit-mysql`, `rowbit-mcp`, `rowbit-cli`. See [ARCHITECTURE.md](ARCHITECTURE.md) |
+| `docs/spec/` | [Change lifecycle](docs/spec/change-lifecycle.md) and [rowbit.yml](docs/spec/policy.md) specs |
+| `examples/` | An example `rowbit.yml` |
+| `compose.yaml` | MariaDB 11.4 and MySQL 8.4 for integration tests |
 | `site/` | The demo page, deployed to GitHub Pages on every push to `main` |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Commits need a DCO sign-off (`git commit -s`). Report security issues as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
-[AGPL-3.0-only](LICENSE)
+The server is [AGPL-3.0-only](LICENSE). The `rowbit.yml` policy schema (`crates/rowbit-policy`) and future client SDKs are [Apache-2.0](crates/rowbit-policy/LICENSE).

@@ -1,0 +1,39 @@
+# cargo-deny: advisories (RustSec, the same database cargo-audit uses),
+# licenses, banned crates and allowed sources.
+
+[graph]
+all-features = true
+
+[advisories]
+# Every advisory fails the build, including unmaintained and unsound crates.
+# To accept one, add it here with a reason and a date to revisit.
+ignore = []
+
+[licenses]
+# Permissive licenses only for dependencies. The server itself is
+# AGPL-3.0-only and rowbit-policy is Apache-2.0; workspace crates are
+# unpublished for now, so they are skipped below.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

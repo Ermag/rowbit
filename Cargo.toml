@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "AGPL-3.0-only"
+repository = "https://github.com/Ermag/rowbit"
+homepage = "https://github.com/Ermag/rowbit"
+publish = false
+
+[workspace.dependencies]
+rowbit-core = { path = "crates/rowbit-core" }
+rowbit-policy = { path = "crates/rowbit-policy" }
+rowbit-mysql = { path = "crates/rowbit-mysql" }
+
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+mysql_async = { version = "0.36", default-features = false, features = ["minimal-rust"] }
+serde = { version = "1", features = ["derive"] }
+serde_norway = "0.9"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
