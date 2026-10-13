@@ -154,12 +154,6 @@ fn update(u: &Update, canonical: String) -> Result<Classified, Refusal> {
         if columns.iter().any(|c| c.eq_ignore_ascii_case(&column)) {
             return refuse(format!("column {column} is assigned twice"));
         }
-        if let Some(read) = first_read_of(value, &columns) {
-            return refuse(format!(
-                "SET for {column} reads {read}, which this statement assigns earlier; \
-                 the server evaluates SET left to right, which a preview cannot reproduce"
-            ));
-        }
         set_list.push(format!("{} = {value}", quote(&column)));
         columns.push(column);
     }
@@ -511,27 +505,6 @@ fn assigned_column(
         _ => refuse(format!(
             "SET target {target} is not a column of the target table"
         )),
-    }
-}
-
-/// The first column in `earlier` that `value` reads, if any.
-fn first_read_of(value: &Expr, earlier: &[String]) -> Option<String> {
-    let hit = sqlparser::ast::visit_expressions(value, |e| {
-        let id = match e {
-            Expr::Identifier(id) => Some(id),
-            Expr::CompoundIdentifier(ids) => ids.last(),
-            _ => None,
-        };
-        match id {
-            Some(id) if earlier.iter().any(|c| c.eq_ignore_ascii_case(&id.value)) => {
-                ControlFlow::Break(id.value.clone())
-            }
-            _ => ControlFlow::Continue(()),
-        }
-    });
-    match hit {
-        ControlFlow::Break(column) => Some(column),
-        ControlFlow::Continue(()) => None,
     }
 }
 
@@ -921,12 +894,10 @@ mod tests {
     }
 
     #[test]
-    fn set_cannot_read_an_earlier_assignment() {
-        refused("UPDATE t SET a = a + 1, b = a", "reads a");
-        refused("UPDATE t SET a = 1, b = t.A * 2", "reads A");
+    fn set_may_read_earlier_assignments() {
+        // The preview replays SET on the server, left to right, as the write would.
+        ok("UPDATE t SET a = a + 1, b = a");
         refused("UPDATE t SET a = 1, a = 2", "twice");
-        // Reading a column before it is assigned is fine: every SET sees the old row.
-        ok("UPDATE t SET b = a, a = a + 1");
     }
 
     #[test]

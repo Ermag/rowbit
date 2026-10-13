@@ -18,3 +18,10 @@ pub fn url(var: &str) -> Option<String> {
         }
     }
 }
+
+/// The same server as another user from `scripts/test-db-init.sql`, whose
+/// password is its name.
+#[allow(dead_code)]
+pub fn as_user(url: &str, user: &str) -> String {
+    url.replacen("//rowbit:rowbit@", &format!("//{user}:{user}@"), 1)
+}

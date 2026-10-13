@@ -14,6 +14,7 @@ struct Db {
     adapter: MySqlAdapter,
     conn: mysql_async::Conn,
     database: String,
+    url: String,
 }
 
 impl Db {
@@ -25,6 +26,7 @@ impl Db {
             adapter: MySqlAdapter::new(&url).unwrap(),
             conn: mysql_async::Conn::new(opts).await.expect("server answers"),
             database,
+            url,
         })
     }
 
@@ -44,27 +46,38 @@ impl Db {
         sql: &str,
         limits: PreviewLimits,
     ) -> Result<Preview, PreviewError> {
-        let statement = classify(sql).unwrap_or_else(|e| panic!("{sql}: {e}"));
-        self.adapter
-            .preview(&self.database, &statement, limits)
-            .await
+        preview_on(&self.adapter, &self.database, sql, limits).await
     }
 
     async fn refused(&self, sql: &str, needle: &str) {
-        match self.preview(sql).await {
-            Err(PreviewError::Refused(reason)) => {
-                assert!(
-                    reason.contains(needle),
-                    "{sql}: {reason:?}, expected {needle:?}"
-                )
-            }
-            other => panic!("{sql}: expected a refusal, got {other:?}"),
-        }
+        expect_refusal(self.preview(sql).await, sql, needle);
     }
 
     async fn close(self) {
         self.conn.disconnect().await.unwrap();
         self.adapter.close().await.unwrap();
+    }
+}
+
+async fn preview_on(
+    adapter: &MySqlAdapter,
+    database: &str,
+    sql: &str,
+    limits: PreviewLimits,
+) -> Result<Preview, PreviewError> {
+    let statement = classify(sql).unwrap_or_else(|e| panic!("{sql}: {e}"));
+    adapter.preview(database, &statement, limits).await
+}
+
+fn expect_refusal(result: Result<Preview, PreviewError>, sql: &str, needle: &str) {
+    match result {
+        Err(PreviewError::Refused(reason)) => {
+            assert!(
+                reason.contains(needle),
+                "{sql}: {reason:?}, expected {needle:?}"
+            )
+        }
+        other => panic!("{sql}: expected a refusal, got {other:?}"),
     }
 }
 
@@ -111,7 +124,7 @@ async fn update_shows_before_and_after_without_writing(var: &str) {
 
     let p = db
         .preview(
-            "UPDATE pv_update SET note = CONCAT('was ', status), status = 'refunded' \
+            "UPDATE pv_update SET status = 'refunded', note = CONCAT('was ', status) \
              WHERE status = 'approved' AND amount < 100 ORDER BY id",
         )
         .await
@@ -121,17 +134,22 @@ async fn update_shows_before_and_after_without_writing(var: &str) {
         p.table.qualified_name(),
         format!("{}.pv_update", db.database)
     );
-    assert_eq!(p.table.columns, ["id", "status", "amount", "note"]);
+    assert_eq!(
+        p.table.column_names().collect::<Vec<_>>(),
+        ["id", "status", "amount", "note"]
+    );
+    assert_eq!(p.table.columns[2].column_type, "decimal(10,2)");
     assert_eq!(p.table.primary_key, [0]);
-    assert_eq!(p.written, [3, 1]);
+    assert_eq!(p.written, [1, 3]);
     assert_eq!(p.rows.len(), 2);
     assert_eq!(
         p.rows[0].before,
         Some(vec![c("1"), c("approved"), c("12.50"), None])
     );
+    // SET runs left to right on the server, so `note` sees the new status.
     assert_eq!(
         p.rows[0].after,
-        Some(vec![c("was approved"), c("refunded")])
+        Some(vec![c("1"), c("refunded"), c("12.50"), c("was refunded")])
     );
     assert_eq!(p.key(&p.rows[1]), Some(vec![c("3")]));
 
@@ -141,6 +159,90 @@ async fn update_shows_before_and_after_without_writing(var: &str) {
         .await
         .unwrap();
     assert_eq!(still, ["approved", "approved", "approved", "refunded"]);
+    db.close().await;
+}
+
+// Found in review: after images were the expression's value, not what the
+// column stores.
+on_both!(after_images_are_what_the_table_stores);
+async fn after_images_are_what_the_table_stores(var: &str) {
+    let Some(mut db) = Db::open(var).await else {
+        return;
+    };
+    db.run("DROP TABLE IF EXISTS pv_stored").await;
+    db.run(
+        "CREATE TABLE pv_stored (id INT AUTO_INCREMENT PRIMARY KEY, amt DECIMAL(10,2), \
+         code VARCHAR(5), kind ENUM('a','b'), \
+         doubled DECIMAL(12,2) AS (amt * 2) VIRTUAL, \
+         touched TIMESTAMP(6) NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP(6), \
+         hidden INT INVISIBLE DEFAULT 7) ENGINE=InnoDB",
+    )
+    .await;
+    db.run("INSERT INTO pv_stored (id, amt, code, kind) VALUES (1, 10.00, 'x', 'a')")
+        .await;
+
+    let p = db
+        .preview("UPDATE pv_stored SET amt = amt * 1.1234, kind = 'B' WHERE id = 1")
+        .await
+        .unwrap();
+    let after = p.rows[0].after.as_ref().unwrap();
+    let names: Vec<&str> = p.table.column_names().collect();
+    assert_eq!(
+        names,
+        ["id", "amt", "code", "kind", "doubled", "touched", "hidden"]
+    );
+    assert!(p.table.columns[4].generated);
+    assert_eq!(after[1], c("11.23"));
+    assert_eq!(after[3], c("b"), "ENUM values are stored in their own case");
+    assert_eq!(after[4], c("22.46"), "generated columns are recomputed");
+    assert!(after[5].is_some(), "ON UPDATE columns change too");
+    assert_eq!(after[6], c("7"), "invisible columns are included");
+    assert_eq!(p.rows[0].before.as_ref().unwrap()[5], None);
+
+    // Strict mode: a value that does not fit is an error, not truncated.
+    assert!(
+        db.preview("UPDATE pv_stored SET code = 'abcdefgh'")
+            .await
+            .is_err()
+    );
+    db.refused("UPDATE pv_stored SET doubled = 1", "generated column")
+        .await;
+    db.refused("UPDATE pv_stored SET id = 2", "primary key")
+        .await;
+
+    // Each row keeps its own type, not the widest of all rows.
+    let p = db
+        .preview("INSERT INTO pv_stored (amt, code) VALUES (1, 'a'), (2.5, 'b')")
+        .await
+        .unwrap();
+    let amts: Vec<&Cell> = p
+        .rows
+        .iter()
+        .map(|r| &r.after.as_ref().unwrap()[1])
+        .collect();
+    assert_eq!(amts, [&c("1.00"), &c("2.50")]);
+    db.close().await;
+}
+
+on_both!(now_is_pinned_to_the_preview_time);
+async fn now_is_pinned_to_the_preview_time(var: &str) {
+    let Some(mut db) = Db::open(var).await else {
+        return;
+    };
+    db.run("DROP TABLE IF EXISTS pv_now").await;
+    db.run("CREATE TABLE pv_now (id INT PRIMARY KEY, at DECIMAL(20,6)) ENGINE=InnoDB")
+        .await;
+    db.run("INSERT INTO pv_now VALUES (1, 0), (2, 0)").await;
+    let p = db
+        .preview("UPDATE pv_now SET at = UNIX_TIMESTAMP(NOW(6))")
+        .await
+        .unwrap();
+    for row in &p.rows {
+        assert_eq!(
+            row.after.as_ref().unwrap()[1],
+            Some(p.as_of.clone().into_bytes())
+        );
+    }
     db.close().await;
 }
 
@@ -174,7 +276,7 @@ async fn insert_previews_new_rows_and_keys(var: &str) {
     db.run("DROP TABLE IF EXISTS pv_insert").await;
     db.run(
         "CREATE TABLE pv_insert (id INT AUTO_INCREMENT PRIMARY KEY, body TEXT, \
-         created_at DATETIME NULL) ENGINE=InnoDB",
+         created_at DATETIME NULL, status VARCHAR(10) NOT NULL DEFAULT 'new') ENGINE=InnoDB",
     )
     .await;
 
@@ -185,13 +287,13 @@ async fn insert_previews_new_rows_and_keys(var: &str) {
     assert_eq!(p.kind, WriteKind::Insert);
     assert_eq!(p.written, [1, 2]);
     assert_eq!(p.rows.len(), 2);
-    assert_eq!(p.rows[0].after.as_ref().unwrap()[0], c("a"));
-    assert!(
-        p.rows[0].after.as_ref().unwrap()[1].is_some(),
-        "NOW() is evaluated once"
-    );
-    assert_eq!(p.rows[1].after, Some(vec![c("b"), None]));
-    assert_eq!(p.key(&p.rows[0]), None, "the server assigns the key");
+    let first = p.rows[0].after.as_ref().unwrap();
+    assert_eq!(first[0], None, "the server assigns the key at apply");
+    assert_eq!(first[1], c("a"));
+    assert!(first[2].is_some(), "NOW() is evaluated once");
+    assert_eq!(first[3], c("new"), "defaults are filled in");
+    assert_eq!(p.rows[1].after, Some(vec![None, c("b"), None, c("new")]));
+    assert_eq!(p.key(&p.rows[0]), None);
 
     let p = db
         .preview("INSERT INTO pv_insert (id, body) SELECT 10 + 1, 'x'")
@@ -216,17 +318,27 @@ async fn preview_takes_no_locks(var: &str) {
         return;
     };
     refunds(&mut db, "pv_locks").await;
+    refunds(&mut db, "pv_locks_src").await;
 
     // Another session holds every row's lock, as a busy production writer would.
     db.run("START TRANSACTION").await;
     db.run("SELECT * FROM pv_locks FOR UPDATE").await;
+    db.run("SELECT * FROM pv_locks_src FOR UPDATE").await;
 
     let started = Instant::now();
     let p = db
-        .preview("UPDATE pv_locks SET status = 'refunded' WHERE id = 1")
+        .preview(
+            "UPDATE pv_locks SET note = (SELECT status FROM pv_locks_src WHERE id = 4) \
+             WHERE id = 1",
+        )
         .await
         .unwrap();
-    assert_eq!(p.rows.len(), 1);
+    assert_eq!(p.rows[0].after.as_ref().unwrap()[3], c("refunded"));
+    let p = db
+        .preview("INSERT INTO pv_locks (id, status, amount) SELECT id + 10, status, amount FROM pv_locks_src")
+        .await
+        .unwrap();
+    assert_eq!(p.rows.len(), 4);
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "{:?}",
@@ -301,6 +413,31 @@ async fn refuses_tables_it_cannot_guard(var: &str) {
     db.refused("INSERT INTO pv_parent (code) VALUES (1)", "primary key")
         .await;
     db.refused("UPDATE pv_parent SET nope = 1", "").await;
+
+    // Found in review: a user that cannot see triggers or the referencing
+    // table got previews. It must be refused instead.
+    for (user, sql, needle) in [
+        (
+            "limited",
+            "UPDATE pv_trigger SET v = 2 WHERE id = 1",
+            "TRIGGER privilege",
+        ),
+        (
+            "limited",
+            "UPDATE pv_parent SET name = 'y'",
+            "TRIGGER privilege",
+        ),
+        (
+            "noprocess",
+            "DELETE FROM pv_parent WHERE id = 1",
+            "PROCESS privilege",
+        ),
+    ] {
+        let adapter = MySqlAdapter::new(&common::as_user(&db.url, user)).unwrap();
+        let result = preview_on(&adapter, &db.database, sql, PreviewLimits::default()).await;
+        expect_refusal(result, sql, needle);
+        adapter.close().await.unwrap();
+    }
     db.close().await;
 }
 
@@ -319,9 +456,10 @@ async fn refuses_more_rows_than_the_limit(var: &str) {
         .await
         .unwrap();
     assert_eq!(p.rows.len(), 3);
-    match db.preview_with("DELETE FROM pv_limit", limits).await {
-        Err(PreviewError::Refused(r)) => assert!(r.contains("more than 3 rows"), "{r}"),
-        other => panic!("{other:?}"),
-    }
+    expect_refusal(
+        db.preview_with("DELETE FROM pv_limit", limits).await,
+        "DELETE FROM pv_limit",
+        "more than 3 rows",
+    );
     db.close().await;
 }

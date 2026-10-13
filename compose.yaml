@@ -15,6 +15,7 @@ services:
       MARIADB_USER: rowbit
       MARIADB_PASSWORD: rowbit
     ports: ["127.0.0.1:33061:3306"]
+    volumes: ["./scripts/test-db-init.sql:/docker-entrypoint-initdb.d/rowbit.sql:ro"]
     tmpfs: [/var/lib/mysql]
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
@@ -32,6 +33,7 @@ services:
       MYSQL_USER: rowbit
       MYSQL_PASSWORD: rowbit
     ports: ["127.0.0.1:33062:3306"]
+    volumes: ["./scripts/test-db-init.sql:/docker-entrypoint-initdb.d/rowbit.sql:ro"]
     tmpfs: [/var/lib/mysql]
     healthcheck:
       # TCP on 127.0.0.1 only answers once the init-time server has stopped.
