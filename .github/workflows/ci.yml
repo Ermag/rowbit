@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["site/**", ".github/workflows/pages.yml"]
+  pull_request:
+    paths-ignore: ["site/**", ".github/workflows/pages.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Start MariaDB 11.4 and MySQL 8.4
+        run: docker compose up -d --wait
+      - name: Test
+        env:
+          ROWBIT_REQUIRE_DB: "1"
+          ROWBIT_TEST_MARIADB_URL: mysql://rowbit:rowbit@127.0.0.1:33061/rowbit_test
+          ROWBIT_TEST_MYSQL_URL: mysql://rowbit:rowbit@127.0.0.1:33062/rowbit_test
+        run: cargo test --workspace --locked
+      - name: Check the example policy
+        run: cargo run --locked -q -p rowbit-cli -- policy check examples/rowbit.yml
+      - name: Database logs
+        if: failure()
+        run: docker compose logs
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources
+
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit is signed off by its author
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: scripts/check-dco.sh "$BASE" "$HEAD"
