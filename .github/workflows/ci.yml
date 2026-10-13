@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
     paths-ignore: ["site/**", ".github/workflows/pages.yml"]
+  # No path filter on pull requests, so required checks always report.
   pull_request:
-    paths-ignore: ["site/**", ".github/workflows/pages.yml"]
 
 permissions:
   contents: read
