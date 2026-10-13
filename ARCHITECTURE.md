@@ -17,6 +17,7 @@ person ─CLI/web─▶ rowbit ──┘        │
 | `rowbit-core` | AGPL-3.0-only | The change state machine and the engine adapter interface. Every surface is a thin client over it. |
 | `rowbit-policy` | Apache-2.0 | `rowbit.yml` schema: parsing, validation, evaluation. No I/O. |
 | `rowbit-mysql` | AGPL-3.0-only | Adapter for MariaDB and MySQL (one wire protocol). |
+| `rowbit-store` | AGPL-3.0-only | Change state and the hash-chained audit log, in SQLite. |
 | `rowbit-mcp` | AGPL-3.0-only | MCP server, stdio and HTTP. Placeholder until v0.1. |
 | `rowbit-cli` | AGPL-3.0-only | The `rowbit` binary: `policy check`, `ping`, later `approve`, `reject`, `undo`. |
 

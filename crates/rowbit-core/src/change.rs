@@ -70,6 +70,74 @@ pub enum Event {
     UndoSucceeded,
 }
 
+impl State {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            State::Proposed => "proposed",
+            State::Held => "held",
+            State::Approved => "approved",
+            State::Applied => "applied",
+            State::Rejected => "rejected",
+            State::Failed => "failed",
+            State::Undone => "undone",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<State> {
+        [
+            State::Proposed,
+            State::Held,
+            State::Approved,
+            State::Applied,
+            State::Rejected,
+            State::Failed,
+            State::Undone,
+        ]
+        .into_iter()
+        .find(|state| state.as_str() == s)
+    }
+}
+
+impl std::fmt::Display for Actor {
+    /// `agent:<id>`, `human:<id>`, `policy:<rule>` or `system`, as the spec writes them.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Actor::Agent(id) => write!(f, "agent:{id}"),
+            Actor::Human(id) => write!(f, "human:{id}"),
+            Actor::Policy(rule) => write!(f, "policy:{rule}"),
+            Actor::System => f.write_str("system"),
+        }
+    }
+}
+
+impl Event {
+    /// The event's name, as the audit log records it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Event::PolicyAllowed => "PolicyAllowed",
+            Event::PolicyHeld => "PolicyHeld",
+            Event::PolicyBlocked { .. } => "PolicyBlocked",
+            Event::Approve => "Approve",
+            Event::Reject { .. } => "Reject",
+            Event::Withdraw => "Withdraw",
+            Event::Expire => "Expire",
+            Event::ApplySucceeded => "ApplySucceeded",
+            Event::ApplyFailed { .. } => "ApplyFailed",
+            Event::UndoSucceeded => "UndoSucceeded",
+        }
+    }
+
+    /// The reason carried by blocking, rejecting and failing events.
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            Event::PolicyBlocked { reason }
+            | Event::Reject { reason }
+            | Event::ApplyFailed { reason } => Some(reason),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum TransitionError {
     #[error("{event:?} is not allowed from {from:?}")]
@@ -252,6 +320,21 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn states_round_trip_through_their_names() {
+        for s in ALL_STATES {
+            assert_eq!(State::parse(s.as_str()), Some(s));
+        }
+        assert_eq!(State::parse("Approved"), None);
+    }
+
+    #[test]
+    fn actors_print_as_the_spec_writes_them() {
+        assert_eq!(agent().to_string(), "agent:refund-bot");
+        assert_eq!(policy().to_string(), "policy:small-refunds");
+        assert_eq!(Actor::System.to_string(), "system");
     }
 
     #[test]
