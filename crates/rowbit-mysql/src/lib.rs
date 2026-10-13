@@ -1,14 +1,21 @@
 //! Rowbit adapter for MariaDB and MySQL. Both speak the same wire protocol,
 //! so one adapter serves both and tells them apart by the server version.
 
+mod preview;
 pub mod statement;
+
+pub use preview::{PreviewError, PreviewLimits};
 
 use mysql_async::prelude::Queryable;
 use rowbit_core::adapter::{Adapter, Engine, ServerInfo};
+use rowbit_core::preview::Preview;
+
+use crate::statement::Classified;
 
 pub use mysql_async::Error;
 
 pub struct MySqlAdapter {
+    opts: mysql_async::Opts,
     pool: mysql_async::Pool,
 }
 
@@ -17,8 +24,20 @@ impl MySqlAdapter {
     pub fn new(url: &str) -> Result<Self, Error> {
         let opts = mysql_async::Opts::from_url(url)?;
         Ok(Self {
-            pool: mysql_async::Pool::new(opts),
+            pool: mysql_async::Pool::new(opts.clone()),
+            opts,
         })
+    }
+
+    /// Previews a write without running it. `database` is the default for
+    /// names the statement does not qualify.
+    pub async fn preview(
+        &self,
+        database: &str,
+        statement: &Classified,
+        limits: PreviewLimits,
+    ) -> Result<Preview, PreviewError> {
+        preview::preview(&self.opts, database, statement, limits).await
     }
 
     /// Closes every pooled connection.

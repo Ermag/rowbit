@@ -24,6 +24,8 @@ services:
 
   mysql:
     image: mysql:8.4
+    # Lets the non-root test user create triggers while binary logging is on.
+    command: ["--log-bin-trust-function-creators=1"]
     environment:
       MYSQL_ROOT_PASSWORD: rowbit
       MYSQL_DATABASE: rowbit_test
