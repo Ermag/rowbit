@@ -8,6 +8,8 @@
 <meta property="og:title" content="Rowbit">
 <meta property="og:description" content="Rowbit: a safety net for AI agents that write to your database. Preview every write, approve the risky ones, undo any single change.">
 <meta property="og:type" content="website">
+<meta property="og:image" content="https://ermag.github.io/rowbit/social/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
 <style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -201,8 +203,9 @@ td.sqlcell { color: var(--muted); max-width: 360px; overflow: hidden; text-overf
 .dbcol li { font-family: var(--f-display); font-size: 9px; padding: 8px 9px; background: var(--shadow); color: var(--muted); }
 .dbcol li.first { color: var(--shadow); background: var(--mint); }
 .ask { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
-.ask ol { margin: 0; padding: 18px 18px 18px 46px; display: flex; flex-direction: column; gap: 12px; }
-.ask li::marker { font-family: var(--f-display); font-size: 10px; color: var(--amber); }
+.ask .frame { padding: 18px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.ask .frame p { margin: 0; }
+a.btn { display: inline-block; text-decoration: none; }
 footer { color: var(--muted); font-size: 14px; text-align: center; }
 
 @media (max-width: 900px) {
@@ -301,15 +304,12 @@ DATABASE_URL=mysql://billing-bot@localhost:3307/prod</pre>
   <section class="ask" aria-labelledby="ask-h">
     <div>
       <h2 id="ask-h">INSERT COIN: YOUR OPINION</h2>
-      <p class="sub" style="margin:0">We are deciding whether to build this as an open source project. Five questions we would love your take on:</p>
+      <p class="sub" style="margin:0">Rowbit is open source and early. What we build first depends on what you tell us.</p>
     </div>
-    <ol class="frame">
-      <li>Would you put this between your agents and a production database? What would stop you?</li>
-      <li>Where do you want to review held changes: a web UI, Slack, the terminal, or something else?</li>
-      <li>Is a proxy the right shape, or would you rather have a library, a database plugin, or a hosted service?</li>
-      <li>When an undo hits rows that changed since, what should happen?</li>
-      <li>We are starting with MariaDB and MySQL. Which database should come next for you: PostgreSQL, MongoDB, Snowflake, Redis, or another?</li>
-    </ol>
+    <div class="frame">
+      <p>Would you trust it with a production database? Where should reviews happen? Which database comes next? Tell us what you think, good or bad, in our GitHub discussion.</p>
+      <a class="btn" href="https://github.com/Ermag/rowbit/discussions/2">▶ JOIN THE DISCUSSION</a>
+    </div>
   </section>
 
   <footer>ROWBIT · rows, bits and an orbit, said like "robot" · concept mock, all data simulated · <a href="https://github.com/Ermag/rowbit" style="color:var(--sky)">github.com/Ermag/rowbit</a></footer>
