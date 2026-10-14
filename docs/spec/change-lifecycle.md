@@ -78,18 +78,54 @@ Actors come from the transport's authentication, never from arguments an agent p
 
 ### Propose
 
-The agent sends one SQL statement and a target database. Rowbit parses it with `sqlparser-rs` (MySQL dialect). If it is not exactly one `INSERT`, `UPDATE`, `DELETE` or DDL statement, the change is recorded and immediately `PolicyBlocked` with the parse result as the reason.
+The agent sends one SQL statement and a target database. Rowbit parses it with `sqlparser-rs` (MySQL dialect). v0.1 accepts only these shapes:
+
+- `UPDATE t SET ... [WHERE ...] [ORDER BY ...] [LIMIT n]` on one table,
+- `DELETE FROM t [WHERE ...] [ORDER BY ...] [LIMIT n]` on one table,
+- `INSERT INTO t (cols) VALUES (...), ...` and `INSERT INTO t (cols) SELECT ...`,
+- DDL on one table (`CREATE`, `ALTER`, `DROP`, `TRUNCATE` or `RENAME TABLE`, `CREATE INDEX`). It is not previewed. It is always held, and the reviewer approves the statement exactly as Rowbit will run it. It cannot be undone.
+
+Anything else is recorded and immediately `PolicyBlocked` with the reason, including: more than one statement, multi-table `UPDATE` or `DELETE`, `REPLACE`, `INSERT IGNORE`, `ON DUPLICATE KEY UPDATE`, variables, placeholders, locking clauses, `SELECT ... INTO`, executable comments (`/*! ... */`), and functions outside a fixed list of built-ins (stored functions can write, and built-ins like `SLEEP` or `GET_LOCK` reach outside the statement).
+
+Rowbit never runs the agent's text. It runs SQL printed from the parsed statement, so the statement must print back exactly as MySQL reads it: any backslash is refused (the parser and MySQL disagree on escapes such as `\%`, and printing does not escape a backslash again), and so are literals other than plain numbers, strings, hex strings, booleans and `NULL`. Every session Rowbit opens uses `NO_BACKSLASH_ESCAPES` and strict mode.
+
+`RAND()` and `UUID()` may not appear in `WHERE` or `ORDER BY`: apply reads the filter again, and it must pick the same rows.
 
 ### Preview
 
-Rowbit runs the statement inside a transaction on a dedicated connection and always rolls it back. It records:
+The preview never runs the agent's write on the real table. On a dedicated connection, with a time limit for the whole preview:
 
-- the target table and whether it has a primary key,
-- each affected row's primary key, before image and after image,
-- the columns written,
-- the affected row count and any column sums the policy needs.
+1. Pin the clock: record `UNIX_TIMESTAMP(NOW(6))` as the preview's time, and set the session's `timestamp` to it, so `NOW()` and friends give one value throughout.
+2. Check the target table (below).
+3. Create a temporary table `LIKE` the target. It exists only for this connection, and `LIKE` copies the column definitions (types, defaults, generated columns, `ON UPDATE CURRENT_TIMESTAMP`) but not triggers or foreign keys.
+4. Start a `READ ONLY` transaction at `READ COMMITTED`. From here the server refuses any write to a real table, and every read is a consistent read that takes no locks, including the reads an `INSERT ... SELECT` or a subquery in `SET` makes.
+5. Read and replay:
 
-If the preview fails (syntax error, lock timeout, server error), the change is `PolicyBlocked`. The preview is stored with the change and a hash of it is what the reviewer approves.
+| Statement | What the preview does |
+|---|---|
+| `UPDATE` | Read every column of the matching rows, using the statement's `WHERE`, `ORDER BY` and `LIMIT`. These are the before images. Copy them into the temporary table, run the statement's `SET` list there, and read the rows back. These are the after images. |
+| `DELETE` | Read every column of the matching rows. These are the before images; there are no after images. |
+| `INSERT` | Run the statement's `VALUES` or `SELECT` into the temporary table and read the rows back. These are the after images; there are no before images. A key the server will assign with `AUTO_INCREMENT` is left empty, since the temporary table's numbers mean nothing. |
+
+Because the server itself stores each new value, the after images are exactly what the table would hold: rounded to the column's scale, in the `ENUM`'s own case, with defaults filled in, generated and `ON UPDATE` columns updated, and each `SET` evaluated left to right as MySQL does. A value that would not fit its column is an error (strict mode), not a quiet truncation. Both images hold every column, invisible ones included.
+
+So a preview takes no row locks, fires no triggers, advances no `AUTO_INCREMENT` counter and writes to no real table, transactional or not. The temporary table is dropped with the connection.
+
+Rowbit refuses to preview (`PolicyBlocked`) when:
+
+- the table has no primary key, or is not an InnoDB base table (apply and undo depend on rolling back),
+- the statement sets a primary key column or a generated column,
+- an insert leaves out a primary key column that is not a single `AUTO_INCREMENT` key,
+- the table has triggers, or another table references it with a foreign key that cascades or sets `NULL` on delete (for a `DELETE`) or on update of a column the statement sets (for an `UPDATE`), because those effects would not appear in the preview and undo could not reverse them,
+- Rowbit cannot be sure of the previous point: its database user lacks `TRIGGER` on the table (without it, MySQL hides the table's triggers), or lacks `PROCESS` (needed to read InnoDB's list of every foreign key, including those on tables the user cannot see),
+- the write matches more rows than the configured limit (default 10,000),
+- the preview fails in any other way: a time-out, a strict-mode error, a server error.
+
+Rowbit's database user therefore needs `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `CREATE TEMPORARY TABLES` and `TRIGGER` on the databases agents write to, and the global `PROCESS` privilege.
+
+The preview records the target table with its columns (name, type, generated, auto-increment) and primary key, the columns the statement names, each row's before and after images, and the preview's time. It is stored with the change, and its hash is what the reviewer approves.
+
+The preview runs with Rowbit's privileges, so it can show values from any table Rowbit's user can read (a subquery in `SET`, for example). Reviewers see those values. The agent never does: the MCP server tells it a change's state, row count and reasons, never preview values. Agents that should not read a table should not be given a Rowbit user that can; v0.2 adds per-agent scopes.
 
 ### Decide
 
@@ -97,19 +133,24 @@ If the preview fails (syntax error, lock timeout, server error), the change is `
 
 ### Apply
 
-In one transaction:
+Apply does not run the agent's statement either. It writes the stored after images, row by row, by primary key. In one transaction, in strict mode, with a short lock wait timeout:
 
-1. Lock the previewed rows by primary key (`SELECT ... FOR UPDATE`).
-2. Compare each to its stored before image. If any row is missing, differs, or extra rows now match, roll back and send `ApplyFailed` (reason: drift since preview).
-3. Run the statement.
-4. Check that the affected primary keys and their after images equal the preview. If not, roll back and send `ApplyFailed`.
-5. Commit and send `ApplySucceeded`.
+1. Lock the previewed rows by primary key (`SELECT ... FOR UPDATE`). For an insert whose primary key is in the preview, check that no row with that key exists yet.
+2. For an update or delete, compare each locked row to its stored before image. If any row is missing or differs, roll back and send `ApplyFailed` (reason: drift since preview).
+3. For an update or delete, run the preview's read again without locking, with the session's `timestamp` set to the preview's time so `NOW()` means what it meant then. If it now matches primary keys the preview did not have, roll back and send `ApplyFailed` (reason: drift since preview). Rows outside the preview are never written either way; this check makes sure nobody's approval covers a statement that now means more than they saw.
+4. Write each row from its after image, setting every column that is not generated: `UPDATE t SET ... WHERE <primary key> = ...` for the columns whose after image differs from the before image (an `ON UPDATE` column is set explicitly, so it holds the previewed value), `DELETE FROM t WHERE <primary key> = ...`, or `INSERT INTO t (...) VALUES (...)`, leaving out a key the server assigns. Each write must affect exactly one row. Record the key the server assigned.
+5. Read the written rows back and compare them to the after images. If any differs, roll back and send `ApplyFailed`.
+6. Commit and send `ApplySucceeded`.
 
 A server error at any point rolls back and sends `ApplyFailed`.
 
+Locks are held only during apply, only on the previewed rows, and only for as long as it takes to write them.
+
+DDL is run as the reviewed statement, after approval, and is not checked or undone.
+
 ### Undo
 
-In one transaction: lock the rows, check each still equals its stored after image, then restore the before images (delete inserted rows, re-insert deleted rows, write back updated columns). If any row changed since apply, roll back and refuse. The change stays `applied`; a person can resolve the conflict and try again.
+In one transaction: lock the rows by primary key and check each still equals its after image (every column, generated ones included). Then restore the before images: delete inserted rows, re-insert deleted rows, and write back the columns apply wrote. Generated columns are never written; the server recomputes them. If any row changed since apply, roll back and refuse. The change stays `applied`; a person can resolve the conflict and try again.
 
 ## Audit log
 
@@ -117,4 +158,4 @@ Every transition appends one event: change id, from, to, event, actor, time, and
 
 ## Not in v0.1
 
-Multi-statement transactions as one change (v0.3), tables without a primary key, DDL previews (DDL is always held and shown as SQL), undo of an undo.
+Multi-statement transactions as one change (v0.3), tables without a primary key, tables that are not InnoDB, tables with triggers or cascading foreign keys, updates to primary key columns, DDL previews and undo of DDL (DDL is always held and shown as SQL), undo of an undo.
