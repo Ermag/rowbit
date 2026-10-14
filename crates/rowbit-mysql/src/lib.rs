@@ -1,6 +1,8 @@
 //! Rowbit adapter for MariaDB and MySQL. Both speak the same wire protocol,
 //! so one adapter serves both and tells them apart by the server version.
 
+pub mod statement;
+
 use mysql_async::prelude::Queryable;
 use rowbit_core::adapter::{Adapter, Engine, ServerInfo};
 

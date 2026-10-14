@@ -21,6 +21,7 @@ clap = { version = "4", features = ["derive", "env"] }
 mysql_async = { version = "0.36", default-features = false, features = ["minimal-rust"] }
 serde = { version = "1", features = ["derive"] }
 serde_norway = "0.9"
+sqlparser = { version = "0.63", features = ["visitor"] }
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
