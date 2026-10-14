@@ -15,6 +15,7 @@ services:
       MARIADB_USER: rowbit
       MARIADB_PASSWORD: rowbit
     ports: ["127.0.0.1:33061:3306"]
+    volumes: ["./scripts/test-db-init.sql:/docker-entrypoint-initdb.d/rowbit.sql:ro"]
     tmpfs: [/var/lib/mysql]
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
@@ -24,12 +25,15 @@ services:
 
   mysql:
     image: mysql:8.4
+    # Lets the non-root test user create triggers while binary logging is on.
+    command: ["--log-bin-trust-function-creators=1"]
     environment:
       MYSQL_ROOT_PASSWORD: rowbit
       MYSQL_DATABASE: rowbit_test
       MYSQL_USER: rowbit
       MYSQL_PASSWORD: rowbit
     ports: ["127.0.0.1:33062:3306"]
+    volumes: ["./scripts/test-db-init.sql:/docker-entrypoint-initdb.d/rowbit.sql:ro"]
     tmpfs: [/var/lib/mysql]
     healthcheck:
       # TCP on 127.0.0.1 only answers once the init-time server has stopped.
