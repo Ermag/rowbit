@@ -4,7 +4,7 @@
 mod preview;
 pub mod statement;
 
-pub use preview::{PreviewError, PreviewLimits};
+pub use preview::{PreviewError, PreviewLimits, db_error_code};
 
 use mysql_async::prelude::Queryable;
 use rowbit_core::adapter::{Adapter, Engine, ServerInfo};

@@ -56,9 +56,9 @@ Unknown keys anywhere are errors, so a typo never silently weakens a rule.
 |---|---|---|
 | `statement` | one or a list of `insert`, `update`, `delete`, `ddl` | the statement is one of these |
 | `table` | one or a list of `database.table` patterns | the target table matches any pattern. `*` matches any run of characters, for example `billing.*` |
-| `columns` | one or a list of column names | the change writes any of them. A delete writes every column. |
+| `columns` | one or a list of column names | every column the change writes is in the list. A delete writes every column, so it matches only a list of all of them. |
 | `rows` | `{ min, max }`, inclusive, at least one | the affected row count is in range |
-| `sum` | `{ column, min, max }`, inclusive, at least one bound | the sum of `column` over affected rows is in range: after images for inserts and updates, before images for deletes |
+| `sum` | `{ column, min, max }`, inclusive, at least one bound | the sum of `column` over affected rows is in range: over the after images for inserts, the before images for deletes, and for updates over both, so an update cannot fit a budget by changing the column it is measured on. Sums are computed as 64-bit floating point, exact to the cent below about 90 trillion. |
 
 Table names are compared exactly against the server's canonical `database.table` name.
 

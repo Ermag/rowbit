@@ -177,6 +177,61 @@ async fn failures_before_a_decision_block(var: &str, table: &str) {
     }
 }
 
+// Found in review: the server's error message reached the agent, quoting a
+// value from a table it should not read.
+on_both!(database_errors_do_not_leak_values_to_the_agent);
+async fn database_errors_do_not_leak_values_to_the_agent(var: &str, table: &str) {
+    let Some((engine, t)) = setup(var, &format!("{table}_l")).await else {
+        return;
+    };
+    let url = std::env::var(var).unwrap();
+    let mut conn = mysql_async::Conn::from_url(&url).await.unwrap();
+    conn.query_drop(
+        "DROP TABLE IF EXISTS en_secrets; \
+         CREATE TABLE en_secrets (id INT PRIMARY KEY, pw TEXT) ENGINE=InnoDB; \
+         INSERT INTO en_secrets VALUES (1, 'hunter2')",
+    )
+    .await
+    .unwrap();
+    conn.disconnect().await.unwrap();
+
+    // A text value into a DECIMAL column: the server's error quotes it.
+    let sql = format!("UPDATE {t} SET amount = (SELECT MAX(pw) FROM en_secrets) WHERE id = 1");
+    let s = propose(&engine, "refund-bot", &sql).await;
+    assert_eq!(s.state, State::Rejected, "{s:?}");
+    let reason = s.reason.unwrap_or_default();
+    assert!(
+        reason.starts_with("preview failed: database error "),
+        "{reason:?}"
+    );
+    assert!(
+        !reason.contains("hunter2") && !reason.contains('\''),
+        "{reason:?}"
+    );
+    // People still see the whole error in the log.
+    let history = engine.history(s.id).unwrap();
+    assert!(
+        history.iter().any(|e| e.event == "ErrorDetail"
+            && e.detail.as_deref().unwrap_or_default().contains("hunter2")),
+        "{history:?}"
+    );
+}
+
+on_both!(zero_row_changes_are_rejected);
+async fn zero_row_changes_are_rejected(var: &str, table: &str) {
+    let Some((engine, t)) = setup(var, &format!("{table}_z")).await else {
+        return;
+    };
+    let s = propose(
+        &engine,
+        "refund-bot",
+        &format!("UPDATE {t} SET status = 'refunded' WHERE id = 999"),
+    )
+    .await;
+    assert_eq!(s.state, State::Rejected);
+    assert_eq!(s.reason.as_deref(), Some("the statement matches no rows"));
+}
+
 on_both!(ddl_is_held_on_its_statement);
 async fn ddl_is_held_on_its_statement(var: &str, table: &str) {
     let Some((engine, t)) = setup(var, &format!("{table}_d")).await else {

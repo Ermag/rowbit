@@ -182,6 +182,28 @@ fn preview_is_set_once_and_only_while_proposed() {
 }
 
 #[test]
+fn notes_leave_the_state_alone() {
+    let mut store = Store::open_in_memory().unwrap();
+    let (id, _) = previewed(&mut store);
+    store
+        .note(
+            id,
+            &Actor::System,
+            "ErrorDetail",
+            "Incorrect decimal value: 'x'",
+        )
+        .unwrap();
+    let log = store.events(id).unwrap();
+    let last = log.last().unwrap();
+    assert_eq!(
+        (last.event.as_str(), last.from.as_deref(), last.to.as_str()),
+        ("ErrorDetail", Some("proposed"), "proposed")
+    );
+    assert_eq!(store.get(id).unwrap().state, State::Proposed);
+    assert_eq!(store.verify().unwrap(), Ok(()));
+}
+
+#[test]
 fn list_by_state() {
     let mut store = Store::open_in_memory().unwrap();
     let (a, _) = previewed(&mut store);

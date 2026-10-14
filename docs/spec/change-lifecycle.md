@@ -89,7 +89,7 @@ Anything else is recorded and immediately `PolicyBlocked` with the reason, inclu
 
 Rowbit never runs the agent's text. It runs SQL printed from the parsed statement, so the statement must print back exactly as MySQL reads it: any backslash is refused (the parser and MySQL disagree on escapes such as `\%`, and printing does not escape a backslash again), and so are literals other than plain numbers, strings, hex strings, booleans and `NULL`. Every session Rowbit opens uses `NO_BACKSLASH_ESCAPES` and strict mode.
 
-`RAND()` and `UUID()` may not appear in `WHERE` or `ORDER BY`: apply reads the filter again, and it must pick the same rows.
+`RAND()` and `UUID()` may not appear in `WHERE` or `ORDER BY`, and `LIMIT` needs an `ORDER BY`: apply reads the filter again, and it must pick the same rows. (An `ORDER BY` with ties can still pick differently; apply then fails as drift.)
 
 ### Preview
 
@@ -125,13 +125,13 @@ Rowbit's database user therefore needs `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `
 
 The preview records the target table with its columns (name, type, generated, auto-increment) and primary key, the columns the statement names, each row's before and after images, and the preview's time. It is stored with the change, and its hash is what the reviewer approves.
 
-The preview runs with Rowbit's privileges, so it can show values from any table Rowbit's user can read (a subquery in `SET`, for example). Reviewers see those values. The agent never does: the MCP server tells it a change's state, row count and reasons, never preview values. Agents that should not read a table should not be given a Rowbit user that can; v0.2 adds per-agent scopes.
+The preview runs with Rowbit's privileges, so it can show values from any table Rowbit's user can read (a subquery in `SET`, for example). Reviewers see those values. The agent never does: it is told a change's state, table, row count and reason, never preview values. Reasons the agent sees are written by Rowbit: a database error is reduced to its code (`preview failed: database error 1366`), because server messages quote values, and the full message is logged for people as an `ErrorDetail` event. A statement can still learn about a table through how many rows it matches. Agents that should not read a table should not be given a Rowbit user that can; v0.2 adds per-agent scopes.
 
 ### Decide
 
 `rowbit.yml` is evaluated against the preview facts. See [policy.md](policy.md). `allow` sends `PolicyAllowed`, `hold` sends `PolicyHeld`, `block` sends `PolicyBlocked`. The event's actor is `policy:<rule>` for the deciding rule, or `policy:default` when no rule matched. `PolicyHeld` and `PolicyBlocked` carry the rule's `reason` (or which rule decided, if it has none), which the agent is shown.
 
-A change that fails before policy can decide is `PolicyBlocked` by `policy:floor` with the reason: an agent not listed in `rowbit.yml` (its statement is not even previewed), a statement Rowbit refuses, or a preview that fails or is refused. What was reviewed is stored for blocked changes too, so the log shows what was refused.
+A change that fails before policy can decide is `PolicyBlocked` by `policy:floor` with the reason: an agent not listed in `rowbit.yml` (its statement is not even previewed), a statement Rowbit refuses, a preview that fails or is refused, or a write that matches no rows. What was reviewed is stored for blocked changes too, so the log shows what was refused.
 
 ### Apply
 

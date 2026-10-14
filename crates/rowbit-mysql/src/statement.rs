@@ -529,6 +529,11 @@ fn filters(
         sql.push_str(&format!(" ORDER BY {}", items.join(", ")));
     }
     if let Some(limit) = limit {
+        if order_by.is_empty() {
+            // Without an order the server may pick different rows when apply
+            // reads the filter again.
+            return refuse("LIMIT needs an ORDER BY, so it picks the same rows every time");
+        }
         match limit {
             Expr::Value(ValueWithSpan {
                 value: Value::Number(n, false),
@@ -764,7 +769,7 @@ mod tests {
 
     #[test]
     fn delete_keeps_target_and_filter() {
-        let c = ok("DELETE FROM `app`.`sessions` WHERE expires_at < NOW() LIMIT 1000");
+        let c = ok("DELETE FROM `app`.`sessions` WHERE expires_at < NOW() ORDER BY id LIMIT 1000");
         assert_eq!(c.kind, Kind::Delete);
         assert_eq!(c.table.table, "sessions");
         assert!(c.columns.is_empty());
@@ -773,7 +778,7 @@ mod tests {
             &existing(
                 "`app`.`sessions`",
                 "sessions",
-                " WHERE expires_at < NOW() LIMIT 1000",
+                " WHERE expires_at < NOW() ORDER BY id LIMIT 1000",
                 ""
             )
         );
@@ -882,7 +887,8 @@ mod tests {
         refused("DELETE a FROM a JOIN b ON a.id = b.id", "multi-table");
         refused("DELETE FROM a USING a, b WHERE a.id = b.id", "multi-table");
         refused("UPDATE t PARTITION (p0) SET a = 1", "table options");
-        refused("UPDATE t SET a = 1 LIMIT 5 + 5", "LIMIT");
+        refused("UPDATE t SET a = 1 ORDER BY id LIMIT 5 + 5", "LIMIT");
+        refused("DELETE FROM t LIMIT 5", "ORDER BY");
         refused("UPDATE t SET (a, b) = (1, 2)", "");
     }
 

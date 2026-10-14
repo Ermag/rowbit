@@ -11,8 +11,13 @@ pub struct ChangeFacts {
     /// Columns the change writes. Every column of the table for a delete.
     pub columns: Vec<String>,
     pub rows: u64,
-    /// Column sums the preview computed, keyed by column name.
+    /// Column sums the preview computed, keyed by column name: over the
+    /// after images for inserts and updates, the before images for deletes.
     pub sums: BTreeMap<String, f64>,
+    /// For updates, the same sums over the before images. A `sum` rule
+    /// must hold both before and after an update, so a write cannot fit a
+    /// budget by changing the column it is measured on.
+    pub sums_before: BTreeMap<String, f64>,
     pub has_primary_key: bool,
 }
 
@@ -90,8 +95,9 @@ fn matches(m: &Match, facts: &ChangeFacts) -> Result<bool, String> {
     {
         return Ok(false);
     }
+    // Matches only when every column the change writes is listed.
     if let Some(cols) = &m.columns
-        && !cols.as_slice().iter().any(|c| facts.columns.contains(c))
+        && (facts.columns.is_empty() || !facts.columns.iter().all(|c| cols.as_slice().contains(c)))
     {
         return Ok(false);
     }
@@ -101,11 +107,17 @@ fn matches(m: &Match, facts: &ChangeFacts) -> Result<bool, String> {
         return Ok(false);
     }
     if let Some(s) = &m.sum {
-        let Some(&total) = facts.sums.get(&s.column) else {
-            return Err(s.column.clone());
-        };
-        if s.min.is_some_and(|lo| total < lo) || s.max.is_some_and(|hi| total > hi) {
-            return Ok(false);
+        let mut totals = vec![facts.sums.get(&s.column)];
+        if facts.statement == StatementKind::Update {
+            totals.push(facts.sums_before.get(&s.column));
+        }
+        for total in totals {
+            let Some(&total) = total else {
+                return Err(s.column.clone());
+            };
+            if s.min.is_some_and(|lo| total < lo) || s.max.is_some_and(|hi| total > hi) {
+                return Ok(false);
+            }
         }
     }
     Ok(true)
@@ -148,6 +160,7 @@ mod tests {
             columns: vec!["status".into()],
             rows,
             sums: BTreeMap::from([("amount".into(), amount)]),
+            sums_before: BTreeMap::from([("amount".into(), amount)]),
             has_primary_key: true,
         }
     }
@@ -185,10 +198,37 @@ mod tests {
         assert_eq!(v.decision, Decision::Block);
     }
 
+    // Found in review: `columns: status` let `SET status = ..., amount = 0`
+    // through, and the amount budget was checked after the write.
+    #[test]
+    fn an_allow_rule_covers_only_what_it_says() {
+        let mut facts = refund_update(37, 412.50);
+        facts.columns.push("amount".into());
+        assert_eq!(
+            evaluate(&example(), "refund-bot", &facts).decision,
+            Decision::Hold
+        );
+
+        let mut facts = refund_update(37, 0.0);
+        facts.sums_before.insert("amount".into(), 48_210.0);
+        assert_eq!(
+            evaluate(&example(), "refund-bot", &facts).decision,
+            Decision::Hold
+        );
+
+        facts.sums_before.clear();
+        assert_eq!(
+            evaluate(&example(), "refund-bot", &facts).decision,
+            Decision::Block,
+            "an update without a before sum cannot be checked"
+        );
+    }
+
     #[test]
     fn missing_sum_blocks_instead_of_falling_through() {
         let mut facts = refund_update(1, 1.0);
         facts.sums.clear();
+        facts.sums_before.clear();
         let v = evaluate(&example(), "refund-bot", &facts);
         assert_eq!(v.decision, Decision::Block);
     }
@@ -215,6 +255,7 @@ mod tests {
             columns: vec![],
             rows: 0,
             sums: BTreeMap::new(),
+            sums_before: BTreeMap::new(),
             has_primary_key: true,
         };
         assert_eq!(evaluate(&p, "bot", &facts).decision, Decision::Hold);

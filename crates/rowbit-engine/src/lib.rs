@@ -14,7 +14,7 @@ use rowbit_core::preview::{Preview, WriteKind};
 use rowbit_mysql::statement::{Classified, Kind, classify};
 use rowbit_mysql::{MySqlAdapter, PreviewLimits};
 use rowbit_policy::{ChangeFacts, Decision, PolicyFile, StatementKind, Verdict, evaluate};
-use rowbit_store::{ChangeId, Review, Store, StoreError};
+use rowbit_store::{AuditEvent, ChangeId, Review, Store, StoreError};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -76,11 +76,11 @@ impl Engine {
 
         if !self.policy.agents.contains_key(agent) {
             // Not even previewed: an unknown agent gets no reads run for it.
-            return self.block(id, agent, "agent is not listed in rowbit.yml");
+            return self.block(id, agent, "agent is not listed in rowbit.yml", None);
         }
         let classified = match classify(sql) {
             Ok(c) => c,
-            Err(refusal) => return self.block(id, agent, &refusal.to_string()),
+            Err(refusal) => return self.block(id, agent, &refusal.to_string(), None),
         };
 
         let (review, facts) = if classified.kind == Kind::Ddl {
@@ -95,11 +95,19 @@ impl Engine {
                 .preview(database, &classified, self.limits)
                 .await
             {
+                Ok(preview) if preview.rows.is_empty() => {
+                    return self.block(id, agent, "the statement matches no rows", None);
+                }
                 Ok(preview) => {
                     let facts = facts(&preview);
                     (Review::Rows(preview), facts)
                 }
-                Err(e) => return self.block(id, agent, &format!("preview failed: {e}")),
+                Err(e) => {
+                    // People see the server's message in the log; the agent
+                    // gets only Rowbit's words.
+                    let detail = e.to_string();
+                    return self.block(id, agent, &e.agent_reason(), Some(&detail));
+                }
             }
         };
 
@@ -139,8 +147,15 @@ impl Engine {
         };
         let reason = store
             .events(id)?
-            .last()
-            .filter(|e| e.event != "Proposed")
+            .iter()
+            .rev()
+            .find(|e| e.from.as_deref() != Some(e.to.as_str()) || e.event == "Proposed")
+            .filter(|e| {
+                matches!(
+                    e.event.as_str(),
+                    "PolicyHeld" | "PolicyBlocked" | "Reject" | "ApplyFailed"
+                )
+            })
             .and_then(|e| e.detail.clone());
         let (table, rows) = match &change.review {
             Some(Review::Rows(p)) => (Some(p.table.qualified_name()), Some(p.rows.len())),
@@ -155,8 +170,26 @@ impl Engine {
         })
     }
 
-    fn block(&self, id: ChangeId, agent: &str, reason: &str) -> Result<ChangeStatus, EngineError> {
-        self.store().transition(
+    /// The full audit log of a change, error details included. For people
+    /// only: never return this to an agent.
+    pub fn history(&self, id: ChangeId) -> Result<Vec<AuditEvent>, EngineError> {
+        Ok(self.store().events(id)?)
+    }
+
+    /// Blocks before policy could decide. `reason` is shown to the agent and
+    /// must be Rowbit's own words; `detail`, if any, is only logged.
+    fn block(
+        &self,
+        id: ChangeId,
+        agent: &str,
+        reason: &str,
+        detail: Option<&str>,
+    ) -> Result<ChangeStatus, EngineError> {
+        let mut store = self.store();
+        if let Some(detail) = detail {
+            store.note(id, &Actor::System, "ErrorDetail", detail)?;
+        }
+        store.transition(
             id,
             &Event::PolicyBlocked {
                 reason: reason.to_owned(),
@@ -164,6 +197,7 @@ impl Engine {
             &Actor::Policy("floor".to_owned()),
             None,
         )?;
+        drop(store);
         self.status(agent, id)
     }
 
@@ -184,6 +218,7 @@ fn ddl_facts(c: &Classified, database: &str) -> ChangeFacts {
         columns: Vec::new(),
         rows: 0,
         sums: BTreeMap::new(),
+        sums_before: BTreeMap::new(),
         has_primary_key: true,
     }
 }
@@ -204,23 +239,25 @@ fn facts(p: &Preview) -> ChangeFacts {
             .map(|&i| p.table.columns[i].name.clone())
             .collect(),
         rows: p.rows.len() as u64,
-        sums: sums(p),
+        sums: sums(p, p.kind == WriteKind::Delete),
+        sums_before: if p.kind == WriteKind::Update {
+            sums(p, true)
+        } else {
+            BTreeMap::new()
+        },
         has_primary_key: !p.table.primary_key.is_empty(),
     }
 }
 
 /// Sums every column whose values are all numbers (or `NULL`), over the
-/// after images, or the before images for a delete. A column with any other
-/// value gets no sum, so a rule that needs one blocks.
-fn sums(p: &Preview) -> BTreeMap<String, f64> {
+/// before or the after images. A column with any other value gets no sum,
+/// so a rule that needs one blocks.
+fn sums(p: &Preview, before: bool) -> BTreeMap<String, f64> {
     let mut sums = BTreeMap::new();
     for (i, column) in p.table.columns.iter().enumerate() {
         let mut total = 0.0;
         let numeric = p.rows.iter().all(|row| {
-            let image = match p.kind {
-                WriteKind::Delete => &row.before,
-                WriteKind::Insert | WriteKind::Update => &row.after,
-            };
+            let image = if before { &row.before } else { &row.after };
             match image.as_ref().map(|cells| &cells[i]) {
                 Some(None) => true,
                 Some(Some(bytes)) => std::str::from_utf8(bytes)
