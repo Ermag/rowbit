@@ -142,9 +142,11 @@ Apply does not run the agent's statement either. It writes the stored after imag
 3. For an update or delete, run the preview's read again without locking, with the session's `timestamp` set to the preview's time so `NOW()` means what it meant then. If it now matches primary keys the preview did not have, roll back and send `ApplyFailed` (reason: drift since preview). Rows outside the preview are never written either way; this check makes sure nobody's approval covers a statement that now means more than they saw.
 4. Write each row from its after image, setting every column that is not generated: `UPDATE t SET ... WHERE <primary key> = ...` for the columns whose after image differs from the before image (an `ON UPDATE` column is set explicitly, so it holds the previewed value), `DELETE FROM t WHERE <primary key> = ...`, or `INSERT INTO t (...) VALUES (...)`, leaving out a key the server assigns. Each write must affect exactly one row. Record the key the server assigned.
 5. Read the written rows back and compare them to the after images. If any differs, roll back and send `ApplyFailed`.
-6. Commit and send `ApplySucceeded`.
+6. Commit and send `ApplySucceeded`. Its detail is the hash of the apply record: the primary key of every row written, including keys the server assigned. Undo finds the rows by these keys.
 
 A server error at any point rolls back and sends `ApplyFailed`.
+
+A change approved by policy is applied right away; a change a person approves is applied when they approve it.
 
 Locks are held only during apply, only on the previewed rows, and only for as long as it takes to write them.
 
@@ -152,7 +154,7 @@ DDL is run as the reviewed statement, after approval, and is not checked or undo
 
 ### Undo
 
-In one transaction: lock the rows by primary key and check each still equals its after image (every column, generated ones included). Then restore the before images: delete inserted rows, re-insert deleted rows, and write back the columns apply wrote. Generated columns are never written; the server recomputes them. If any row changed since apply, roll back and refuse. The change stays `applied`; a person can resolve the conflict and try again.
+In one transaction: lock the rows by primary key and check each still equals its after image (every column, generated ones included). Then restore the before images: delete inserted rows, re-insert deleted rows, and write back the columns apply wrote. Generated columns are never written; the server recomputes them. Read every row back and compare it to its before image. If any row changed since apply, or a restored row does not read back as its before image, roll back and refuse. The change stays `applied`, and the refusal is logged as an `UndoRefused` event that leaves the state unchanged; a person can resolve the conflict and try again. Schema changes cannot be undone.
 
 ## Audit log
 
@@ -162,7 +164,7 @@ The state change and its event are written in one SQLite transaction, so the sta
 
 What a person reviews is stored once, as canonical JSON, and never replaced: the preview for an `INSERT`, `UPDATE` or `DELETE`, and for DDL the statement as Rowbit will run it. Its hash (SHA-256 of that JSON) is part of the `PolicyAllowed`, `PolicyHeld` and `Approve` events, so the log shows exactly what was approved. `Approve` must carry the hash the person reviewed, and is refused if it differs from the stored one. `PolicyAllowed` and `PolicyHeld` are refused for a change with nothing to review.
 
-Verifying the log checks every event's hash and link, that every event belongs to a change, every stored review against its hash and against the hashes its events name, every change's agent, database and statement against its `Proposed` event, and every change's state against its last event. A chain kept in the same file cannot show that its newest events were cut off along with the matching states; that needs the latest hash kept somewhere outside Rowbit, which v0.1 does not do.
+Verifying the log checks every event's hash and link, that every event belongs to a change, every stored review against its hash and against the hashes its events name, every change's agent, database and statement against its `Proposed` event, every apply record against the hash its `ApplySucceeded` event names, and every change's state against its last event. A chain kept in the same file cannot show that its newest events were cut off along with the matching states; that needs the latest hash kept somewhere outside Rowbit, which v0.1 does not do.
 
 ## Not in v0.1
 
