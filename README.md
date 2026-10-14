@@ -40,6 +40,8 @@ agents:
         reason: Data fixes don't delete rows.
 ```
 
+Here the agent can change the `status` of up to 20 orders on its own. An update that writes any other column, or more rows, waits for a person, and deletes are refused.
+
 See [examples/rowbit.yml](examples/rowbit.yml) and the [rowbit.yml spec](docs/spec/policy.md) for the full schema.
 
 ## Why not just migrations?
