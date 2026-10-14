@@ -20,13 +20,13 @@ GRANT PROCESS ON *.* TO 'rowbit'@'10.0.0.%';
 | `PROCESS` | global only | Tables that another table references with a cascading foreign key are refused in v0.1, for the same reason as triggers. The referencing table may be one Rowbit's user can't see, so Rowbit reads InnoDB's own list of every foreign key (`information_schema.INNODB_FOREIGN` on MySQL, `INNODB_SYS_FOREIGN` on MariaDB), which needs `PROCESS`. It can't be granted per database. Without it, every `UPDATE` and `DELETE` is refused. |
 | `INSERT`, `UPDATE`, `DELETE` | per database | Apply and undo write rows by primary key. Preview doesn't need them. |
 
-Without any of the first four, the preview fails and the change is blocked, with a reason naming the missing privilege or the server's access error. Rowbit never falls back to a preview it can't stand behind.
+Without any of the first four, the preview fails and the change is blocked. Rowbit never falls back to a preview it can't stand behind.
 
 What these grants also allow, so you can weigh them:
 
 - `PROCESS` lets the user see every session's running statement (`SHOW PROCESSLIST`) and InnoDB's status, across the whole server.
 - `TRIGGER` lets the user create and drop triggers. Rowbit never does.
-- Previews run with Rowbit's privileges, so reviewers can see values from any table Rowbit's user can read. Agents never see preview values. Don't grant `SELECT` on tables nobody reviewing changes should see.
+- Previews run with Rowbit's privileges, so reviewers can see values from any table Rowbit's user can read. Agents never see preview values, though a statement can still learn about tables Rowbit can read through how many rows it matches. Scope Rowbit's `SELECT` grants to the tables agents need; per-agent grants arrive in v0.2.
 
 Don't grant anything else: no `ALL`, no `GRANT OPTION`, nothing on `mysql.*`. Approved DDL is run as the reviewed statement by Rowbit's user, so it fails without `CREATE`, `ALTER`, `DROP` or `INDEX`. Leaving those out is a reasonable choice if schema changes go through your migration tool.
 
