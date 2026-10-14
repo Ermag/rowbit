@@ -10,7 +10,7 @@
 
 # Rowbit
 
-Your AI agent gets a vague task and writes `UPDATE billing.refunds SET status = 'refunded'` with no `WHERE`. Rowbit catches it before it touches a row, shows a person exactly which 1,284 rows would change, and waits. If something bad does get through, you undo that one change without restoring a backup.
+You ask a coding agent to fix the orders stuck in pending, and it writes `UPDATE shop.orders SET status = 'cancelled' WHERE status = 'pending'`. That also matches every order placed in the last hour. Rowbit catches it before it touches a row, shows a person exactly which 1,284 rows would change, and waits. If something bad does get through, you undo that one change without restoring a backup.
 
 **Status:** early and open source. Nothing is released yet. The [interactive demo](https://ermag.github.io/rowbit/) shows the idea on simulated data, and what we build first depends on what you tell us in the [feedback discussion](https://github.com/Ermag/rowbit/discussions/2).
 
@@ -28,37 +28,39 @@ Rowbit sits between your agents and your database. Agents talk to Rowbit, never 
 # rowbit.yml
 version: 0
 agents:
-  refund-bot:
-    default: block
+  coding-agent:
+    default: hold
     rules:
-      - name: small-refund-batches
-        when: { statement: update, table: billing.refunds, rows: { max: 50 } }
+      - name: small-order-fixes
+        when: { statement: update, table: shop.orders, columns: status, rows: { max: 20 } }
         then: allow
-      - name: refunds-need-a-person
-        when: { table: billing.refunds }
-        then: hold
-        reason: Large refund batches are reviewed by billing.
+      - name: no-deletes
+        when: { statement: delete }
+        then: block
+        reason: Data fixes don't delete rows.
 ```
+
+Here the agent can change the `status` of up to 20 orders on its own. An update that writes any other column, or more rows, waits for a person, and deletes are refused.
 
 See [examples/rowbit.yml](examples/rowbit.yml) and the [rowbit.yml spec](docs/spec/policy.md) for the full schema.
 
 ## Why not just migrations?
 
-Having an agent write a migration file that goes through code review and CI is the right answer for a coding agent changing your schema, and Rowbit doesn't compete there: it holds every schema change for a person and leaves the real workflow to your migration tool. It doesn't work for agents that change data while your product runs:
+Having an agent write a migration file that goes through code review and CI is the right answer for a coding agent changing your schema, and Rowbit doesn't compete there: it holds every schema change for a person and leaves the real workflow to your migration tool. It works badly for fixing data:
 
-- **They can't wait for a pull request.** A support agent refunding an order at 3am needs an answer in seconds, and nobody reviews 500 pull requests a day.
-- **A reviewed diff shows SQL, not rows.** `UPDATE refunds SET status = 'refunded' WHERE customer_id = 4812` looks fine in review. What it touches depends on the data when it runs. Rowbit shows the exact rows when the decision is made, and refuses to apply if they changed since.
+- **A reviewed diff shows SQL, not rows.** `UPDATE orders SET status = 'cancelled' WHERE status = 'pending'` looks fine in review. What it touches depends on the data when it runs. Rowbit shows the exact rows when the decision is made, and refuses to apply if they changed since.
+- **A one-off fix can't wait for a pull request.** Repairing a few broken rows during an incident needs an answer in minutes, and nobody writes and reviews a migration for every one.
 - **Not every write needs a person.** Rules let small, safe writes straight through and hold only the risky ones, so reviewers aren't trained to rubber-stamp.
 - **Undo is per change.** Down-migrations for data are usually missing or lossy. Rowbit keeps the before image of every row a change touched.
 
-The well-known incidents of coding agents wiping production databases are a credentials problem as much as anything: take the credentials away and have the agent write migrations. Rowbit is for the agents that need to write.
+The well-known incidents of coding agents wiping production databases are a credentials problem as much as anything: take the credentials away and have the agent write migrations. Rowbit is for the agents that need to write. And if an agent does the same thing over and over, like issuing refunds, give it a tool that does just that instead of SQL.
 
 ## Good to know
 
-- **Only Rowbit holds the database credentials.** If an agent also has its own connection string, it can write around Rowbit. Give agents Rowbit's endpoint and nothing else.
+- **Only Rowbit holds the database credentials.** If an agent also has its own connection string, it can write around Rowbit. Give agents Rowbit's endpoint and nothing else, and Rowbit [a database user of its own](docs/privileges.md).
 - **Undo restores rows, not the world.** It puts the data back, but it can't take back an email that was sent or a refund that was paid because of it.
-- **Preview never writes to your tables.** It reads the affected rows without taking locks and replays the write on a temporary copy that only Rowbit's connection can see. Tables with triggers or cascading foreign keys are blocked in v0.1, because their side effects wouldn't show in the preview or be undone. So are tables Rowbit's database user can't fully inspect: it needs the `TRIGGER` and `PROCESS` privileges (see the [spec](docs/spec/change-lifecycle.md#preview)).
-- **Where data lives.** Change state, previews (including before and after copies of affected rows) and the audit log are stored in a local SQLite file next to Rowbit. Treat it as sensitive as the database itself.
+- **Preview never writes to your tables.** It reads the affected rows without taking locks and replays the write on a temporary copy that only Rowbit's connection can see. Tables with triggers or cascading foreign keys are blocked in v0.1, because their side effects wouldn't show in the preview or be undone. So are tables Rowbit's database user can't fully inspect: it needs the `TRIGGER` and `PROCESS` privileges. See [database privileges](docs/privileges.md) for the exact grants.
+- **Where data lives.** Change state, previews (including before and after copies of affected rows) and the audit log are stored in a local SQLite file next to Rowbit. Protect it like a replica of the database ([how](docs/privileges.md#the-sqlite-file)).
 - **Fail closed.** Anything Rowbit can't evaluate, it refuses. See the [change lifecycle](docs/spec/change-lifecycle.md) and [SECURITY.md](SECURITY.md).
 
 ## Plan
