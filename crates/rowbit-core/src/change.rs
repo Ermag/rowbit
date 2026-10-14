@@ -166,7 +166,7 @@ pub fn transition(
         (S::Proposed, E::PolicyHeld { .. }) => S::Held,
         (S::Proposed, E::PolicyBlocked { .. }) => S::Rejected,
         (S::Held, E::Approve) => S::Approved,
-        (S::Held | S::Approved, E::Reject { .. }) => S::Rejected,
+        (S::Held, E::Reject { .. }) => S::Rejected,
         (S::Proposed | S::Held, E::Withdraw) => S::Rejected,
         (S::Held, E::Expire) => S::Rejected,
         (S::Approved, E::ApplySucceeded) => S::Applied,
@@ -344,6 +344,13 @@ mod tests {
         assert_eq!(agent().to_string(), "agent:refund-bot");
         assert_eq!(policy().to_string(), "policy:small-refunds");
         assert_eq!(Actor::System.to_string(), "system");
+    }
+
+    #[test]
+    fn an_approved_change_cannot_be_rejected() {
+        // It is being applied; a reject would race the write.
+        let reject = Event::Reject { reason: "x".into() };
+        assert!(step(State::Approved, reject, human()).is_err());
     }
 
     #[test]

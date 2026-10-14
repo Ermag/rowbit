@@ -127,6 +127,29 @@ impl Preview {
     }
 }
 
+/// What apply wrote: the primary key of each previewed row, in preview
+/// order, including keys the server assigned to inserted rows. Undo finds
+/// the rows by these keys.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Applied {
+    pub keys: Vec<AppliedKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppliedKey {
+    #[serde(with = "hex_cells")]
+    pub key: Option<Vec<Cell>>,
+}
+
+impl Applied {
+    /// The stored form, and the bytes the `ApplySucceeded` event's hash covers.
+    pub fn to_canonical_json(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("an apply record always serializes")
+    }
+}
+
 /// Serializes cells as hex strings (`null` for SQL `NULL`).
 mod hex_cells {
     use serde::de::Error;

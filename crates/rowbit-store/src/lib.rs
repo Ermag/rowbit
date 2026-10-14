@@ -11,7 +11,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rowbit_core::change::{self, Actor, Event, State, TransitionError};
-use rowbit_core::preview::Preview;
+use rowbit_core::preview::{Applied, Preview};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -60,6 +60,8 @@ pub enum StoreError {
     ReviewMismatch,
     #[error("change {0} can only get a review while proposed")]
     NotProposed(ChangeId),
+    #[error("ApplySucceeded is recorded with what was applied, through record_applied")]
+    ApplyNeedsRecord,
     #[error("stored data is corrupt: {0}")]
     Corrupt(String),
     #[error("SQLite: {0}")]
@@ -81,6 +83,8 @@ pub enum Tampered {
     StateModified(ChangeId),
     #[error("the agent, database or statement of change {0} does not match its proposal")]
     ProposalModified(ChangeId),
+    #[error("the apply record of change {0} does not match its ApplySucceeded event")]
+    ApplyRecordModified(ChangeId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,6 +98,9 @@ pub struct Change {
     pub review: Option<Review>,
     /// Hex SHA-256 of the review's canonical JSON.
     pub review_hash: Option<String>,
+    /// What apply wrote, once applied. Its hash is the `ApplySucceeded`
+    /// event's detail.
+    pub applied: Option<Applied>,
     pub created_at_ms: i64,
 }
 
@@ -155,6 +162,7 @@ impl Store {
                  state TEXT NOT NULL,
                  review BLOB,
                  review_hash TEXT,
+                 applied BLOB,
                  created_at_ms INTEGER NOT NULL
              );
              CREATE TABLE IF NOT EXISTS events (
@@ -254,6 +262,32 @@ impl Store {
         actor: &Actor,
         reviewed: Option<&str>,
     ) -> Result<State, StoreError> {
+        if matches!(event, Event::ApplySucceeded) {
+            return Err(StoreError::ApplyNeedsRecord);
+        }
+        self.transition_with(id, event, actor, reviewed, None)
+    }
+
+    /// Records a successful apply (`ApplySucceeded`, by the system) together
+    /// with what was written. The event's detail is the record's hash.
+    pub fn record_applied(&mut self, id: ChangeId, applied: &Applied) -> Result<State, StoreError> {
+        self.transition_with(
+            id,
+            &Event::ApplySucceeded,
+            &Actor::System,
+            None,
+            Some(applied.to_canonical_json()),
+        )
+    }
+
+    fn transition_with(
+        &mut self,
+        id: ChangeId,
+        event: &Event,
+        actor: &Actor,
+        reviewed: Option<&str>,
+        applied: Option<Vec<u8>>,
+    ) -> Result<State, StoreError> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -284,13 +318,20 @@ impl Store {
             "UPDATE changes SET state = ?1 WHERE id = ?2",
             params![to.as_str(), id],
         )?;
+        let applied_hash = applied.as_ref().map(|json| hex(&Sha256::digest(json)));
+        if let Some(json) = &applied {
+            tx.execute(
+                "UPDATE changes SET applied = ?1 WHERE id = ?2",
+                params![json, id],
+            )?;
+        }
         append(
             &tx,
             id,
             Some(from),
             to,
             event.name(),
-            event.reason(),
+            applied_hash.as_deref().or(event.reason()),
             &actor.to_string(),
             if decides_on_review {
                 review_hash.as_deref()
@@ -342,7 +383,8 @@ impl Store {
         let row = self
             .conn
             .query_row(
-                "SELECT agent, database_name, sql, state, review, review_hash, created_at_ms
+                "SELECT agent, database_name, sql, state, review, review_hash, created_at_ms,
+                        applied
                  FROM changes WHERE id = ?1",
                 [id],
                 |r| {
@@ -354,12 +396,19 @@ impl Store {
                         r.get::<_, Option<Vec<u8>>>(4)?,
                         r.get::<_, Option<String>>(5)?,
                         r.get::<_, i64>(6)?,
+                        r.get::<_, Option<Vec<u8>>>(7)?,
                     ))
                 },
             )
             .optional()?
             .ok_or(StoreError::NotFound(id))?;
-        let (agent, database, sql, state, review, review_hash, created_at_ms) = row;
+        let (agent, database, sql, state, review, review_hash, created_at_ms, applied) = row;
+        let applied = applied
+            .map(|json| {
+                serde_json::from_slice(&json)
+                    .map_err(|e| StoreError::Corrupt(format!("apply record of change {id}: {e}")))
+            })
+            .transpose()?;
         let review = review
             .map(|json| {
                 serde_json::from_slice(&json)
@@ -374,6 +423,7 @@ impl Store {
             state: parse_state(&state)?,
             review,
             review_hash,
+            applied,
             created_at_ms,
         })
     }
@@ -413,7 +463,7 @@ impl Store {
         }
 
         let mut stmt = self.conn.prepare(
-            "SELECT id, agent, database_name, sql, state, review, review_hash
+            "SELECT id, agent, database_name, sql, state, review, review_hash, applied
              FROM changes ORDER BY id",
         )?;
         let changes = stmt
@@ -426,6 +476,7 @@ impl Store {
                     r.get::<_, String>(4)?,
                     r.get::<_, Option<Vec<u8>>>(5)?,
                     r.get::<_, Option<String>>(6)?,
+                    r.get::<_, Option<Vec<u8>>>(7)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -435,7 +486,7 @@ impl Store {
         {
             return Ok(Err(Tampered::OrphanEvent { seq: e.seq }));
         }
-        for (id, agent, database, sql, state, review, hash) in changes {
+        for (id, agent, database, sql, state, review, hash, applied) in changes {
             let mine: Vec<&AuditEvent> = events.iter().filter(|e| e.change_id == id).collect();
 
             let proposal = mine
@@ -462,6 +513,20 @@ impl Store {
                 .any(|e| e.review_hash.is_some() && e.review_hash != hash);
             if actual != hash || decided_on_other {
                 return Ok(Err(Tampered::ReviewModified(id)));
+            }
+
+            let applied_hash = applied.map(|a| hex(&Sha256::digest(&a)));
+            let logged = mine
+                .iter()
+                .find(|e| e.event == "ApplySucceeded")
+                .map(|e| e.detail.clone());
+            let applied_matches = match (&applied_hash, logged) {
+                (None, None) => true,
+                (Some(h), Some(Some(d))) => h == &d,
+                _ => false,
+            };
+            if !applied_matches {
+                return Ok(Err(Tampered::ApplyRecordModified(id)));
             }
 
             if mine.last().map(|e| e.to.as_str()) != Some(state.as_str()) {

@@ -568,7 +568,7 @@ fn cells(row: Row) -> Result<Vec<Cell>, PreviewError> {
         .collect()
 }
 
-fn to_value(cell: &Cell) -> Value {
+pub(crate) fn to_value(cell: &Cell) -> Value {
     match cell {
         None => Value::NULL,
         Some(b) => Value::Bytes(b.clone()),
@@ -576,6 +576,6 @@ fn to_value(cell: &Cell) -> Value {
 }
 
 /// Backquotes an identifier for MySQL.
-fn quote(id: &str) -> String {
+pub(crate) fn quote(id: &str) -> String {
     format!("`{}`", id.replace('`', "``"))
 }

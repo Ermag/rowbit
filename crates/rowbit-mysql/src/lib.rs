@@ -1,14 +1,16 @@
 //! Rowbit adapter for MariaDB and MySQL. Both speak the same wire protocol,
 //! so one adapter serves both and tells them apart by the server version.
 
+mod apply;
 mod preview;
 pub mod statement;
 
+pub use apply::ApplyError;
 pub use preview::{PreviewError, PreviewLimits, db_error_code};
 
 use mysql_async::prelude::Queryable;
 use rowbit_core::adapter::{Adapter, Engine, ServerInfo};
-use rowbit_core::preview::Preview;
+use rowbit_core::preview::{Applied, Preview};
 
 use crate::statement::Classified;
 
@@ -38,6 +40,34 @@ impl MySqlAdapter {
         limits: PreviewLimits,
     ) -> Result<Preview, PreviewError> {
         preview::preview(&self.opts, database, statement, limits).await
+    }
+
+    /// Writes an approved preview by primary key, after checking that the
+    /// rows still match it. `statement` is the classified statement the
+    /// preview came from. Writes nothing unless every check passes.
+    pub async fn apply(
+        &self,
+        database: &str,
+        statement: &Classified,
+        preview: &Preview,
+    ) -> Result<Applied, ApplyError> {
+        apply::apply(&self.opts, database, statement, preview).await
+    }
+
+    /// Restores the before images of an applied preview, if every row still
+    /// holds what apply wrote.
+    pub async fn undo(
+        &self,
+        database: &str,
+        preview: &Preview,
+        applied: &Applied,
+    ) -> Result<(), ApplyError> {
+        apply::undo(&self.opts, database, preview, applied).await
+    }
+
+    /// Runs an approved DDL statement as reviewed.
+    pub async fn run_ddl(&self, database: &str, sql: &str) -> Result<(), ApplyError> {
+        apply::run_ddl(&self.opts, database, sql).await
     }
 
     /// Closes every pooled connection.
