@@ -5,12 +5,18 @@
 //! kept exactly as the server sent them over its text protocol, and after
 //! images are what the table would store, not what an expression evaluated
 //! to.
+//!
+//! [`Preview::to_canonical_json`] is the stored form and the input to the
+//! preview hash. Cells are hex strings in it, so binary values survive.
+
+use serde::{Deserialize, Serialize};
 
 /// One column value: `None` is SQL `NULL`, otherwise the server's text
 /// rendering of the value (raw bytes for binary columns).
 pub type Cell = Option<Vec<u8>>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum WriteKind {
     Insert,
     Update,
@@ -18,7 +24,8 @@ pub enum WriteKind {
 }
 
 /// The table a write targets, as the server describes it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Table {
     pub database: String,
     pub name: String,
@@ -28,7 +35,8 @@ pub struct Table {
     pub primary_key: Vec<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Column {
     pub name: String,
     /// The server's full type, e.g. `decimal(10,2)` or `enum('a','b')`.
@@ -50,7 +58,8 @@ impl Table {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Preview {
     pub kind: WriteKind,
     pub table: Table,
@@ -68,16 +77,30 @@ pub struct Preview {
 
 /// One row the write would change. Both images cover every column, in
 /// table order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RowChange {
     /// `None` for an insert.
+    #[serde(with = "hex_cells")]
     pub before: Option<Vec<Cell>>,
     /// `None` for a delete. For an insert whose key the server assigns,
     /// the key's cell is `None`.
+    #[serde(with = "hex_cells")]
     pub after: Option<Vec<Cell>>,
 }
 
 impl Preview {
+    /// The stored form of a preview, and the bytes its hash covers. Field
+    /// order is fixed by the struct definitions, so equal previews always
+    /// give equal bytes.
+    pub fn to_canonical_json(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("a preview always serializes")
+    }
+
+    pub fn from_canonical_json(bytes: &[u8]) -> Result<Preview, serde_json::Error> {
+        serde_json::from_slice(bytes)
+    }
+
     /// The row's primary key, or `None` for an inserted row whose key the
     /// server assigns (`AUTO_INCREMENT`).
     pub fn key(&self, row: &RowChange) -> Option<Vec<Cell>> {
@@ -100,6 +123,51 @@ impl Preview {
             .primary_key
             .iter()
             .map(|&i| image[i].clone())
+            .collect()
+    }
+}
+
+/// Serializes cells as hex strings (`null` for SQL `NULL`).
+mod hex_cells {
+    use serde::de::Error;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::Cell;
+
+    pub fn serialize<S: Serializer>(image: &Option<Vec<Cell>>, s: S) -> Result<S::Ok, S::Error> {
+        let hex: Option<Vec<Option<String>>> = image.as_ref().map(|cells| {
+            cells
+                .iter()
+                .map(|c| {
+                    c.as_ref()
+                        .map(|b| b.iter().map(|x| format!("{x:02x}")).collect())
+                })
+                .collect()
+        });
+        hex.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<Cell>>, D::Error> {
+        let hex: Option<Vec<Option<String>>> = Deserialize::deserialize(d)?;
+        hex.map(|cells| {
+            cells
+                .into_iter()
+                .map(|c| {
+                    c.map(|h| decode(&h).ok_or_else(|| D::Error::custom("bad hex cell")))
+                        .transpose()
+                })
+                .collect()
+        })
+        .transpose()
+    }
+
+    fn decode(h: &str) -> Option<Vec<u8>> {
+        if h.len() % 2 != 0 {
+            return None;
+        }
+        (0..h.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(h.get(i..i + 2)?, 16).ok())
             .collect()
     }
 }
@@ -149,6 +217,27 @@ mod tests {
         };
         assert_eq!(p.key(&row), Some(vec![cell("7")]));
         assert_eq!(p.table.qualified_name(), "billing.refunds");
+    }
+
+    #[test]
+    fn canonical_json_round_trips_binary_and_null() {
+        let mut p = preview(WriteKind::Update, vec![1]);
+        p.rows.push(RowChange {
+            before: Some(vec![cell("7"), Some(vec![0, 255, b'"']), None]),
+            after: Some(vec![cell("7"), None, None]),
+        });
+        let json = p.to_canonical_json();
+        let text = String::from_utf8(json.clone()).unwrap();
+        assert!(
+            text.contains(r#""rows":[{"before":["37","00ff22",null],"after":["37",null,null]}]"#),
+            "{text}"
+        );
+        assert!(
+            text.starts_with(r#"{"kind":"update","table":{"database":"billing""#),
+            "{text}"
+        );
+        assert_eq!(Preview::from_canonical_json(&json).unwrap(), p);
+        assert!(Preview::from_canonical_json(br#"{"kind":"update"}"#).is_err());
     }
 
     #[test]

@@ -154,7 +154,13 @@ In one transaction: lock the rows by primary key and check each still equals its
 
 ## Audit log
 
-Every transition appends one event: change id, from, to, event, actor, time, and the hash of the previous event (a hash chain, so edits to history are detectable). The preview hash is part of the `PolicyAllowed`, `PolicyHeld` and `Approve` events, so the log shows exactly what was approved.
+Every transition appends one event: sequence number, change id, from, to, event, detail (the reason, if the event has one), actor, time, and the hash of the previous event. The event's own hash is SHA-256 over all of that, so the events form a chain and editing or deleting one breaks it. Proposing a change appends a first `Proposed` event whose detail records the target database and the statement exactly as the agent sent it.
+
+The state change and its event are written in one SQLite transaction, so the state and the log can never disagree. The SQLite file is shared by the server and the CLI; each waits up to five seconds for the other's write.
+
+What a person reviews is stored once, as canonical JSON, and never replaced: the preview for an `INSERT`, `UPDATE` or `DELETE`, and for DDL the statement as Rowbit will run it. Its hash (SHA-256 of that JSON) is part of the `PolicyAllowed`, `PolicyHeld` and `Approve` events, so the log shows exactly what was approved. `Approve` must carry the hash the person reviewed, and is refused if it differs from the stored one. `PolicyAllowed` and `PolicyHeld` are refused for a change with nothing to review.
+
+Verifying the log checks every event's hash and link, that every event belongs to a change, every stored review against its hash and against the hashes its events name, every change's agent, database and statement against its `Proposed` event, and every change's state against its last event. A chain kept in the same file cannot show that its newest events were cut off along with the matching states; that needs the latest hash kept somewhere outside Rowbit, which v0.1 does not do.
 
 ## Not in v0.1
 
