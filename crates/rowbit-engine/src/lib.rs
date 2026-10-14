@@ -10,17 +10,27 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use rowbit_core::change::{Actor, Event, State};
-use rowbit_core::preview::{Preview, WriteKind};
+use rowbit_core::preview::{Applied, Preview, WriteKind};
 use rowbit_mysql::statement::{Classified, Kind, classify};
 use rowbit_mysql::{MySqlAdapter, PreviewLimits};
 use rowbit_policy::{ChangeFacts, Decision, PolicyFile, StatementKind, Verdict, evaluate};
-use rowbit_store::{AuditEvent, ChangeId, Review, Store, StoreError};
+use rowbit_store::{AuditEvent, Change, ChangeId, Review, Store, StoreError};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum EngineError {
     #[error("change {0} not found")]
     NotFound(ChangeId),
+    #[error("change {id} is {state}, so it cannot be {action}")]
+    WrongState {
+        id: ChangeId,
+        state: &'static str,
+        action: &'static str,
+    },
+    /// Undo would overwrite a later change, or cannot run. Nothing was
+    /// written and the change stays applied.
+    #[error("undo refused: {0}")]
+    UndoRefused(String),
     #[error(transparent)]
     Store(#[from] StoreError),
 }
@@ -133,7 +143,132 @@ impl Engine {
             store.set_review(id, &review)?;
             store.transition(id, &event, &actor, None)?;
         }
+        if decision == Decision::Allow {
+            self.apply(id).await?;
+        }
         self.status(agent, id)
+    }
+
+    /// A person approves a held change, naming the review hash they saw,
+    /// and Rowbit applies it.
+    pub async fn approve(
+        &self,
+        person: &str,
+        id: ChangeId,
+        reviewed: &str,
+    ) -> Result<Change, EngineError> {
+        self.store().transition(
+            id,
+            &Event::Approve,
+            &Actor::Human(person.to_owned()),
+            Some(reviewed),
+        )?;
+        self.apply(id).await?;
+        self.change(id)
+    }
+
+    /// A person rejects a held or approved change.
+    pub fn reject(&self, person: &str, id: ChangeId, reason: &str) -> Result<Change, EngineError> {
+        self.store().transition(
+            id,
+            &Event::Reject {
+                reason: reason.to_owned(),
+            },
+            &Actor::Human(person.to_owned()),
+            None,
+        )?;
+        self.change(id)
+    }
+
+    /// A person undoes an applied change. If any row changed since apply,
+    /// nothing is written, the refusal is logged, and the change stays
+    /// applied.
+    pub async fn undo(&self, person: &str, id: ChangeId) -> Result<Change, EngineError> {
+        let change = self.change(id)?;
+        if change.state != State::Applied {
+            return Err(EngineError::WrongState {
+                id,
+                state: change.state.as_str(),
+                action: "undone",
+            });
+        }
+        let refused = match (&change.review, &change.applied) {
+            (Some(Review::Rows(preview)), Some(applied)) => self
+                .adapter
+                .undo(&change.database, preview, applied)
+                .await
+                .err()
+                .map(|e| e.to_string()),
+            (Some(Review::Ddl { .. }), _) => Some("schema changes cannot be undone".to_owned()),
+            _ => Some("nothing was recorded to undo".to_owned()),
+        };
+        if let Some(reason) = refused {
+            self.store().log_refusal(
+                id,
+                &Actor::Human(person.to_owned()),
+                "UndoRefused",
+                &reason,
+            )?;
+            return Err(EngineError::UndoRefused(reason));
+        }
+        self.store()
+            .transition(id, &Event::UndoSucceeded, &Actor::System, None)?;
+        self.change(id)
+    }
+
+    /// Everything about a change, row values included. For people only:
+    /// never return this to an agent.
+    pub fn change(&self, id: ChangeId) -> Result<Change, EngineError> {
+        match self.store().get(id) {
+            Ok(change) => Ok(change),
+            Err(StoreError::NotFound(_)) => Err(EngineError::NotFound(id)),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Changes waiting for a person, oldest first.
+    pub fn held(&self) -> Result<Vec<ChangeId>, EngineError> {
+        Ok(self.store().list(State::Held)?)
+    }
+
+    /// Writes an approved change, and records `ApplySucceeded` with what
+    /// was written, or `ApplyFailed` with why nothing was.
+    async fn apply(&self, id: ChangeId) -> Result<(), EngineError> {
+        let change = self.change(id)?;
+        if change.state != State::Approved {
+            return Err(EngineError::WrongState {
+                id,
+                state: change.state.as_str(),
+                action: "applied",
+            });
+        }
+        let result = match &change.review {
+            Some(Review::Rows(preview)) => match classify(&change.sql) {
+                Ok(statement) => self
+                    .adapter
+                    .apply(&change.database, &statement, preview)
+                    .await
+                    .map_err(|e| e.to_string()),
+                Err(refusal) => Err(refusal.to_string()),
+            },
+            Some(Review::Ddl { sql }) => self
+                .adapter
+                .run_ddl(&change.database, sql)
+                .await
+                .map(|()| Applied { keys: Vec::new() })
+                .map_err(|e| e.to_string()),
+            None => Err("nothing was reviewed".to_owned()),
+        };
+        let mut store = self.store();
+        match result {
+            Ok(applied) => {
+                store.record_applied(id, &applied)?;
+            }
+            Err(reason) => {
+                store.transition(id, &Event::ApplyFailed { reason }, &Actor::System, None)?;
+            }
+        }
+        Ok(())
     }
 
     /// The status of one of `agent`'s own changes. Other agents' changes

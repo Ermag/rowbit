@@ -7,7 +7,7 @@ use rowbit_core::change::State;
 use rowbit_engine::{ChangeStatus, Engine};
 use rowbit_mysql::MySqlAdapter;
 use rowbit_policy::PolicyFile;
-use rowbit_store::Store;
+use rowbit_store::{Review, Store};
 
 const POLICY: &str = r#"
 version: 0
@@ -104,7 +104,8 @@ async fn small_batch_is_approved_large_one_is_held(var: &str, table: &str) {
         &format!("UPDATE {t} SET status = 'refunded' WHERE id IN (1, 2)"),
     )
     .await;
-    assert_eq!(s.state, State::Approved, "{s:?}");
+    // Allowed by policy, so applied straight away.
+    assert_eq!(s.state, State::Applied, "{s:?}");
     assert_eq!(s.rows, Some(2));
     assert_eq!(
         s.table.as_deref(),
@@ -115,11 +116,11 @@ async fn small_batch_is_approved_large_one_is_held(var: &str, table: &str) {
     let s = propose(
         &engine,
         "refund-bot",
-        &format!("UPDATE {t} SET status = 'refunded' WHERE status = 'approved'"),
+        &format!("UPDATE {t} SET status = 'refunded' WHERE status <> 'paid'"),
     )
     .await;
     assert_eq!(s.state, State::Held, "{s:?}");
-    assert_eq!(s.rows, Some(3));
+    assert_eq!(s.rows, Some(4));
     assert_eq!(
         s.reason.as_deref(),
         Some("Large or unusual refund batches are reviewed by billing.")
@@ -261,4 +262,82 @@ async fn agents_see_only_their_own_changes(var: &str, table: &str) {
     assert_eq!(engine.status("refund-bot", s.id).unwrap(), s);
     assert!(engine.status("support-bot", s.id).is_err());
     assert!(engine.status("refund-bot", 999).is_err());
+}
+
+// The demo's story: a large batch is held, a person approves exactly what
+// they saw, it applies, and one undo puts every row back.
+on_both!(held_change_is_approved_applied_and_undone);
+async fn held_change_is_approved_applied_and_undone(var: &str, table: &str) {
+    let Some((engine, t)) = setup(var, &format!("{table}_h")).await else {
+        return;
+    };
+    let s = propose(
+        &engine,
+        "refund-bot",
+        &format!("UPDATE {t} SET status = 'refunded' WHERE status = 'approved'"),
+    )
+    .await;
+    assert_eq!(s.state, State::Held);
+    assert_eq!(engine.held().unwrap(), [s.id]);
+
+    let change = engine.change(s.id).unwrap();
+    let Some(Review::Rows(preview)) = &change.review else {
+        panic!("{change:?}")
+    };
+    assert_eq!(preview.rows.len(), 3);
+    let hash = change.review_hash.clone().unwrap();
+
+    assert!(
+        engine
+            .approve("philip", s.id, &"0".repeat(64))
+            .await
+            .is_err()
+    );
+    let change = engine.approve("philip", s.id, &hash).await.unwrap();
+    assert_eq!(change.state, State::Applied);
+
+    let change = engine.undo("philip", s.id).await.unwrap();
+    assert_eq!(change.state, State::Undone);
+    assert!(engine.undo("philip", s.id).await.is_err());
+}
+
+on_both!(rejected_and_drifted_changes_write_nothing);
+async fn rejected_and_drifted_changes_write_nothing(var: &str, table: &str) {
+    let Some((engine, t)) = setup(var, &format!("{table}_r")).await else {
+        return;
+    };
+    let sql = format!("UPDATE {t} SET status = 'refunded' WHERE status = 'approved'");
+    let s = propose(&engine, "refund-bot", &sql).await;
+    let change = engine.reject("philip", s.id, "not today").unwrap();
+    assert_eq!(change.state, State::Rejected);
+    assert_eq!(
+        engine.status("refund-bot", s.id).unwrap().reason.as_deref(),
+        Some("not today")
+    );
+
+    // Held, then a row changes before the approval: apply fails, nothing written.
+    let s = propose(&engine, "refund-bot", &sql).await;
+    let hash = engine.change(s.id).unwrap().review_hash.unwrap();
+    let url = std::env::var(var).unwrap();
+    let mut conn = mysql_async::Conn::from_url(&url).await.unwrap();
+    conn.query_drop(format!("UPDATE {t} SET amount = 1 WHERE id = 1"))
+        .await
+        .unwrap();
+    let change = engine.approve("philip", s.id, &hash).await.unwrap();
+    assert_eq!(change.state, State::Failed);
+    let status = engine.status("refund-bot", s.id).unwrap();
+    assert!(
+        status
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("drift"),
+        "{status:?}"
+    );
+    let refunded: Vec<u32> = conn
+        .query(format!("SELECT id FROM {t} WHERE status = 'refunded'"))
+        .await
+        .unwrap();
+    assert_eq!(refunded, [4]);
+    conn.disconnect().await.unwrap();
 }

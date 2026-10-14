@@ -1,4 +1,4 @@
-use rowbit_core::preview::{Column, RowChange, Table, WriteKind};
+use rowbit_core::preview::{AppliedKey, Column, RowChange, Table, WriteKind};
 
 use super::*;
 
@@ -67,15 +67,23 @@ fn held_change_is_approved_applied_and_undone() {
     store
         .transition(id, &Event::Approve, &human(), Some(&hash))
         .unwrap();
-    store
-        .transition(id, &Event::ApplySucceeded, &Actor::System, None)
-        .unwrap();
+    assert!(matches!(
+        store.transition(id, &Event::ApplySucceeded, &Actor::System, None),
+        Err(StoreError::ApplyNeedsRecord)
+    ));
+    let applied = Applied {
+        keys: vec![AppliedKey {
+            key: Some(vec![Some(b"7".to_vec())]),
+        }],
+    };
+    store.record_applied(id, &applied).unwrap();
     store
         .transition(id, &Event::UndoSucceeded, &Actor::System, None)
         .unwrap();
 
     let change = store.get(id).unwrap();
     assert_eq!(change.state, State::Undone);
+    assert_eq!(change.applied, Some(applied.clone()));
     assert_eq!(change.review, Some(preview("refunded")));
     assert_eq!(change.agent, "refund-bot");
 
@@ -347,4 +355,48 @@ fn a_second_connection_waits_instead_of_failing() {
     assert!(writer.join().unwrap().is_ok());
     drop(a);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn apply_record_is_chained_and_refusals_are_logged() {
+    let mut store = Store::open_in_memory().unwrap();
+    let (id, hash) = previewed(&mut store);
+    store.transition(id, &held(), &policy(), None).unwrap();
+    store
+        .transition(id, &Event::Approve, &human(), Some(&hash))
+        .unwrap();
+    let applied = Applied {
+        keys: vec![AppliedKey {
+            key: Some(vec![Some(b"7".to_vec())]),
+        }],
+    };
+    store.record_applied(id, &applied).unwrap();
+    store
+        .log_refusal(id, &human(), "UndoRefused", "row 7 changed since apply")
+        .unwrap();
+    let log = store.events(id).unwrap();
+    let last = log.last().unwrap();
+    assert_eq!(
+        (last.event.as_str(), last.from.as_deref(), last.to.as_str()),
+        ("UndoRefused", Some("applied"), "applied")
+    );
+    assert_eq!(store.get(id).unwrap().state, State::Applied);
+    assert_eq!(store.verify().unwrap(), Ok(()));
+
+    let other = Applied {
+        keys: vec![AppliedKey {
+            key: Some(vec![Some(b"8".to_vec())]),
+        }],
+    };
+    store
+        .conn
+        .execute(
+            "UPDATE changes SET applied = ?1",
+            params![other.to_canonical_json()],
+        )
+        .unwrap();
+    assert_eq!(
+        store.verify().unwrap(),
+        Err(Tampered::ApplyRecordModified(id))
+    );
 }
