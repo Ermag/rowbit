@@ -270,7 +270,7 @@ impl Store {
 
         let decides_on_review = matches!(
             event,
-            Event::PolicyAllowed | Event::PolicyHeld | Event::Approve
+            Event::PolicyAllowed | Event::PolicyHeld { .. } | Event::Approve
         );
         if decides_on_review && review_hash.is_none() {
             return Err(StoreError::NoReview(id));
@@ -301,6 +301,41 @@ impl Store {
         )?;
         tx.commit()?;
         Ok(to)
+    }
+
+    /// Logs something about a change without moving it: an event whose
+    /// from and to are the current state. For details people need that the
+    /// agent must not see, and for refused requests.
+    pub fn note(
+        &mut self,
+        id: ChangeId,
+        actor: &Actor,
+        event: &str,
+        detail: &str,
+    ) -> Result<(), StoreError> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let state: String = tx
+            .query_row("SELECT state FROM changes WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?
+            .ok_or(StoreError::NotFound(id))?;
+        let state = parse_state(&state)?;
+        append(
+            &tx,
+            id,
+            Some(state),
+            state,
+            event,
+            Some(detail),
+            &actor.to_string(),
+            None,
+            now_ms(),
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn get(&self, id: ChangeId) -> Result<Change, StoreError> {

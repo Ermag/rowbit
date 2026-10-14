@@ -22,6 +22,27 @@ pub enum PreviewError {
     Database(#[from] mysql_async::Error),
 }
 
+impl PreviewError {
+    /// What the agent may be told. Rowbit's own refusals carry no values;
+    /// a database error is reduced to its code, because server messages
+    /// quote values, from any table Rowbit's user can read.
+    pub fn agent_reason(&self) -> String {
+        match self {
+            PreviewError::Refused(reason) => reason.clone(),
+            PreviewError::Database(e) => format!("preview failed: {}", db_error_code(e)),
+        }
+    }
+}
+
+/// A database error without its message: `database error 1366`.
+pub fn db_error_code(e: &mysql_async::Error) -> String {
+    match e {
+        mysql_async::Error::Server(e) => format!("database error {}", e.code),
+        mysql_async::Error::Io(_) => "database unreachable".to_owned(),
+        _ => "database error".to_owned(),
+    }
+}
+
 fn refuse<T>(reason: impl Into<String>) -> Result<T, PreviewError> {
     Err(PreviewError::Refused(reason.into()))
 }
@@ -469,7 +490,9 @@ async fn refuse_side_effects(
         return Ok(());
     }
     // InnoDB's own foreign key list shows every foreign key, whatever the
-    // user may see of the referencing tables. It needs PROCESS.
+    // user may see of the referencing tables. It needs PROCESS. Compared
+    // without case: with lower_case_table_names=2 (macOS) InnoDB stores
+    // the names in lower case.
     let (foreign, columns) = if mariadb {
         ("INNODB_SYS_FOREIGN", "INNODB_SYS_FOREIGN_COLS")
     } else {
@@ -487,7 +510,7 @@ async fn refuse_side_effects(
                 "SELECT f.FOR_NAME, f.TYPE, c.REF_COL_NAME \
                  FROM information_schema.{foreign} f \
                  JOIN information_schema.{columns} c ON c.ID = f.ID \
-                 WHERE f.REF_NAME = ?"
+                 WHERE LOWER(f.REF_NAME) = LOWER(?)"
             ),
             (ref_name,),
         )
@@ -540,7 +563,7 @@ fn cells(row: Row) -> Result<Vec<Cell>, PreviewError> {
         .map(|v| match v {
             Value::NULL => Ok(None),
             Value::Bytes(b) => Ok(Some(b)),
-            other => refuse(format!("unexpected value {other:?} in preview")),
+            _ => refuse("unexpected value type in preview"),
         })
         .collect()
 }

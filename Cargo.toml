@@ -13,6 +13,7 @@ publish = false
 
 [workspace.dependencies]
 rowbit-core = { path = "crates/rowbit-core" }
+rowbit-engine = { path = "crates/rowbit-engine" }
 rowbit-policy = { path = "crates/rowbit-policy" }
 rowbit-mysql = { path = "crates/rowbit-mysql" }
 rowbit-store = { path = "crates/rowbit-store" }

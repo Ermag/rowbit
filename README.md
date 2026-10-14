@@ -18,7 +18,7 @@ Your AI agent gets a vague task and writes `UPDATE billing.refunds SET status = 
 
 Rowbit sits between your agents and your database. Agents talk to Rowbit, never to the database directly.
 
-- **Exact preview.** Each write runs once inside a transaction that is rolled back, so you see the real rows it would change.
+- **Exact preview.** Rowbit reads the rows a write would change and replays it on a private temporary copy, so you see each row before and after, exactly as the table would store it. Your tables are only read.
 - **Rules and humans.** A small YAML file decides whether a write is auto-approved, held for a person, or blocked. Agents can propose changes and check their status. Only people approve.
 - **Apply what you approved.** If the rows changed between preview and approval, nothing is written.
 - **Undo one change.** Before-images are kept per change, so you can roll back one bad write and keep everything else.
@@ -42,11 +42,22 @@ agents:
 
 See [examples/rowbit.yml](examples/rowbit.yml) and the [rowbit.yml spec](docs/spec/policy.md) for the full schema.
 
+## Why not just migrations?
+
+Having an agent write a migration file that goes through code review and CI is the right answer for a coding agent changing your schema, and Rowbit doesn't compete there: it holds every schema change for a person and leaves the real workflow to your migration tool. It doesn't work for agents that change data while your product runs:
+
+- **They can't wait for a pull request.** A support agent refunding an order at 3am needs an answer in seconds, and nobody reviews 500 pull requests a day.
+- **A reviewed diff shows SQL, not rows.** `UPDATE refunds SET status = 'refunded' WHERE customer_id = 4812` looks fine in review. What it touches depends on the data when it runs. Rowbit shows the exact rows when the decision is made, and refuses to apply if they changed since.
+- **Not every write needs a person.** Rules let small, safe writes straight through and hold only the risky ones, so reviewers aren't trained to rubber-stamp.
+- **Undo is per change.** Down-migrations for data are usually missing or lossy. Rowbit keeps the before image of every row a change touched.
+
+The well-known incidents of coding agents wiping production databases are a credentials problem as much as anything: take the credentials away and have the agent write migrations. Rowbit is for the agents that need to write.
+
 ## Good to know
 
 - **Only Rowbit holds the database credentials.** If an agent also has its own connection string, it can write around Rowbit. Give agents Rowbit's endpoint and nothing else.
 - **Undo restores rows, not the world.** It puts the data back, but it can't take back an email that was sent or a refund that was paid because of it.
-- **Preview runs on your database.** The write executes inside a transaction that is rolled back, so it takes row locks and fires triggers while it runs. How to make this safer, especially for non-transactional tables, is an open design question for v0.1.
+- **Preview never writes to your tables.** It reads the affected rows without taking locks and replays the write on a temporary copy that only Rowbit's connection can see. Tables with triggers or cascading foreign keys are blocked in v0.1, because their side effects wouldn't show in the preview or be undone. So are tables Rowbit's database user can't fully inspect: it needs the `TRIGGER` and `PROCESS` privileges (see the [spec](docs/spec/change-lifecycle.md#preview)).
 - **Where data lives.** Change state, previews (including before and after copies of affected rows) and the audit log are stored in a local SQLite file next to Rowbit. Treat it as sensitive as the database itself.
 - **Fail closed.** Anything Rowbit can't evaluate, it refuses. See the [change lifecycle](docs/spec/change-lifecycle.md) and [SECURITY.md](SECURITY.md).
 
@@ -60,7 +71,7 @@ See [examples/rowbit.yml](examples/rowbit.yml) and the [rowbit.yml spec](docs/sp
 
 | Path | What |
 |---|---|
-| `crates/` | Rust workspace: `rowbit-core`, `rowbit-policy`, `rowbit-mysql`, `rowbit-mcp`, `rowbit-cli`. See [ARCHITECTURE.md](ARCHITECTURE.md) |
+| `crates/` | Rust workspace: `rowbit-core`, `rowbit-policy`, `rowbit-mysql`, `rowbit-store`, `rowbit-engine`, `rowbit-mcp`, `rowbit-cli`. See [ARCHITECTURE.md](ARCHITECTURE.md) |
 | `docs/spec/` | [Change lifecycle](docs/spec/change-lifecycle.md) and [rowbit.yml](docs/spec/policy.md) specs |
 | `examples/` | An example `rowbit.yml` |
 | `compose.yaml` | MariaDB 11.4 and MySQL 8.4 for integration tests |

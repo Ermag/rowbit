@@ -908,6 +908,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rowbit-engine"
+version = "0.0.0"
+dependencies = [
+ "mysql_async",
+ "rowbit-core",
+ "rowbit-mysql",
+ "rowbit-policy",
+ "rowbit-store",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "rowbit-mcp"
 version = "0.0.0"
 
