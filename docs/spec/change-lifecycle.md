@@ -36,7 +36,6 @@ stateDiagram-v2
     held --> rejected: Reject / Withdraw / Expire
     approved --> applied: ApplySucceeded
     approved --> failed: ApplyFailed
-    approved --> rejected: Reject (person)
     applied --> undone: UndoSucceeded
     rejected --> [*]
     failed --> [*]
@@ -53,7 +52,6 @@ stateDiagram-v2
 | `held` | `Reject` | `rejected` | a person |
 | `held` | `Withdraw` | `rejected` | the proposing agent |
 | `held` | `Expire` | `rejected` | system |
-| `approved` | `Reject` | `rejected` | a person |
 | `approved` | `ApplySucceeded` | `applied` | system |
 | `approved` | `ApplyFailed` | `failed` | system |
 | `applied` | `UndoSucceeded` | `undone` | system |
@@ -62,7 +60,7 @@ Every other pair is an error. Notable consequences:
 
 - `Approve` is only accepted from `held`, and only from a person. A person cannot approve a change that has no preview yet, and a policy rule cannot approve a held change.
 - `Expire` rejects. A timeout never approves.
-- A person rejecting an `approved` change is how an approval is cancelled before it applies (useful once a cool-down window exists).
+- An `approved` change cannot be rejected: it is applied as soon as it is approved, and a reject would race the write. A cool-down window, if one comes, will add its own state.
 - Undo is requested by a person. The system performs it and records `UndoSucceeded`. If undo is refused (see below) the change stays `applied` and the refusal is logged.
 
 ## Actors
@@ -146,7 +144,11 @@ Apply does not run the agent's statement either. It writes the stored after imag
 
 A server error at any point rolls back and sends `ApplyFailed`.
 
-A change approved by policy is applied right away; a change a person approves is applied when they approve it.
+A change approved by policy is applied right away; a change a person approves is applied when they approve it. Only one apply or undo runs for a change at a time. The `ApplyFailed` reason the agent sees names the kind of failure without row keys or values (`drift since preview: a previewed row changed`); the full message is logged for people as an `ErrorDetail` event.
+
+Before writing, Rowbit logs an `ApplyStarted` event that leaves the state unchanged. If Rowbit stops between the database's commit and recording the outcome, or the outcome is unknown (the commit failed, or apply ran past its time limit of one minute), the change stays `approved` with `ApplyStarted` as its last event. Rowbit lists such changes on startup for a person to compare with the preview; it never retries them on its own. Undo works the same way with `UndoStarted`.
+
+DDL runs with a short metadata lock wait, so a schema change stuck behind a long transaction fails instead of queueing every query on the table behind it. A failed DDL statement is treated as an unknown outcome, since some DDL changes the schema before failing.
 
 Locks are held only during apply, only on the previewed rows, and only for as long as it takes to write them.
 

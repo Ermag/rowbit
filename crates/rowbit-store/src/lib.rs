@@ -280,40 +280,6 @@ impl Store {
         )
     }
 
-    /// Logs a refused request that leaves the change where it is, such as an
-    /// undo that would overwrite later changes.
-    pub fn log_refusal(
-        &mut self,
-        id: ChangeId,
-        actor: &Actor,
-        event: &str,
-        reason: &str,
-    ) -> Result<(), StoreError> {
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let state: String = tx
-            .query_row("SELECT state FROM changes WHERE id = ?1", [id], |r| {
-                r.get(0)
-            })
-            .optional()?
-            .ok_or(StoreError::NotFound(id))?;
-        let state = parse_state(&state)?;
-        append(
-            &tx,
-            id,
-            Some(state),
-            state,
-            event,
-            Some(reason),
-            &actor.to_string(),
-            None,
-            now_ms(),
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
     fn transition_with(
         &mut self,
         id: ChangeId,

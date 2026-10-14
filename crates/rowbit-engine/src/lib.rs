@@ -6,13 +6,13 @@
 //! Anything that goes wrong before a decision blocks the change. What an
 //! agent gets back is a [`ChangeStatus`], which never carries row values.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Mutex;
 
 use rowbit_core::change::{Actor, Event, State};
 use rowbit_core::preview::{Applied, Preview, WriteKind};
 use rowbit_mysql::statement::{Classified, Kind, classify};
-use rowbit_mysql::{MySqlAdapter, PreviewLimits};
+use rowbit_mysql::{ApplyError, MySqlAdapter, PreviewLimits};
 use rowbit_policy::{ChangeFacts, Decision, PolicyFile, StatementKind, Verdict, evaluate};
 use rowbit_store::{AuditEvent, Change, ChangeId, Review, Store, StoreError};
 use thiserror::Error;
@@ -31,6 +31,12 @@ pub enum EngineError {
     /// written and the change stays applied.
     #[error("undo refused: {0}")]
     UndoRefused(String),
+    #[error("change {0} is already being applied or undone")]
+    Busy(ChangeId),
+    /// The database may or may not hold the change. A person has to check;
+    /// see [`Engine::interrupted`].
+    #[error("change {0} was interrupted; its outcome is unknown and a person must check it")]
+    Interrupted(ChangeId),
     #[error(transparent)]
     Store(#[from] StoreError),
 }
@@ -54,6 +60,20 @@ pub struct Engine {
     policy: PolicyFile,
     store: Mutex<Store>,
     limits: PreviewLimits,
+    /// Changes being applied or undone right now.
+    busy: Mutex<HashSet<ChangeId>>,
+}
+
+struct Claim<'a> {
+    engine: &'a Engine,
+    id: ChangeId,
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        let mut busy = self.engine.busy.lock().unwrap_or_else(|p| p.into_inner());
+        busy.remove(&self.id);
+    }
 }
 
 impl Engine {
@@ -63,6 +83,7 @@ impl Engine {
             policy,
             store: Mutex::new(store),
             limits: PreviewLimits::default(),
+            busy: Mutex::new(HashSet::new()),
         }
     }
 
@@ -167,7 +188,7 @@ impl Engine {
         self.change(id)
     }
 
-    /// A person rejects a held or approved change.
+    /// A person rejects a held change.
     pub fn reject(&self, person: &str, id: ChangeId, reason: &str) -> Result<Change, EngineError> {
         self.store().transition(
             id,
@@ -184,6 +205,7 @@ impl Engine {
     /// nothing is written, the refusal is logged, and the change stays
     /// applied.
     pub async fn undo(&self, person: &str, id: ChangeId) -> Result<Change, EngineError> {
+        let _working = self.claim(id)?;
         let change = self.change(id)?;
         if change.state != State::Applied {
             return Err(EngineError::WrongState {
@@ -192,28 +214,39 @@ impl Engine {
                 action: "undone",
             });
         }
-        let refused = match (&change.review, &change.applied) {
-            (Some(Review::Rows(preview)), Some(applied)) => self
-                .adapter
-                .undo(&change.database, preview, applied)
-                .await
-                .err()
-                .map(|e| e.to_string()),
-            (Some(Review::Ddl { .. }), _) => Some("schema changes cannot be undone".to_owned()),
-            _ => Some("nothing was recorded to undo".to_owned()),
+        let person = Actor::Human(person.to_owned());
+        let (preview, applied) = match (&change.review, &change.applied) {
+            (Some(Review::Rows(preview)), Some(applied)) => (preview, applied),
+            (Some(Review::Ddl { .. }), _) => {
+                return self.refuse_undo(id, &person, "schema changes cannot be undone");
+            }
+            _ => return self.refuse_undo(id, &person, "nothing was recorded to undo"),
         };
-        if let Some(reason) = refused {
-            self.store().log_refusal(
-                id,
-                &Actor::Human(person.to_owned()),
-                "UndoRefused",
-                &reason,
-            )?;
-            return Err(EngineError::UndoRefused(reason));
+        self.store().note(id, &person, "UndoStarted", "")?;
+        match self.adapter.undo(&change.database, preview, applied).await {
+            Ok(()) => {
+                self.store()
+                    .transition(id, &Event::UndoSucceeded, &Actor::System, None)?;
+                self.change(id)
+            }
+            Err(ApplyError::Uncertain(detail)) => {
+                // Leave UndoStarted as the last word, for a person to check.
+                self.store()
+                    .note(id, &Actor::System, "ErrorDetail", &detail)?;
+                Err(EngineError::Interrupted(id))
+            }
+            Err(e) => self.refuse_undo(id, &person, &e.to_string()),
         }
-        self.store()
-            .transition(id, &Event::UndoSucceeded, &Actor::System, None)?;
-        self.change(id)
+    }
+
+    fn refuse_undo(
+        &self,
+        id: ChangeId,
+        person: &Actor,
+        reason: &str,
+    ) -> Result<Change, EngineError> {
+        self.store().note(id, person, "UndoRefused", reason)?;
+        Err(EngineError::UndoRefused(reason.to_owned()))
     }
 
     /// Everything about a change, row values included. For people only:
@@ -231,9 +264,30 @@ impl Engine {
         Ok(self.store().list(State::Held)?)
     }
 
+    /// Changes whose apply or undo started but was never recorded as done
+    /// or failed: Rowbit stopped, or the outcome was unknown. A person has
+    /// to compare the rows with the preview. Report these on startup.
+    pub fn interrupted(&self) -> Result<Vec<ChangeId>, EngineError> {
+        let store = self.store();
+        let mut ids = Vec::new();
+        for state in [State::Approved, State::Applied] {
+            for id in store.list(state)? {
+                let last = store.events(id)?.pop();
+                if last.is_some_and(|e| e.event == "ApplyStarted" || e.event == "UndoStarted") {
+                    ids.push(id);
+                }
+            }
+        }
+        ids.sort_unstable();
+        Ok(ids)
+    }
+
     /// Writes an approved change, and records `ApplySucceeded` with what
-    /// was written, or `ApplyFailed` with why nothing was.
+    /// was written, or `ApplyFailed` with why nothing was. An `ApplyStarted`
+    /// note goes first, so a crash between the database commit and the
+    /// record shows up in [`Engine::interrupted`].
     async fn apply(&self, id: ChangeId) -> Result<(), EngineError> {
+        let _working = self.claim(id)?;
         let change = self.change(id)?;
         if change.state != State::Approved {
             return Err(EngineError::WrongState {
@@ -242,33 +296,58 @@ impl Engine {
                 action: "applied",
             });
         }
+        self.store().note(id, &Actor::System, "ApplyStarted", "")?;
         let result = match &change.review {
             Some(Review::Rows(preview)) => match classify(&change.sql) {
-                Ok(statement) => self
-                    .adapter
-                    .apply(&change.database, &statement, preview)
-                    .await
-                    .map_err(|e| e.to_string()),
-                Err(refusal) => Err(refusal.to_string()),
+                Ok(statement) => {
+                    self.adapter
+                        .apply(&change.database, &statement, preview)
+                        .await
+                }
+                Err(refusal) => Err(ApplyError::Conflict {
+                    reason: refusal.to_string(),
+                    row: None,
+                }),
             },
             Some(Review::Ddl { sql }) => self
                 .adapter
                 .run_ddl(&change.database, sql)
                 .await
-                .map(|()| Applied { keys: Vec::new() })
-                .map_err(|e| e.to_string()),
-            None => Err("nothing was reviewed".to_owned()),
+                .map(|()| Applied { keys: Vec::new() }),
+            None => Err(ApplyError::Conflict {
+                reason: "nothing was reviewed".to_owned(),
+                row: None,
+            }),
         };
         let mut store = self.store();
         match result {
             Ok(applied) => {
                 store.record_applied(id, &applied)?;
             }
-            Err(reason) => {
+            Err(ApplyError::Uncertain(detail)) => {
+                store.note(id, &Actor::System, "ErrorDetail", &detail)?;
+                return Err(EngineError::Interrupted(id));
+            }
+            Err(e) => {
+                let reason = e.agent_reason();
+                let detail = e.to_string();
+                if detail != reason {
+                    store.note(id, &Actor::System, "ErrorDetail", &detail)?;
+                }
                 store.transition(id, &Event::ApplyFailed { reason }, &Actor::System, None)?;
             }
         }
         Ok(())
+    }
+
+    /// Marks `id` as being applied or undone, so two of those never run at
+    /// once for the same change. Released when the guard drops.
+    fn claim(&self, id: ChangeId) -> Result<Claim<'_>, EngineError> {
+        let mut busy = self.busy.lock().unwrap_or_else(|p| p.into_inner());
+        if !busy.insert(id) {
+            return Err(EngineError::Busy(id));
+        }
+        Ok(Claim { engine: self, id })
     }
 
     /// The status of one of `agent`'s own changes. Other agents' changes
@@ -428,6 +507,60 @@ mod tests {
             generated: false,
             auto_increment: false,
         }
+    }
+
+    /// An engine whose database is never reached.
+    fn offline() -> Engine {
+        Engine::new(
+            MySqlAdapter::new("mysql://nobody@127.0.0.1:1/none").unwrap(),
+            PolicyFile::from_yaml("version: 0\n").unwrap(),
+            Store::open_in_memory().unwrap(),
+        )
+    }
+
+    // Found in review: a crash between the database commit and the log
+    // record left them disagreeing with nothing to say so.
+    #[test]
+    fn an_apply_that_never_finished_is_reported() {
+        let engine = offline();
+        let id = {
+            let mut store = engine.store();
+            let id = store.propose("bot", "db", "DELETE FROM t").unwrap();
+            store
+                .set_review(id, &Review::Ddl { sql: "x".into() })
+                .unwrap();
+            store
+                .transition(
+                    id,
+                    &Event::PolicyHeld { reason: "r".into() },
+                    &Actor::Policy("p".into()),
+                    None,
+                )
+                .unwrap();
+            let hash = store.get(id).unwrap().review_hash.unwrap();
+            store
+                .transition(
+                    id,
+                    &Event::Approve,
+                    &Actor::Human("ann".into()),
+                    Some(&hash),
+                )
+                .unwrap();
+            store.note(id, &Actor::System, "ApplyStarted", "").unwrap();
+            id
+        };
+        assert_eq!(engine.interrupted().unwrap(), [id]);
+        assert_eq!(engine.change(id).unwrap().state, State::Approved);
+    }
+
+    #[test]
+    fn one_apply_or_undo_at_a_time() {
+        let engine = offline();
+        let first = engine.claim(7).unwrap();
+        assert!(matches!(engine.claim(7), Err(EngineError::Busy(7))));
+        assert!(engine.claim(8).is_ok());
+        drop(first);
+        assert!(engine.claim(7).is_ok());
     }
 
     #[test]

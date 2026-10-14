@@ -14,21 +14,49 @@ use mysql_async::{Conn, OptsBuilder, Params, Row, Value};
 use rowbit_core::preview::{Applied, AppliedKey, Cell, Preview, RowChange, Table, WriteKind};
 use thiserror::Error;
 
-use crate::preview::{SQL_MODE, quote, to_value};
+use crate::preview::{SQL_MODE, db_error_code, quote, to_value};
 use crate::statement::{Classified, PreviewRead};
 
 #[derive(Debug, Error)]
 pub enum ApplyError {
     /// The database no longer matches what was reviewed, or what was written
-    /// is not what was reviewed. Nothing was written.
-    #[error("{0}")]
-    Conflict(String),
+    /// is not what was reviewed. Nothing was written. `reason` holds no
+    /// values; `row` names the row for people.
+    #[error("{reason}{}", row.as_ref().map(|r| format!(" (row {r})")).unwrap_or_default())]
+    Conflict { reason: String, row: Option<String> },
+    /// Nothing was written.
     #[error("database error: {0}")]
     Database(#[from] mysql_async::Error),
+    /// The outcome is unknown: the work timed out, or the connection failed
+    /// while committing. A person has to look at the rows.
+    #[error("outcome unknown: {0}")]
+    Uncertain(String),
+}
+
+impl ApplyError {
+    /// What the agent may be told: no row values or keys, and a database
+    /// error only by its code.
+    pub fn agent_reason(&self) -> String {
+        match self {
+            ApplyError::Conflict { reason, .. } => reason.clone(),
+            ApplyError::Database(e) => db_error_code(e),
+            ApplyError::Uncertain(_) => "the outcome is unknown; a person will check".to_owned(),
+        }
+    }
 }
 
 fn conflict<T>(reason: impl Into<String>) -> Result<T, ApplyError> {
-    Err(ApplyError::Conflict(reason.into()))
+    Err(ApplyError::Conflict {
+        reason: reason.into(),
+        row: None,
+    })
+}
+
+fn conflict_at<T>(reason: impl Into<String>, key: &[Cell]) -> Result<T, ApplyError> {
+    Err(ApplyError::Conflict {
+        reason: reason.into(),
+        row: Some(show_key(key)),
+    })
 }
 
 /// How long apply and undo wait for a row lock before giving up.
@@ -43,15 +71,18 @@ pub(crate) async fn apply(
     statement: &Classified,
     preview: &Preview,
 ) -> Result<Applied, ApplyError> {
-    let mut conn = connect(opts, database, &preview.as_of).await?;
-    let result = async {
-        conn.query_drop("START TRANSACTION").await?;
-        let applied = write_preview(&mut conn, statement, preview).await?;
-        conn.query_drop("COMMIT").await?;
-        Ok(applied)
-    }
-    .await;
-    finish(conn, result).await
+    bounded(async {
+        let mut conn = connect(opts, database, &preview.as_of).await?;
+        let result = async {
+            conn.query_drop("START TRANSACTION").await?;
+            let applied = write_preview(&mut conn, statement, preview).await?;
+            commit(&mut conn).await?;
+            Ok(applied)
+        }
+        .await;
+        finish(conn, result).await
+    })
+    .await
 }
 
 /// Restores the before images of an applied preview.
@@ -61,15 +92,18 @@ pub(crate) async fn undo(
     preview: &Preview,
     applied: &Applied,
 ) -> Result<(), ApplyError> {
-    let mut conn = connect(opts, database, &preview.as_of).await?;
-    let result = async {
-        conn.query_drop("START TRANSACTION").await?;
-        restore(&mut conn, preview, applied).await?;
-        conn.query_drop("COMMIT").await?;
-        Ok(())
-    }
-    .await;
-    finish(conn, result).await
+    bounded(async {
+        let mut conn = connect(opts, database, &preview.as_of).await?;
+        let result = async {
+            conn.query_drop("START TRANSACTION").await?;
+            restore(&mut conn, preview, applied).await?;
+            commit(&mut conn).await?;
+            Ok(())
+        }
+        .await;
+        finish(conn, result).await
+    })
+    .await
 }
 
 /// Runs a reviewed DDL statement as it is.
@@ -78,9 +112,41 @@ pub(crate) async fn run_ddl(
     database: &str,
     sql: &str,
 ) -> Result<(), ApplyError> {
-    let mut conn = connect(opts, database, "0").await?;
-    let result = conn.query_drop(sql).await.map_err(ApplyError::from);
-    finish(conn, result).await
+    bounded(async {
+        let mut conn = connect(opts, database, "0").await?;
+        // A DDL statement that fails partway can leave the schema changed,
+        // so any error is reported as an unknown outcome.
+        let result = conn
+            .query_drop(sql)
+            .await
+            .map_err(|e| ApplyError::Uncertain(e.to_string()));
+        finish(conn, result).await
+    })
+    .await
+}
+
+/// How long apply, undo or DDL may take in all.
+const TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Runs `work` with an overall time limit. Running out of time leaves the
+/// outcome unknown, since a commit may already have been sent.
+async fn bounded<T>(
+    work: impl std::future::Future<Output = Result<T, ApplyError>>,
+) -> Result<T, ApplyError> {
+    tokio::time::timeout(TIMEOUT, work)
+        .await
+        .unwrap_or_else(|_| {
+            Err(ApplyError::Uncertain(format!(
+                "timed out after {TIMEOUT:?}"
+            )))
+        })
+}
+
+/// A failed COMMIT may or may not have been applied by the server.
+async fn commit(conn: &mut Conn) -> Result<(), ApplyError> {
+    conn.query_drop("COMMIT")
+        .await
+        .map_err(|e| ApplyError::Uncertain(format!("COMMIT failed: {e}")))
 }
 
 async fn connect(
@@ -91,10 +157,12 @@ async fn connect(
     let opts = OptsBuilder::from_opts(opts.clone()).db_name(Some(database));
     let mut conn = Conn::new(opts).await?;
     // Strict, literal backslashes, READ COMMITTED (locks on the rows by key,
-    // no gap locks), and a short lock wait so a busy row fails the apply
-    // instead of stalling it.
+    // no gap locks), and short row and metadata lock waits, so a busy row
+    // fails the apply, and DDL behind a long transaction fails instead of
+    // queueing every query on the table behind it.
     conn.query_drop(format!(
-        "SET SESSION sql_mode = '{SQL_MODE}', SESSION innodb_lock_wait_timeout = {}",
+        "SET SESSION sql_mode = '{SQL_MODE}', SESSION innodb_lock_wait_timeout = {0}, \
+         SESSION lock_wait_timeout = {0}",
         LOCK_WAIT.as_secs()
     ))
     .await?;
@@ -137,22 +205,13 @@ async fn write_preview(
         match (&row.before, current) {
             (Some(before), Some(current)) if &current == before => {}
             (Some(_), Some(_)) => {
-                return conflict(format!(
-                    "drift since preview: row {} changed",
-                    show_key(&key)
-                ));
+                return conflict_at("drift since preview: a previewed row changed", &key);
             }
             (Some(_), None) => {
-                return conflict(format!(
-                    "drift since preview: row {} is gone",
-                    show_key(&key)
-                ));
+                return conflict_at("drift since preview: a previewed row is gone", &key);
             }
             (None, Some(_)) => {
-                return conflict(format!(
-                    "drift since preview: row {} now exists",
-                    show_key(&key)
-                ));
+                return conflict_at("drift since preview: a row to insert now exists", &key);
             }
             (None, None) => {}
         }
@@ -186,10 +245,10 @@ async fn write_preview(
         }
         drop(result);
         if let Some(key) = extra {
-            return conflict(format!(
-                "drift since preview: the statement now also matches row {}",
-                show_key(&key)
-            ));
+            return conflict_at(
+                "drift since preview: the statement now matches a row nobody reviewed",
+                &key,
+            );
         }
     }
 
@@ -219,10 +278,10 @@ async fn restore(conn: &mut Conn, preview: &Preview, applied: &Applied) -> Resul
         let expected = after_with_key(table, row, key);
         let current = lock_row(conn, table, &target, key).await?;
         if current != expected {
-            return conflict(format!(
-                "row {} changed since apply, so undo would overwrite someone else's change",
-                show_key(key)
-            ));
+            return conflict_at(
+                "a row changed since apply, so undo would overwrite someone else's change",
+                key,
+            );
         }
         match preview.kind {
             WriteKind::Update => {
@@ -371,10 +430,7 @@ async fn insert_row(
 fn expect_one_row(conn: &Conn, key: &[Cell]) -> Result<(), ApplyError> {
     match conn.affected_rows() {
         1 => Ok(()),
-        n => conflict(format!(
-            "writing row {} affected {n} rows instead of 1",
-            show_key(key)
-        )),
+        n => conflict_at(format!("a write affected {n} rows instead of 1"), key),
     }
 }
 
@@ -388,10 +444,10 @@ async fn read_back(
 ) -> Result<(), ApplyError> {
     let actual = select_row(conn, table, target, key, "").await?;
     if actual.as_ref() != expected {
-        return conflict(format!(
-            "row {} does not hold the reviewed values after writing it",
-            show_key(key)
-        ));
+        return conflict_at(
+            "a row does not hold the reviewed values after writing it",
+            key,
+        );
     }
     Ok(())
 }
@@ -435,7 +491,7 @@ async fn select_row(
     match rows.len() {
         0 => Ok(None),
         1 => Ok(Some(cells(rows.into_iter().next().expect("one row"))?)),
-        n => conflict(format!("{n} rows share the key {}", show_key(key))),
+        n => conflict_at(format!("{n} rows share a primary key"), key),
     }
 }
 
@@ -485,7 +541,7 @@ fn cells(row: Row) -> Result<Vec<Cell>, ApplyError> {
         .map(|v| match v {
             Value::NULL => Ok(None),
             Value::Bytes(b) => Ok(Some(b)),
-            other => conflict(format!("unexpected value {other:?}")),
+            _ => conflict("unexpected value type"),
         })
         .collect()
 }

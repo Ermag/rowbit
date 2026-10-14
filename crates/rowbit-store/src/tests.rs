@@ -372,7 +372,7 @@ fn apply_record_is_chained_and_refusals_are_logged() {
     };
     store.record_applied(id, &applied).unwrap();
     store
-        .log_refusal(id, &human(), "UndoRefused", "row 7 changed since apply")
+        .note(id, &human(), "UndoRefused", "row 7 changed since apply")
         .unwrap();
     let log = store.events(id).unwrap();
     let last = log.last().unwrap();

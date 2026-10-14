@@ -81,8 +81,10 @@ fn s(v: &str) -> Option<String> {
 
 fn expect_conflict<T: std::fmt::Debug>(r: Result<T, ApplyError>, needle: &str) {
     match r {
-        Err(ApplyError::Conflict(reason)) => {
-            assert!(reason.contains(needle), "{reason:?}, expected {needle:?}")
+        Err(e @ ApplyError::Conflict { .. }) => {
+            let text = e.to_string();
+            assert!(text.contains(needle), "{text:?}, expected {needle:?}");
+            assert!(!e.agent_reason().contains("(row"), "{:?}", e.agent_reason());
         }
         other => panic!("expected a conflict, got {other:?}"),
     }
@@ -173,7 +175,7 @@ async fn drift_writes_nothing(var: &str) {
     // Someone else changes a previewed row.
     db.run("UPDATE ap_drift SET amount = 13.00 WHERE id = 1")
         .await;
-    expect_conflict(db.apply(&c, &p).await, "row 1 changed");
+    expect_conflict(db.apply(&c, &p).await, "a previewed row changed (row 1)");
     // Put it back, including the ON UPDATE column the change above bumped.
     db.run("UPDATE ap_drift SET amount = 12.50, touched = NULL WHERE id = 1")
         .await;
@@ -181,12 +183,12 @@ async fn drift_writes_nothing(var: &str) {
     // A new row now matches the statement.
     db.run("INSERT INTO ap_drift (id, status, amount) VALUES (4, 'approved', 1.00)")
         .await;
-    expect_conflict(db.apply(&c, &p).await, "also matches row 4");
+    expect_conflict(db.apply(&c, &p).await, "nobody reviewed (row 4)");
     db.run("DELETE FROM ap_drift WHERE id = 4").await;
 
     // A previewed row is gone.
     db.run("DELETE FROM ap_drift WHERE id = 2").await;
-    expect_conflict(db.apply(&c, &p).await, "row 2 is gone");
+    expect_conflict(db.apply(&c, &p).await, "a previewed row is gone (row 2)");
 
     let statuses = db.rows("SELECT status FROM ap_drift ORDER BY id").await;
     assert_eq!(statuses, [vec![s("approved")], vec![s("refunded")]]);
@@ -284,7 +286,7 @@ async fn undo_refuses_to_overwrite_later_changes(var: &str) {
     let applied = db.apply(&c, &p).await.unwrap();
     db.run("UPDATE ap_conflict SET status = 'disputed' WHERE id = 2")
         .await;
-    expect_conflict(db.undo(&p, &applied).await, "row 2 changed since apply");
+    expect_conflict(db.undo(&p, &applied).await, "someone else's change (row 2)");
     // Nothing was restored, including row 1.
     assert_eq!(
         db.rows("SELECT status FROM ap_conflict WHERE id < 3 ORDER BY id")
