@@ -29,6 +29,12 @@ fn preview(status: &str) -> Review {
     })
 }
 
+fn held() -> Event {
+    Event::PolicyHeld {
+        reason: "large batch".into(),
+    }
+}
+
 fn agent() -> Actor {
     Actor::Agent("refund-bot".into())
 }
@@ -57,9 +63,7 @@ fn held_change_is_approved_applied_and_undone() {
     let mut store = Store::open_in_memory().unwrap();
     let (id, hash) = previewed(&mut store);
 
-    store
-        .transition(id, &Event::PolicyHeld, &policy(), None)
-        .unwrap();
+    store.transition(id, &held(), &policy(), None).unwrap();
     store
         .transition(id, &Event::Approve, &human(), Some(&hash))
         .unwrap();
@@ -103,9 +107,7 @@ fn held_change_is_approved_applied_and_undone() {
 fn agent_can_never_approve_and_nothing_is_logged() {
     let mut store = Store::open_in_memory().unwrap();
     let (id, hash) = previewed(&mut store);
-    store
-        .transition(id, &Event::PolicyHeld, &policy(), None)
-        .unwrap();
+    store.transition(id, &held(), &policy(), None).unwrap();
 
     let err = store
         .transition(id, &Event::Approve, &agent(), Some(&hash))
@@ -122,9 +124,7 @@ fn agent_can_never_approve_and_nothing_is_logged() {
 fn approval_must_name_the_stored_preview() {
     let mut store = Store::open_in_memory().unwrap();
     let (id, _) = previewed(&mut store);
-    store
-        .transition(id, &Event::PolicyHeld, &policy(), None)
-        .unwrap();
+    store.transition(id, &held(), &policy(), None).unwrap();
 
     for seen in [None, Some("0".repeat(64))] {
         let err = store
@@ -186,12 +186,8 @@ fn list_by_state() {
     let mut store = Store::open_in_memory().unwrap();
     let (a, _) = previewed(&mut store);
     let (b, _) = previewed(&mut store);
-    store
-        .transition(a, &Event::PolicyHeld, &policy(), None)
-        .unwrap();
-    store
-        .transition(b, &Event::PolicyHeld, &policy(), None)
-        .unwrap();
+    store.transition(a, &held(), &policy(), None).unwrap();
+    store.transition(b, &held(), &policy(), None).unwrap();
     assert_eq!(store.list(State::Held).unwrap(), [a, b]);
     assert!(store.list(State::Applied).unwrap().is_empty());
 }
@@ -201,9 +197,7 @@ fn verify_detects_tampering() {
     let tamper = |sql: &str| {
         let mut store = Store::open_in_memory().unwrap();
         let (id, hash) = previewed(&mut store);
-        store
-            .transition(id, &Event::PolicyHeld, &policy(), None)
-            .unwrap();
+        store.transition(id, &held(), &policy(), None).unwrap();
         store
             .transition(id, &Event::Approve, &human(), Some(&hash))
             .unwrap();
@@ -231,9 +225,7 @@ fn verify_detects_tampering() {
     let hash = hex(&Sha256::digest(&json));
     let mut store = Store::open_in_memory().unwrap();
     let (id, original) = previewed(&mut store);
-    store
-        .transition(id, &Event::PolicyHeld, &policy(), None)
-        .unwrap();
+    store.transition(id, &held(), &policy(), None).unwrap();
     store
         .transition(id, &Event::Approve, &human(), Some(&original))
         .unwrap();
@@ -259,9 +251,7 @@ fn survives_reopening() {
         previewed(&mut store).0
     };
     let mut store = Store::open(&path).unwrap();
-    store
-        .transition(id, &Event::PolicyHeld, &policy(), None)
-        .unwrap();
+    store.transition(id, &held(), &policy(), None).unwrap();
     assert_eq!(store.events(id).unwrap().len(), 2);
     assert_eq!(store.verify().unwrap(), Ok(()));
     drop(store);
@@ -279,9 +269,7 @@ fn ddl_is_held_and_approved_on_the_statement_rowbit_will_run() {
         sql: "ALTER TABLE refunds ADD COLUMN note TEXT".into(),
     };
     let hash = store.set_review(id, &review).unwrap();
-    store
-        .transition(id, &Event::PolicyHeld, &policy(), None)
-        .unwrap();
+    store.transition(id, &held(), &policy(), None).unwrap();
     store
         .transition(id, &Event::Approve, &human(), Some(&hash))
         .unwrap();

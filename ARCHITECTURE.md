@@ -4,10 +4,11 @@ Rowbit sits between AI agents and a database. Agents propose writes; Rowbit prev
 
 ```
 agent ──MCP──▶ rowbit-mcp ─┐
-                           ├──▶ rowbit-core ──▶ adapter (rowbit-mysql) ──▶ MariaDB / MySQL
+                           ├──▶ rowbit-engine ──▶ adapter (rowbit-mysql) ──▶ MariaDB / MySQL
 person ─CLI/web─▶ rowbit ──┘        │
+                                    ├──▶ rowbit-core (state machine)
                                     ├──▶ rowbit-policy (rowbit.yml)
-                                    └──▶ state + audit log (SQLite)
+                                    └──▶ rowbit-store (state + audit log, SQLite)
 ```
 
 ## Crates
@@ -18,6 +19,7 @@ person ─CLI/web─▶ rowbit ──┘        │
 | `rowbit-policy` | Apache-2.0 | `rowbit.yml` schema: parsing, validation, evaluation. No I/O. |
 | `rowbit-mysql` | AGPL-3.0-only | Adapter for MariaDB and MySQL (one wire protocol). |
 | `rowbit-store` | AGPL-3.0-only | Change state and the hash-chained audit log, in SQLite. |
+| `rowbit-engine` | AGPL-3.0-only | Runs a proposed change through classify, preview, policy and the store. What surfaces call. |
 | `rowbit-mcp` | AGPL-3.0-only | MCP server, stdio and HTTP. Placeholder until v0.1. |
 | `rowbit-cli` | AGPL-3.0-only | The `rowbit` binary: `policy check`, `ping`, later `approve`, `reject`, `undo`. |
 

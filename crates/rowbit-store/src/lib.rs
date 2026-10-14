@@ -270,7 +270,7 @@ impl Store {
 
         let decides_on_review = matches!(
             event,
-            Event::PolicyAllowed | Event::PolicyHeld | Event::Approve
+            Event::PolicyAllowed | Event::PolicyHeld { .. } | Event::Approve
         );
         if decides_on_review && review_hash.is_none() {
             return Err(StoreError::NoReview(id));

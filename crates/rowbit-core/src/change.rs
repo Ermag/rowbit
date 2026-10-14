@@ -47,7 +47,9 @@ pub enum Event {
     /// Policy evaluated the preview and allowed the change.
     PolicyAllowed,
     /// Policy evaluated the preview and wants a person to decide.
-    PolicyHeld,
+    PolicyHeld {
+        reason: String,
+    },
     /// Policy blocked the change, or the preview itself failed.
     PolicyBlocked {
         reason: String,
@@ -115,7 +117,7 @@ impl Event {
     pub fn name(&self) -> &'static str {
         match self {
             Event::PolicyAllowed => "PolicyAllowed",
-            Event::PolicyHeld => "PolicyHeld",
+            Event::PolicyHeld { .. } => "PolicyHeld",
             Event::PolicyBlocked { .. } => "PolicyBlocked",
             Event::Approve => "Approve",
             Event::Reject { .. } => "Reject",
@@ -130,7 +132,8 @@ impl Event {
     /// The reason carried by blocking, rejecting and failing events.
     pub fn reason(&self) -> Option<&str> {
         match self {
-            Event::PolicyBlocked { reason }
+            Event::PolicyHeld { reason }
+            | Event::PolicyBlocked { reason }
             | Event::Reject { reason }
             | Event::ApplyFailed { reason } => Some(reason),
             _ => None,
@@ -160,7 +163,7 @@ pub fn transition(
 
     let to = match (from, event) {
         (S::Proposed, E::PolicyAllowed) => S::Approved,
-        (S::Proposed, E::PolicyHeld) => S::Held,
+        (S::Proposed, E::PolicyHeld { .. }) => S::Held,
         (S::Proposed, E::PolicyBlocked { .. }) => S::Rejected,
         (S::Held, E::Approve) => S::Approved,
         (S::Held | S::Approved, E::Reject { .. }) => S::Rejected,
@@ -178,7 +181,7 @@ pub fn transition(
     };
 
     let allowed = match event {
-        E::PolicyAllowed | E::PolicyHeld | E::PolicyBlocked { .. } => {
+        E::PolicyAllowed | E::PolicyHeld { .. } | E::PolicyBlocked { .. } => {
             matches!(actor, Actor::Policy(_))
         }
         E::Approve | E::Reject { .. } => matches!(actor, Actor::Human(_)),
@@ -221,6 +224,12 @@ mod tests {
         Actor::Policy("small-refunds".into())
     }
 
+    fn held() -> Event {
+        Event::PolicyHeld {
+            reason: "large batch".into(),
+        }
+    }
+
     fn step(from: State, event: Event, actor: Actor) -> Result<State, TransitionError> {
         transition(from, &event, &actor, "refund-bot")
     }
@@ -236,7 +245,7 @@ mod tests {
 
     #[test]
     fn held_change_needs_a_human() {
-        let s = step(State::Proposed, Event::PolicyHeld, policy()).unwrap();
+        let s = step(State::Proposed, held(), policy()).unwrap();
         assert_eq!(s, State::Held);
         assert_eq!(step(s, Event::Approve, human()), Ok(State::Approved));
     }
@@ -302,7 +311,7 @@ mod tests {
     fn terminal_states_accept_nothing() {
         let events = [
             Event::PolicyAllowed,
-            Event::PolicyHeld,
+            held(),
             Event::PolicyBlocked { reason: "x".into() },
             Event::Approve,
             Event::Reject { reason: "x".into() },
