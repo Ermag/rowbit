@@ -493,7 +493,7 @@ async fn approving_through_the_review_page(var: &str, table: &str) {
         "signed out sees nothing"
     );
     // Each wrong try waits longer; two are enough to show they fail.
-    for password in ["", "password"] {
+    for password in [String::new(), rowbit_web::new_password()] {
         let login = Request::post("/login")
             .header(header::HOST, "127.0.0.1:8080")
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
