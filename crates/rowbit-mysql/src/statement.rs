@@ -377,7 +377,11 @@ fn ddl(statement: &Statement, canonical: String) -> Result<Classified, Refusal> 
             _ => return refuse("truncate one table at a time"),
         },
         Statement::RenameTable(renames) => match renames.as_slice() {
-            [rename] => &rename.old_name,
+            [rename] => {
+                // The new name too: renaming into a system schema is as bad.
+                refuse_system_table(&table_name(&rename.new_name)?)?;
+                &rename.old_name
+            }
             _ => return refuse("rename one table at a time"),
         },
         Statement::Query(_) => {
@@ -390,13 +394,25 @@ fn ddl(statement: &Statement, canonical: String) -> Result<Classified, Refusal> 
             );
         }
     };
+    // The guard sees most table names, but not those of DROP and RENAME.
+    let table = table_name(table)?;
+    refuse_system_table(&table)?;
     Ok(Classified {
         kind: Kind::Ddl,
-        table: table_name(table)?,
+        table,
         columns: Vec::new(),
         canonical,
         preview: None,
     })
+}
+
+fn refuse_system_table(table: &TableName) -> Result<(), Refusal> {
+    match &table.database {
+        Some(db) if is_system_schema(db) => refuse(format!(
+            "{db} is a system schema, which agents may not read or write"
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// The one table an `UPDATE` or `DELETE` targets, and its alias.
@@ -933,6 +949,18 @@ mod tests {
             "system schema",
         );
         refused("DELETE FROM mysql.user", "system schema");
+        // Found in review 4: DROP and RENAME names aren't visited as relations.
+        for sql in [
+            "DROP TABLE mysql.user",
+            "RENAME TABLE shop.orders TO sys.orders",
+            "RENAME TABLE mysql.user TO shop.u",
+            "TRUNCATE TABLE mysql.general_log",
+            "ALTER TABLE mysql.user ADD COLUMN x INT",
+            "CREATE TABLE sys.x (id INT PRIMARY KEY)",
+            "CREATE INDEX i ON mysql.user (host)",
+        ] {
+            refused(sql, "system schema");
+        }
         assert!(classify_read("SELECT * FROM shop.orders").is_ok());
     }
 
