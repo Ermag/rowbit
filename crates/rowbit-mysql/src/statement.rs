@@ -83,6 +83,28 @@ pub enum PreviewRead {
 
 /// Parses and classifies one statement in MySQL syntax.
 pub fn classify(sql: &str) -> Result<Classified, Refusal> {
+    let statement = parse_one(sql)?;
+    let canonical = statement.to_string();
+    match &statement {
+        Statement::Update(u) => update(u, canonical),
+        Statement::Delete(d) => delete(d, canonical),
+        Statement::Insert(i) => insert(i, canonical),
+        other => ddl(other, canonical),
+    }
+}
+
+/// Checks a read for the query tool: exactly one `SELECT` (or other query
+/// expression) that passes the same checks as a write. Returns the SQL
+/// Rowbit will run, printed from the parsed statement.
+pub fn classify_read(sql: &str) -> Result<String, Refusal> {
+    match parse_one(sql)? {
+        Statement::Query(q) => Ok(q.to_string()),
+        _ => refuse("the query tool only reads; propose writes with propose_write"),
+    }
+}
+
+/// Parses exactly one statement and runs the guard over all of it.
+fn parse_one(sql: &str) -> Result<Statement, Refusal> {
     let dialect = MySqlDialect {};
     refuse_executable_comments(sql)?;
     if sql.contains('\\') {
@@ -102,13 +124,7 @@ pub fn classify(sql: &str) -> Result<Classified, Refusal> {
     if let ControlFlow::Break(refusal) = statement.visit(&mut Guard) {
         return Err(refusal);
     }
-    let canonical = statement.to_string();
-    match &statement {
-        Statement::Update(u) => update(u, canonical),
-        Statement::Delete(d) => delete(d, canonical),
-        Statement::Insert(i) => insert(i, canonical),
-        other => ddl(other, canonical),
-    }
+    Ok(statement)
 }
 
 /// MySQL runs `/*! ... */` comments, and conditional ones (`/*!80000 ... */`)
@@ -852,6 +868,20 @@ mod tests {
             assert_eq!(c.table.table, table, "{sql}");
             assert!(c.preview.is_none());
         }
+    }
+
+    #[test]
+    fn reads_are_checked_like_writes() {
+        assert_eq!(
+            classify_read("select id, status from refunds where amount > 10").unwrap(),
+            "SELECT id, status FROM refunds WHERE amount > 10"
+        );
+        assert!(classify_read("UPDATE t SET a = 1").is_err());
+        assert!(classify_read("SELECT SLEEP(10)").is_err());
+        assert!(classify_read("SELECT * FROM t FOR UPDATE").is_err());
+        assert!(classify_read("SELECT * FROM t INTO OUTFILE '/tmp/x'").is_err());
+        assert!(classify_read("SELECT @@version").is_err());
+        assert!(classify_read("SELECT 1; SELECT 2").is_err());
     }
 
     #[test]

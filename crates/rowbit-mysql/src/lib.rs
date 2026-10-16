@@ -3,10 +3,12 @@
 
 mod apply;
 mod preview;
+mod query;
 pub mod statement;
 
 pub use apply::ApplyError;
 pub use preview::{PreviewError, PreviewLimits, db_error_code};
+pub use query::{QueryLimits, QueryResult};
 
 use mysql_async::prelude::Queryable;
 use rowbit_core::adapter::{Adapter, Engine, ServerInfo};
@@ -63,6 +65,17 @@ impl MySqlAdapter {
         applied: &Applied,
     ) -> Result<(), ApplyError> {
         apply::undo(&self.opts, database, preview, applied).await
+    }
+
+    /// Runs a read for an agent: `sql` must come from
+    /// [`statement::classify_read`]. Read only, time-limited, row-capped.
+    pub async fn query(
+        &self,
+        database: &str,
+        sql: &str,
+        limits: QueryLimits,
+    ) -> Result<QueryResult, PreviewError> {
+        query::query(&self.opts, database, sql, limits).await
     }
 
     /// Runs an approved DDL statement as reviewed.

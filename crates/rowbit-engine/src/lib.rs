@@ -11,8 +11,8 @@ use std::sync::Mutex;
 
 use rowbit_core::change::{Actor, Event, State};
 use rowbit_core::preview::{Applied, Preview, WriteKind};
-use rowbit_mysql::statement::{Classified, Kind, classify};
-use rowbit_mysql::{ApplyError, MySqlAdapter, PreviewLimits};
+use rowbit_mysql::statement::{Classified, Kind, classify, classify_read};
+use rowbit_mysql::{ApplyError, MySqlAdapter, PreviewLimits, QueryLimits, QueryResult};
 use rowbit_policy::{ChangeFacts, Decision, PolicyFile, StatementKind, Verdict, evaluate};
 use rowbit_store::{AuditEvent, Change, ChangeId, Review, Store, StoreError};
 use thiserror::Error;
@@ -33,6 +33,10 @@ pub enum EngineError {
     UndoRefused(String),
     #[error("change {0} is already being applied or undone")]
     Busy(ChangeId),
+    /// A read was refused or failed. The reason is safe to show the agent,
+    /// who could have read the same values anyway.
+    #[error("{0}")]
+    Query(String),
     /// The database may or may not hold the change. A person has to check;
     /// see [`Engine::interrupted`].
     #[error("change {0} was interrupted; its outcome is unknown and a person must check it")]
@@ -168,6 +172,30 @@ impl Engine {
             self.apply(id).await?;
         }
         self.status(agent, id)
+    }
+
+    /// Runs a read for `agent`. Only agents listed in `rowbit.yml` may read,
+    /// and only with a statement that passes the same checks as a write.
+    /// Reads are not logged as changes.
+    ///
+    /// The agent reads with Rowbit's database privileges; scope them to what
+    /// agents may see (per-agent grants come in v0.2).
+    pub async fn query(
+        &self,
+        agent: &str,
+        database: &str,
+        sql: &str,
+    ) -> Result<QueryResult, EngineError> {
+        if !self.policy.agents.contains_key(agent) {
+            return Err(EngineError::Query(
+                "agent is not listed in rowbit.yml".to_owned(),
+            ));
+        }
+        let sql = classify_read(sql).map_err(|r| EngineError::Query(r.to_string()))?;
+        self.adapter
+            .query(database, &sql, QueryLimits::default())
+            .await
+            .map_err(|e| EngineError::Query(e.to_string()))
     }
 
     /// A person approves a held change, naming the review hash they saw,
