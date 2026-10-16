@@ -48,7 +48,7 @@ mcp:
 | `reviewers.allow` | map | yes, with `oidc` | Who may sign in. At least one of `emails`, `domains`, `groups`. |
 | `notify` | list | no | Where to announce held changes. See [Notifications](#notifications). |
 | `mcp.http` | boolean | no, `false` | Serve agents over MCP at `/mcp`. See [MCP over HTTP](#mcp-over-http). |
-| `agent_users.host` | string | no | Host part for the agents' database users. Defaults to the host part of Rowbit's own user. |
+| `agent_users.host` | string | no | Host part for the agents' database users. Defaults to the host part of Rowbit's own user. `rowbit grants --agent-host` overrides it. |
 
 Unknown keys are errors, as in `rowbit.yml`.
 
@@ -122,10 +122,9 @@ Signing agents in with OAuth, as the MCP specification describes, may come later
 
 ## Database users for agents
 
-Scoped agents (see [Scopes](policy.md#scopes)) each get a database user, `rowbit_<agent id>`. Creating users and granting privileges needs `CREATE USER` and `GRANT OPTION`, which Rowbit's own user must never have, so these commands take an administrator's connection for the one run, from `--admin-url` or `ROWBIT_ADMIN_DATABASE_URL`, and never store it.
+Scoped agents (see [Scopes](policy.md#scopes)) each get a database user, `rowbit_<agent id>`. Its host part is the host part of Rowbit's own user (`CURRENT_USER()` on `ROWBIT_DATABASE_URL`), so it can connect from wherever Rowbit does, unless `agent_users.host` or `--agent-host` says otherwise. Creating users and granting privileges needs `CREATE USER` and `GRANT OPTION`, which Rowbit's own user must never have, so these commands take an administrator's connection for the one run, from `--admin-url` or `ROWBIT_ADMIN_DATABASE_URL`, and never store it.
 
 - `rowbit grants diff` prints, per agent, the `CREATE USER`, `GRANT` and `REVOKE` statements that would bring the database in line with `rowbit.yml`, and changes nothing.
-- `rowbit grants apply` runs them, after showing them and asking for confirmation (`--yes` skips it). A new user gets a random password, which Rowbit keeps in its state file to connect as that user; `--rotate-passwords` makes new ones. An agent removed from `rowbit.yml` keeps its user until `rowbit grants apply --drop-removed`.
-- `rowbit grants show <agent>` prints what Rowbit compiles for one agent, without connecting.
+- `rowbit grants apply` runs them, after showing them and asking for confirmation (`--yes` skips it; without a terminal it refuses to ask). Privileges added by hand, including `GRANT OPTION`, are revoked. Grants it can't manage, such as a role or a proxy grant, are listed for a person to remove, and until they are, Rowbit won't serve that agent. A new user gets a random password, which Rowbit keeps in its state file to connect as that user; `--rotate-passwords` makes new ones. An agent removed from `rowbit.yml` keeps its user until `rowbit grants apply --drop-removed`.
 
 The agents' passwords sit in the state file next to Rowbit's previews, which hold full copies of changed rows already; each agent user can do no more than its scopes allow. See [database privileges](../privileges.md).

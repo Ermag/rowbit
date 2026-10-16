@@ -109,7 +109,7 @@ Writing doesn't imply reading. An `UPDATE ... WHERE status = 'open'` reads `stat
 
 ### What Rowbit compiles
 
-The agent's database user is `rowbit_<agent id>` (so scoped agent ids are at most 25 characters, MySQL's limit being 32), at the same host as Rowbit's own user unless `rowbit-server.yml` says otherwise. `rowbit grants diff` prints what the agent users have against what `rowbit.yml` compiles to, and `rowbit grants apply` creates the users and runs the difference. See [server.md](server.md#database-users-for-agents).
+The agent's database user is `rowbit_<agent id>` (so scoped agent ids are at most 25 characters, MySQL's limit being 32), at the same host as Rowbit's own user unless `rowbit-server.yml` says otherwise. `rowbit grants diff` prints what the agent users have against what `rowbit.yml` compiles to, and `rowbit grants apply` creates the users and runs the difference. A database-level grant spells the database's name with `_` and `%` escaped, since the server would otherwise read them as wildcards, and a table that doesn't exist yet gets only `CREATE` from `ddl` (the server refuses other grants on it) and nothing from the other scopes. See [server.md](server.md#database-users-for-agents).
 
 | Scope | Grant |
 |---|---|
