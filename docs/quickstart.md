@@ -105,10 +105,10 @@ rowbit show 2
 Or in the browser. Leave this running and open <http://127.0.0.1:8080>:
 
 ```sh
-rowbit serve --as you
+rowbit serve
 ```
 
-The page lists the held change with a before and after table, and buttons to approve or reject it. It has no sign-in in v0.1 and records you as whatever `--as` says, so keep it on localhost.
+The first time, `serve` prints a password for the page, once. Keep it: Rowbit stores only its hash. Sign in with it and your name, which the audit log records. (`rowbit serve --set-password` sets your own.) The page lists the held change with a before and after table, and buttons to approve or reject it.
 
 Reject it from the page, or in another terminal:
 
@@ -131,10 +131,10 @@ It's held too, since it changes more than 20 rows. The count depends on how long
 {"id":4,"reason":"no rule matched","rows":84,"state":"held","table":"shop.orders"}
 ```
 
-Approve it with the first 12 or more characters of the review hash `show` printed. Rowbit refuses any other hash, so you approve exactly what you looked at.
+`show` lists the first 50 rows; `rowbit show 4 --all` lists every one. Approve it with the first 12 or more characters of the review hash `show` printed, and, since it's more than 50 rows, its row count. Rowbit refuses any other hash or count, so you approve exactly what you looked at.
 
 ```sh
-rowbit approve 4 --review <first 12 characters of the hash> --as you
+rowbit approve 4 --review <first 12 characters of the hash> --rows <row count> --as you
 ```
 
 Rowbit locks those rows, checks each is still as it was in the preview, writes them, and reads them back. If any row had changed since the preview, it would write nothing.
@@ -180,7 +180,7 @@ The agent gets three tools: `query` to read, `propose_write` to ask for a write,
 
 ## Before you use it for real
 
-- **Keep the agent away from Rowbit's credentials, state and review page.** The setup above is for trying Rowbit only. An agent that can read the database URL can connect around Rowbit. An agent that can also read `rowbit.db` can run `rowbit approve` and approve its own change, and one that can reach the review page can press Approve: v0.1 has no sign-in, and `--as` is whatever name is typed. So run Rowbit, its files and the review page as an operating system user the agent can't act as. With stdio, one way is to have the MCP client start Rowbit through `sudo`:
+- **Keep the agent away from Rowbit's credentials, state and review page.** The setup above is for trying Rowbit only. An agent that can read the database URL can connect around Rowbit. An agent that can also read `rowbit.db` can run `rowbit approve` and approve its own change: the CLI records whatever name `--as` gives. The review page needs its password, so keep that from the agent too. So run Rowbit and its files as an operating system user the agent can't act as. With stdio, one way is to have the MCP client start Rowbit through `sudo`:
 
   ```sh
   # /etc/sudoers.d/rowbit: the agent's user may start only this, as rowbit
@@ -196,10 +196,10 @@ The agent gets three tools: `query` to read, `propose_write` to ask for a write,
     --policy /etc/rowbit/rowbit.yml --store /var/lib/rowbit/rowbit.db
   ```
 
-  Then configure the MCP client to run `sudo -n -u rowbit /usr/local/bin/rowbit-mcp-coding-agent`. Reviewers run `rowbit` as the `rowbit` user too, and reach the review page only through your own authenticating proxy.
+  Then configure the MCP client to run `sudo -n -u rowbit /usr/local/bin/rowbit-mcp-coding-agent`. Reviewers run `rowbit` as the `rowbit` user too, or use the review page. Over a network, put the page behind HTTPS; it is plain HTTP.
 - **Give Rowbit its own database user** with the grants in [database privileges](privileges.md), and nothing else.
 - **Protect `rowbit.db`.** It holds before and after copies of every row a change touched. Rowbit makes it readable by its owner only; back it up like the database. See [the SQLite file](privileges.md#the-sqlite-file).
-- **Know the limits of v0.1.** One statement per change, tables with a primary key, no triggers or cascading foreign keys, no sign-in for reviewers, and size rules can be met by splitting a write into smaller ones. See [Not in v0.1](spec/change-lifecycle.md#not-in-v01).
+- **Know the limits of v0.1.** One statement per change, tables with a primary key, no triggers or cascading foreign keys, one shared password for the review page (sign-in with your identity provider comes in v0.2), and size rules can be met by splitting a write into smaller ones. See [Not in v0.1](spec/change-lifecycle.md#not-in-v01).
 
 ## Clean up
 

@@ -7,15 +7,6 @@ use clap::{Parser, Subcommand};
 use rowbit_core::adapter::{Adapter, Engine};
 use rowbit_core::change::{Actor, Event, State};
 
-const ALL_STATES: [State; 7] = [
-    State::Proposed,
-    State::Held,
-    State::Approved,
-    State::Applied,
-    State::Rejected,
-    State::Failed,
-    State::Undone,
-];
 use rowbit_engine::Engine as RowbitEngine;
 use rowbit_policy::PolicyFile;
 use rowbit_store::Store;
@@ -341,7 +332,7 @@ async fn main() -> anyhow::Result<()> {
             let store = store.open()?;
             let states = match state {
                 Some(s) => vec![State::parse(&s).with_context(|| format!("unknown state {s}"))?],
-                None => ALL_STATES.to_vec(),
+                None => State::ALL.to_vec(),
             };
             let mut ids = Vec::new();
             for state in states {
@@ -408,7 +399,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Verify { store } => {
             let store = store.open()?;
-            let changes: usize = ALL_STATES
+            let changes: usize = State::ALL
                 .iter()
                 .map(|s| store.list(*s).map(|ids| ids.len()))
                 .sum::<Result<usize, _>>()?;

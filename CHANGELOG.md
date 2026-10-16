@@ -22,15 +22,15 @@ The first working version: an MCP server that previews, checks, holds, applies a
 
 ### For people
 
-- `rowbit changes`, `show`, `approve`, `reject`, `undo` and `verify` in the terminal. Approving needs the review hash `show` printed.
-- `rowbit serve`: one plain review page with the held queue, a before and after table, and approve, reject and undo buttons.
+- `rowbit changes`, `show`, `approve`, `reject`, `undo` and `verify` in the terminal. Approving needs the review hash `show` printed, and for more than 50 rows, the row count (`show --all` lists every row). Text the agent controls is shown with control and hidden characters made visible.
+- `rowbit serve`: one plain review page with the held queue, a before and after table, and approve, reject and undo buttons. Reviewers sign in with the page's password, which `serve` prints once (only its hash is kept), and their name.
 - `rowbit propose` sends a statement as an agent would, for trying Rowbit without an MCP client.
 - A hash-chained audit log in SQLite records every proposal, decision, approval, apply and undo. `rowbit verify` checks it.
 
 ### Known limits
 
-- No sign-in for reviewers: the CLI and the page record whoever `--as` names.
-- Agents read with Rowbit's database privileges; per-agent grants come in v0.2.
+- The review page has one shared password, and the name given at sign-in is trusted; the CLI records whatever `--as` names. Sign-in with an identity provider comes in v0.2.
+- Agents read with Rowbit's database privileges, except the server's own schemas, which are always refused; per-agent grants come in v0.2.
 - A size rule can be met by splitting a write into smaller changes; budgets across changes come in v0.3.
 - MCP over stdio only. With stdio, the machine running the agent holds Rowbit's database credentials.
 
