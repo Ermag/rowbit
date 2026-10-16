@@ -3,7 +3,8 @@
 //! attack and the defence that must hold. Run on both databases.
 //!
 //! Part of the v0.1 release gate (see the roadmap): these must pass before
-//! v0.1.0 is tagged.
+//! v0.1.0 is tagged. Agent text reaching a reviewer's terminal is tested
+//! with the CLI, in `crates/rowbit-cli/tests/review.rs`.
 
 use std::sync::Arc;
 
@@ -407,4 +408,106 @@ async fn racing_an_approval(var: &str, table: &str) {
     let rows = w.rows().await;
     assert_eq!(rows[0].1, "paid");
     assert!(rows[1..].iter().all(|(_, s)| s == "approved"), "{rows:?}");
+}
+
+// Attack (review 3): read other sessions' SQL through the server's own
+// schemas, which the PROCESS grant Rowbit needs would otherwise expose.
+on_both!(reading_the_server_s_own_schemas);
+async fn reading_the_server_s_own_schemas(var: &str, table: &str) {
+    let Some(w) = World::new(var, &format!("{table}_ss")).await else {
+        return;
+    };
+    let agent = w.agent("refund-bot").await;
+    for (sql, database) in [
+        (
+            "SELECT USER, HOST, DB, INFO FROM information_schema.PROCESSLIST",
+            None,
+        ),
+        ("SELECT trx_query FROM information_schema.INNODB_TRX", None),
+        (
+            "SELECT * FROM performance_schema.events_statements_current",
+            None,
+        ),
+        ("SELECT user, authentication_string FROM mysql.user", None),
+        ("SELECT * FROM sys.session", None),
+        ("TABLE information_schema.PROCESSLIST", None),
+        ("SELECT INFO FROM PROCESSLIST", Some("information_schema")),
+    ] {
+        let mut args = json!({ "sql": sql });
+        if let Some(db) = database {
+            args["database"] = json!(db);
+        }
+        let (failed, text) = call(&agent, "query", args).await;
+        assert!(failed, "{sql}: {text}");
+    }
+    let s = propose(
+        &agent,
+        &format!(
+            "UPDATE {} SET status = (SELECT MAX(INFO) FROM information_schema.PROCESSLIST) WHERE id = 1",
+            w.table
+        ),
+    )
+    .await;
+    assert_eq!(s["state"], "rejected", "{s}");
+    w.untouched().await;
+}
+
+// Attack (review 3): an agent on the same host as the review page fetches
+// it and posts an approval, with a stolen form token and guessed password.
+on_both!(approving_through_the_review_page);
+async fn approving_through_the_review_page(var: &str, table: &str) {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode, header};
+    use tower::ServiceExt;
+
+    let Some(w) = World::new(var, &format!("{table}_rp")).await else {
+        return;
+    };
+    let agent = w.agent("refund-bot").await;
+    let held = propose(
+        &agent,
+        &format!("UPDATE {} SET status = 'refunded'", w.table),
+    )
+    .await;
+    let id = held["id"].as_i64().unwrap();
+    let review = w.engine.change(id).unwrap().review_hash.unwrap();
+    let page = rowbit_web::router(
+        w.engine.clone(),
+        rowbit_web::hash_password(&rowbit_web::new_password()),
+        vec!["127.0.0.1:8080".to_owned()],
+    );
+    let send = |request: Request<Body>| {
+        let page = page.clone();
+        async move { page.oneshot(request).await.unwrap().status() }
+    };
+    let get = Request::get("/")
+        .header(header::HOST, "127.0.0.1:8080")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        send(get).await,
+        StatusCode::SEE_OTHER,
+        "signed out sees nothing"
+    );
+    // Each wrong try waits longer; two are enough to show they fail.
+    for password in ["", "password"] {
+        let login = Request::post("/login")
+            .header(header::HOST, "127.0.0.1:8080")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(format!("name=agent&password={password}")))
+            .unwrap();
+        assert_eq!(send(login).await, StatusCode::FORBIDDEN);
+    }
+    let approve = Request::post(format!("/changes/{id}/approve"))
+        .header(header::HOST, "127.0.0.1:8080")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(header::COOKIE, format!("rowbit_session={}", "0".repeat(64)))
+        .body(Body::from(format!(
+            "token={}&review={review}",
+            "0".repeat(64)
+        )))
+        .unwrap();
+    assert_eq!(send(approve).await, StatusCode::FORBIDDEN);
+    assert_eq!(w.engine.change(id).unwrap().state.as_str(), "held");
+    w.untouched().await;
 }
