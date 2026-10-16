@@ -13,6 +13,7 @@ use rowbit_store::Store;
 use tower::ServiceExt;
 
 const HOST: &str = "127.0.0.1:8080";
+const PASSWORD: &str = "correct horse battery staple";
 const POLICY: &str = "version: 0\nagents:\n  refund-bot:\n    default: hold\n";
 
 fn url(var: &str) -> Option<String> {
@@ -31,15 +32,51 @@ fn url(var: &str) -> Option<String> {
 struct Page {
     router: axum::Router,
     engine: Arc<Engine>,
+    /// The session cookie, once signed in.
+    cookie: Option<String>,
 }
 
 impl Page {
-    async fn get(&self, host: &str) -> (StatusCode, String) {
-        let request = Request::get("/")
-            .header(header::HOST, host)
-            .body(Body::empty())
+    fn new(engine: Arc<Engine>) -> Page {
+        let hash = rowbit_web::hash_password(PASSWORD);
+        Page {
+            router: rowbit_web::router(engine.clone(), hash, vec![HOST.to_owned()]),
+            engine,
+            cookie: None,
+        }
+    }
+
+    async fn sign_in(&mut self, name: &str, password: &str) -> StatusCode {
+        let request = Request::post("/login")
+            .header(header::HOST, HOST)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(format!(
+                "name={name}&password={}",
+                password.replace(' ', "+")
+            )))
             .unwrap();
-        self.send(request).await
+        let response = self.router.clone().oneshot(request).await.unwrap();
+        if let Some(cookie) = response.headers().get(header::SET_COOKIE) {
+            let cookie = cookie.to_str().unwrap();
+            assert!(
+                cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"),
+                "{cookie}"
+            );
+            self.cookie = Some(cookie.split(';').next().unwrap().to_owned());
+        }
+        response.status()
+    }
+
+    async fn get(&self, host: &str) -> (StatusCode, String) {
+        self.get_path(host, "/").await
+    }
+
+    async fn get_path(&self, host: &str, path: &str) -> (StatusCode, String) {
+        let mut request = Request::get(path).header(header::HOST, host);
+        if let Some(cookie) = &self.cookie {
+            request = request.header(header::COOKIE, cookie);
+        }
+        self.send(request.body(Body::empty()).unwrap()).await
     }
 
     async fn post(&self, path: &str, form: &str, origin: Option<&str>) -> (StatusCode, String) {
@@ -48,6 +85,9 @@ impl Page {
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
         if let Some(origin) = origin {
             request = request.header(header::ORIGIN, origin);
+        }
+        if let Some(cookie) = &self.cookie {
+            request = request.header(header::COOKIE, cookie);
         }
         self.send(request.body(Body::from(form.to_owned())).unwrap())
             .await
@@ -86,8 +126,12 @@ async fn setup(var: &str, table: &str) -> Option<(Page, String, String)> {
         PolicyFile::from_yaml(POLICY).unwrap(),
         Store::open_in_memory().unwrap(),
     ));
-    let router = rowbit_web::router(engine.clone(), "philip", vec![HOST.to_owned()]);
-    Some((Page { router, engine }, url, table.to_owned()))
+    let mut page = Page::new(engine);
+    assert_eq!(
+        page.sign_in("philip", PASSWORD).await,
+        StatusCode::SEE_OTHER
+    );
+    Some((page, url, table.to_owned()))
 }
 
 async fn statuses(url: &str, table: &str) -> Vec<String> {
@@ -245,12 +289,128 @@ async fn other_hosts_are_refused() {
         PolicyFile::from_yaml(POLICY).unwrap(),
         Store::open_in_memory().unwrap(),
     ));
-    let page = Page {
-        router: rowbit_web::router(engine.clone(), "philip", vec![HOST.to_owned()]),
-        engine,
-    };
+    let mut page = Page::new(engine);
     let (status, _) = page.get("rebind.evil.example:8080").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    // Signed out, the queue redirects to sign-in and shows nothing.
+    let (status, html) = page.get(HOST).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    let (status, html) = page.get_path(HOST, "/login").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("type=password"), "{html}");
+    assert_eq!(
+        page.sign_in("philip", PASSWORD).await,
+        StatusCode::SEE_OTHER
+    );
     let (status, html) = page.get(HOST).await;
     assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(html.contains("Signed in as philip"), "{html}");
+}
+
+// Found in review: any local user could fetch the page, take the form token
+// and approve. Reaching the port is no longer enough.
+on_both!(reaching_the_port_is_not_enough_to_approve);
+async fn reaching_the_port_is_not_enough_to_approve(var: &str, table: &str) {
+    let Some((reviewer, url, t)) = setup(var, &format!("{table}_x")).await else {
+        return;
+    };
+    let id = reviewer
+        .engine
+        .propose(
+            "refund-bot",
+            "rowbit_test",
+            &format!("UPDATE {t} SET status = 'x'"),
+        )
+        .await
+        .unwrap()
+        .id;
+    let (_, html) = reviewer.get(HOST).await;
+    let token = field(&html, "token");
+    let review = field(&html, "review");
+    let form = format!("token={token}&review={review}");
+
+    // An attacker on the same host: no cookie, even with a stolen token.
+    let mut attacker = Page {
+        router: reviewer.router.clone(),
+        engine: reviewer.engine.clone(),
+        cookie: None,
+    };
+    let (status, _) = attacker.get(HOST).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (status, _) = attacker
+        .post(&format!("/changes/{id}/approve"), &form, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // A made-up cookie.
+    attacker.cookie = Some(format!("rowbit_session={}", "a".repeat(64)));
+    let (status, _) = attacker
+        .post(&format!("/changes/{id}/approve"), &form, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // Guessing the password: refused, and slowly.
+    attacker.cookie = None;
+    let started = std::time::Instant::now();
+    assert_eq!(
+        attacker.sign_in("evil", "hunter2").await,
+        StatusCode::FORBIDDEN
+    );
+    assert!(started.elapsed() >= std::time::Duration::from_secs(1));
+    assert!(attacker.cookie.is_none());
+    // Another session's token doesn't work with your own cookie.
+    assert_eq!(
+        attacker.sign_in("other", PASSWORD).await,
+        StatusCode::SEE_OTHER
+    );
+    let (status, _) = attacker
+        .post(&format!("/changes/{id}/approve"), &form, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    assert_eq!(statuses(&url, &t).await, ["approved", "approved"]);
+    let (status, _) = reviewer
+        .post(&format!("/changes/{id}/approve"), &form, None)
+        .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(
+        reviewer
+            .engine
+            .history(id)
+            .unwrap()
+            .iter()
+            .any(|e| e.event == "Approve" && e.actor == "human:philip")
+    );
+}
+
+on_both!(big_changes_show_every_row_before_approval);
+async fn big_changes_show_every_row_before_approval(var: &str, table: &str) {
+    let Some((page, url, t)) = setup(var, &format!("{table}_b")).await else {
+        return;
+    };
+    let mut conn = mysql_async::Conn::from_url(&url).await.unwrap();
+    for id in 3..=60 {
+        conn.query_drop(format!("INSERT INTO {t} VALUES ({id}, 'approved')"))
+            .await
+            .unwrap();
+    }
+    conn.disconnect().await.unwrap();
+    let id = page
+        .engine
+        .propose(
+            "refund-bot",
+            "rowbit_test",
+            &format!("UPDATE {t} SET status = 'x'"),
+        )
+        .await
+        .unwrap()
+        .id;
+    let (_, html) = page.get(HOST).await;
+    assert!(html.contains("Approve and apply all 60 rows"), "{html}");
+    assert!(
+        html.contains(&format!("<a href=\"/changes/{id}\">See all 60</a>")),
+        "{html}"
+    );
+    assert!(!html.contains("<td>60</td><td>status</td>"), "{html}");
+    let (status, all) = page.get_path(HOST, &format!("/changes/{id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(all.contains("<td>60</td><td>status</td>"), "{all}");
 }

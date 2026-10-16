@@ -68,7 +68,7 @@ Every other pair is an error. Notable consequences:
 Actors come from the transport's authentication, never from arguments an agent passes:
 
 - `agent:<id>`: the MCP connection's or proxy user's configured agent id. Must match a key in `rowbit.yml`.
-- `human:<id>`: a reviewer. In v0.1 the CLI records `--as <name>`, or the login name, without checking it: anyone who can run `rowbit` against the store file can act as a person, so keep that file and the database credentials to reviewers. Signed-in reviewers (OIDC) come in v0.2.
+- `human:<id>`: a reviewer. The review page records the name given at sign-in, behind the page's password. The CLI records `--as <name>`, or the login name, without checking it: anyone who can run `rowbit` against the store file can act as a person, so keep that file and the database credentials to reviewers. Signing in with an identity provider (OIDC) comes in v0.2.
 - `policy:<rule>`: the policy engine, naming the deciding rule, or `default` or a floor.
 - `system`: Rowbit's executor and timers.
 
@@ -178,7 +178,11 @@ No statement, read or write, may name the server's own schemas (`information_sch
 
 ## Reviewing (web page)
 
-`rowbit serve --as <name>` serves one plain page on `127.0.0.1:8080`: the held changes with each row's changed columns before and after (the first 50 rows), approve and reject buttons, and the recent changes with an undo button for applied ones. Approve sends the review hash shown on the page. The page has no sign-in in v0.1 and acts as `--as`; it answers only requests addressed to the host it listens on (against DNS rebinding), every form carries a random per-process token and is refused from another origin, and it sends a content security policy that allows no scripts. Listening on anything but localhost prints a warning.
+`rowbit serve` serves one plain page on `127.0.0.1:8080`: the held changes with each row's changed columns before and after (the first 50 rows, with a link to a page listing all of them), approve and reject buttons, and the recent changes with an undo button for applied ones. The approve button names how many rows it applies ("Approve and apply all 1,284 rows") and sends the review hash shown on the page. The statement shown is the canonical one, without the agent's comments, and control characters and invisible or direction-changing Unicode in anything shown are made visible.
+
+Reviewers sign in with the page's password and their name. The first time `rowbit serve` runs, it makes up a random password, prints it once to the operator's terminal and keeps only an Argon2id hash in the state file; `rowbit serve --set-password` sets one instead. Sign-in gives an `HttpOnly`, `SameSite=Strict` session cookie, valid for 12 hours or until the process stops, that carries the reviewer's name, which the audit log records as `human:<name>`. Every action needs that cookie and the session's own form token, so being able to reach the port, as any local user or agent can, is not enough. Each wrong password in a row waits longer before answering, up to 8 seconds. The page also answers only requests addressed to the host it listens on (against DNS rebinding), refuses forms from another origin, and sends a content security policy that allows no scripts. It is plain HTTP: listening on anything but localhost prints a warning to put it behind HTTPS.
+
+A shared password with a typed name is the v0.1 stand-in for signing in with an identity provider (OIDC), planned for v0.2.
 
 ## Audit log
 
