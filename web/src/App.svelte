@@ -4,6 +4,7 @@
   import Change from './Change.svelte';
   import Log from './Log.svelte';
   import Queue from './Queue.svelte';
+  import Shadow from './Shadow.svelte';
 
   let reviewer = $state('');
   let route = $state(location.hash);
@@ -28,6 +29,7 @@
   <nav>
     <a href="#/" class:active={route === '' || route === '#/'}>Held</a>
     <a href="#/log" class:active={route === '#/log'}>Log</a>
+    <a href="#/shadow" class:active={route === '#/shadow'}>Shadow</a>
   </nav>
   <span class="who">
     {#if reviewer}{reviewer} <button class="link" onclick={signOut}>Sign out</button>{/if}
@@ -41,6 +43,8 @@
     {#key changeId}<Change id={changeId} />{/key}
   {:else if route === '#/log'}
     <Log />
+  {:else if route === '#/shadow'}
+    <Shadow />
   {:else}
     <Queue />
   {/if}

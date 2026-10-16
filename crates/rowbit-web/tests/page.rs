@@ -533,3 +533,42 @@ async fn wrong_passwords_are_checked_one_at_a_time() {
         started.elapsed()
     );
 }
+
+on_both!(shadowed_changes_are_listed_apart);
+async fn shadowed_changes_are_listed_apart(var: &str, table: &str) {
+    let Some(url) = url(var) else { return };
+    let t = format!("{table}_sh");
+    let mut conn = mysql_async::Conn::from_url(&url).await.unwrap();
+    conn.query_drop(format!(
+        "DROP TABLE IF EXISTS {t}; CREATE TABLE {t} (id INT PRIMARY KEY, status VARCHAR(40) NOT NULL) ENGINE=InnoDB; \
+         INSERT INTO {t} VALUES (1, 'approved'), (2, 'approved')"
+    ))
+    .await
+    .unwrap();
+    conn.disconnect().await.unwrap();
+    let engine = Arc::new(Engine::new(
+        MySqlAdapter::new(&url).unwrap(),
+        PolicyFile::from_yaml("version: 0\nagents:\n  refund-bot:\n    mode: shadow\n").unwrap(),
+        Store::open_in_memory().unwrap(),
+    ));
+    let mut page = Page::new(engine.clone());
+    page.sign_in("philip", password()).await;
+    engine
+        .propose(
+            "refund-bot",
+            "rowbit_test",
+            &format!("UPDATE {t} SET status = 'x' WHERE id = 1"),
+        )
+        .await
+        .unwrap();
+    let (_, all) = page.api("/api/changes").await;
+    assert_eq!(all["changes"].as_array().unwrap().len(), 1);
+    let (_, shadowed) = page.api("/api/changes?shadowed=true").await;
+    let list = shadowed["changes"].as_array().unwrap();
+    assert_eq!(list.len(), 1, "{shadowed}");
+    assert_eq!(list[0]["state"], "applied");
+    assert_eq!(
+        list[0]["shadowed"],
+        json!({ "by": "policy:default", "would": "would hold: no rule matched" })
+    );
+}

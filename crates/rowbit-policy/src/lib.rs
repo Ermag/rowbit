@@ -9,7 +9,7 @@ mod schema;
 
 pub use eval::{ChangeFacts, Verdict, evaluate};
 pub use schema::{
-    AgentPolicy, Decision, Match, OneOrMany, PolicyFile, Range, Rule, StatementKind, SumMatch,
+    AgentPolicy, Decision, Match, Mode, OneOrMany, PolicyFile, Range, Rule, StatementKind, SumMatch,
 };
 
 use thiserror::Error;

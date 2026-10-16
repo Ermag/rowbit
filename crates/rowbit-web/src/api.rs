@@ -94,6 +94,9 @@ pub(crate) struct ListQuery {
     state: Option<String>,
     agent: Option<String>,
     table: Option<String>,
+    /// Only changes a rule would have held or blocked, in shadow mode.
+    #[serde(default)]
+    shadowed: bool,
     limit: Option<usize>,
 }
 
@@ -134,6 +137,9 @@ pub(crate) async fn list(
             continue;
         }
         let summary = summary(&app, &change);
+        if q.shadowed && summary["shadowed"].is_null() {
+            continue;
+        }
         if let Some(t) = q.table.as_deref().filter(|t| !t.is_empty())
             && summary["table"].as_str().is_none_or(|x| !x.contains(t))
         {
@@ -178,9 +184,15 @@ fn summary(app: &App, change: &Change) -> Value {
             )
         })
         .and_then(|e| e.detail.clone());
+    let shadowed = history.iter().find(|e| e.event == "PolicyShadowed");
     json!({
         "id": change.id,
         "state": change.state.as_str(),
+        // What a rule would have done, for an agent in shadow mode.
+        "shadowed": shadowed.map(|e| json!({
+            "by": visible(&e.actor),
+            "would": e.detail.as_deref().map(visible),
+        })),
         "agent": visible(&change.agent),
         "database": visible(&change.database),
         "table": table.map(|t| visible(&t)),

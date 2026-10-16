@@ -4,6 +4,12 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 
 ## Unreleased
 
+### Shadow mode
+
+- `mode: shadow` on an agent in `rowbit.yml` applies writes its rules would hold or block, and logs what would have happened (`PolicyShadowed`, `would hold: ...`), so a team can put Rowbit in front of an agent on day one without slowing it down. Floors still apply: statements Rowbit refuses, tables without a primary key, and schema changes, which are still held. Shadowed changes can be undone like any other.
+- `rowbit changes --shadowed` and the UI's Shadow page list them, grouped by rule.
+- `rowbit policy test <file>` replays every recorded change against another `rowbit.yml`, from the stored previews, and lists each decision that would differ.
+
 ### Review UI
 
 - `rowbit serve` serves a new web UI, built in and needing nothing else: the held queue, each change with its rows before and after (paged, unchanged columns on request), approve, reject and undo, and a log of every change filtered by state, agent or table, with the audit log's check. Approving more than 50 rows needs the row count typed, as on the command line. It replaces the v0.1 page.

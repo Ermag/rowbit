@@ -15,7 +15,7 @@ use rowbit_mysql::statement::{Classified, Kind, classify, classify_read, is_syst
 use rowbit_mysql::{
     ApplyError, MySqlAdapter, PreviewError, PreviewLimits, QueryLimits, QueryResult, server_message,
 };
-use rowbit_policy::{ChangeFacts, Decision, PolicyFile, StatementKind, Verdict, evaluate};
+use rowbit_policy::{ChangeFacts, Decision, Mode, PolicyFile, StatementKind, Verdict, evaluate};
 use rowbit_store::{AuditEvent, Change, ChangeId, Review, Store, StoreError};
 use thiserror::Error;
 
@@ -160,13 +160,31 @@ impl Engine {
             decision,
             rule,
             reason,
+            floor,
         } = evaluate(&self.policy, agent, &facts);
+        // Shadow mode records a rule's hold or block instead of doing it,
+        // but never overrides a floor, and never runs a schema change
+        // nobody approved: those can't be undone.
+        let shadow = decision != Decision::Allow
+            && !floor
+            && facts.statement != StatementKind::Ddl
+            && self.policy.agents.get(agent).map(|a| a.mode) == Some(Mode::Shadow);
         let actor = Actor::Policy(rule.clone().unwrap_or_else(|| "default".to_owned()));
         let reason = reason.unwrap_or_else(|| match &rule {
             Some(rule) => format!("rule {rule}"),
             None => "no rule matched".to_owned(),
         });
         let event = match decision {
+            _ if shadow => Event::PolicyShadowed {
+                reason: format!(
+                    "would {}: {reason}",
+                    if decision == Decision::Hold {
+                        "hold"
+                    } else {
+                        "block"
+                    }
+                ),
+            },
             Decision::Allow => Event::PolicyAllowed,
             Decision::Hold => Event::PolicyHeld { reason },
             Decision::Block => Event::PolicyBlocked { reason },
@@ -178,7 +196,7 @@ impl Engine {
             store.set_review(id, &review)?;
             store.transition(id, &event, &actor, None)?;
         }
-        if decision == Decision::Allow {
+        if decision == Decision::Allow || shadow {
             self.apply(id).await?;
         }
         self.status(agent, id)
@@ -494,6 +512,41 @@ impl Engine {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+}
+
+/// What a policy would decide now about a change already recorded, from
+/// its stored review. For `rowbit policy test`. `None` when nothing was
+/// reviewed (the change was refused before its preview).
+pub fn replay(policy: &PolicyFile, change: &Change) -> Option<Verdict> {
+    let facts = match change.review.as_ref()? {
+        Review::Rows(p) => facts(p),
+        Review::Ddl { .. } => ddl_facts(&classify(&change.sql).ok()?, &change.database),
+    };
+    Some(evaluate(policy, &change.agent, &facts))
+}
+
+/// What policy decided about a recorded change, from its log: `allow`,
+/// `hold` or `block`, or `None` if it never reached policy. A shadowed
+/// change counts as what it would have been.
+pub fn recorded_decision(history: &[AuditEvent]) -> Option<Decision> {
+    history.iter().find_map(|e| match e.event.as_str() {
+        "PolicyAllowed" => Some(Decision::Allow),
+        "PolicyHeld" => Some(Decision::Hold),
+        "PolicyBlocked" if e.actor != "policy:floor" && e.actor != "policy:scope" => {
+            Some(Decision::Block)
+        }
+        "PolicyShadowed" => Some(
+            if e.detail
+                .as_deref()
+                .is_some_and(|d| d.starts_with("would block"))
+            {
+                Decision::Block
+            } else {
+                Decision::Hold
+            },
+        ),
+        _ => None,
+    })
 }
 
 fn ddl_facts(c: &Classified, database: &str) -> ChangeFacts {
