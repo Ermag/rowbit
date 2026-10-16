@@ -267,9 +267,27 @@ async fn query_reads_and_refuses_writes(var: &str, table: &str) {
         format!("UPDATE {t} SET status = 'x'"),
         format!("SELECT * FROM {t} FOR UPDATE"),
         "SELECT SLEEP(5)".to_owned(),
+        "SELECT INFO FROM information_schema.PROCESSLIST".to_owned(),
     ] {
         let (failed, text) = call(&client, "query", json!({ "sql": sql })).await;
         assert!(failed, "{sql}: {text}");
     }
+    let (failed, text) = call(
+        &client,
+        "query",
+        json!({ "sql": "SELECT INFO FROM PROCESSLIST", "database": "information_schema" }),
+    )
+    .await;
+    assert!(failed && text.contains("system schema"), "{text}");
+    let (failed, text) = call(
+        &client,
+        "query",
+        json!({ "sql": "SELECT * FROM mc_missing" }),
+    )
+    .await;
+    assert!(
+        failed && text.starts_with("database error: ERROR 1146"),
+        "{text}"
+    );
     client.cancel().await.unwrap();
 }

@@ -7,7 +7,7 @@ mod query;
 pub mod statement;
 
 pub use apply::ApplyError;
-pub use preview::{PreviewError, PreviewLimits, db_error_code};
+pub use preview::{PreviewError, PreviewLimits, db_error_code, server_message};
 pub use query::{QueryLimits, QueryResult};
 
 use mysql_async::prelude::Queryable;

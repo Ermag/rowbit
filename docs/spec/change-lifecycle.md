@@ -164,11 +164,11 @@ In one transaction: lock the rows by primary key and check each still equals its
 
 | Tool | Does | Returns |
 |---|---|---|
-| `query` | Runs one `SELECT` that passes the same checks as a write, in a read-only transaction, with a time limit and at most 1,000 rows. Only agents listed in `rowbit.yml` may read. Not logged as a change. | Columns, rows, and whether rows were cut off. |
+| `query` | Runs one `SELECT` that passes the same checks as a write, in a read-only transaction, with a time limit and at most 1,000 rows. Only agents listed in `rowbit.yml` may read. Not logged as a change. | Columns, rows, and whether rows were cut off. A refused read gets Rowbit's reason; a failed one gets the server's message (`database error: ERROR 1146 ...`), which is about the agent's own read. |
 | `propose_write` | Proposes one statement: propose, preview, decide, and apply if allowed. | The change's id, state, table, row count and reason. |
 | `change_status` | Looks up one of the agent's own changes. Another agent's change is reported as not found. | The same as `propose_write`. |
 
-There is no tool to approve, reject, apply or undo. Nothing a tool returns about a change includes preview values (see Preview). A read runs with Rowbit's database privileges, so an agent can read whatever Rowbit's user can; scope that user accordingly until per-agent grants arrive in v0.2.
+No statement, read or write, may name the server's own schemas (`information_schema`, `performance_schema`, `mysql`, `sys`), and none of them may be the default database: with the `PROCESS` grant Rowbit needs, they show every session's running SQL on the server. There is no tool to approve, reject, apply or undo. Nothing a tool returns about a change includes preview values (see Preview). A read runs with Rowbit's database privileges, so an agent can read whatever Rowbit's user can; scope that user accordingly until per-agent grants arrive in v0.2.
 
 ## Audit log
 

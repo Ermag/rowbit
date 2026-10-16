@@ -24,7 +24,7 @@ Without any of the first four, the preview fails and the change is blocked. Rowb
 
 What these grants also allow, so you can weigh them:
 
-- `PROCESS` lets the user see every session's running statement (`SHOW PROCESSLIST`) and InnoDB's status, across the whole server.
+- `PROCESS` lets the user see every session's running statement (`SHOW PROCESSLIST`, `information_schema.PROCESSLIST`, `INNODB_TRX`) and InnoDB's status, across the whole server. Agents read with Rowbit's privileges, so Rowbit refuses any statement that names `information_schema`, `performance_schema`, `mysql` or `sys`, and any of them as the default database.
 - `TRIGGER` lets the user create and drop triggers. Rowbit never does.
 - Previews run with Rowbit's privileges, so reviewers can see values from any table Rowbit's user can read. Agents never see preview values, though a statement can still learn about tables Rowbit can read through how many rows it matches. Scope Rowbit's `SELECT` grants to the tables agents need; per-agent grants arrive in v0.2.
 
