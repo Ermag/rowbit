@@ -197,6 +197,7 @@ The agent gets three tools: `query` to read, `propose_write` to ask for a write,
   ```
 
   Then configure the MCP client to run `sudo -n -u rowbit /usr/local/bin/rowbit-mcp-coding-agent`. Reviewers run `rowbit` as the `rowbit` user too, or use the review page. Over a network, put the page behind HTTPS; it is plain HTTP.
+- **Keep the page's password out of logs.** The first `rowbit serve` prints it to standard error, so under a service manager like systemd it would land in the journal. Run the first `serve` in a terminal, or set the password with `rowbit serve --set-password` before installing the service.
 - **Give Rowbit its own database user** with the grants in [database privileges](privileges.md), and nothing else.
 - **Protect `rowbit.db`.** It holds before and after copies of every row a change touched. Rowbit makes it readable by its owner only; back it up like the database. See [the SQLite file](privileges.md#the-sqlite-file).
 - **Know the limits of v0.1.** One statement per change, tables with a primary key, no triggers or cascading foreign keys, one shared password for the review page (sign-in with your identity provider comes in v0.2), and size rules can be met by splitting a write into smaller ones. See [Not in v0.1](spec/change-lifecycle.md#not-in-v01).
