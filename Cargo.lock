@@ -1352,6 +1352,7 @@ dependencies = [
 name = "rowbit-mcp"
 version = "0.0.0"
 dependencies = [
+ "axum",
  "mysql_async",
  "rmcp",
  "rowbit-core",
@@ -1359,9 +1360,11 @@ dependencies = [
  "rowbit-mysql",
  "rowbit-policy",
  "rowbit-store",
+ "rowbit-web",
  "serde",
  "serde_json",
  "tokio",
+ "tower",
 ]
 
 [[package]]

@@ -18,10 +18,13 @@ serde_json.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
 mysql_async.workspace = true
 rmcp = { workspace = true, features = ["client"] }
 rowbit-policy.workspace = true
 rowbit-store.workspace = true
+rowbit-web.workspace = true
+tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true
