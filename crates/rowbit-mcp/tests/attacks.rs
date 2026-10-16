@@ -456,7 +456,8 @@ async fn reading_the_server_s_own_schemas(var: &str, table: &str) {
 }
 
 // Attack (review 3): an agent on the same host as the review page fetches
-// it and posts an approval, with a stolen form token and guessed password.
+// it and posts an approval, with a made-up session and token and guessed
+// passwords.
 on_both!(approving_through_the_review_page);
 async fn approving_through_the_review_page(var: &str, table: &str) {
     use axum::body::Body;
@@ -476,8 +477,14 @@ async fn approving_through_the_review_page(var: &str, table: &str) {
     let review = w.engine.change(id).unwrap().review_hash.unwrap();
     let page = rowbit_web::router(
         w.engine.clone(),
-        rowbit_web::hash_password(&rowbit_web::new_password()),
-        vec!["127.0.0.1:8080".to_owned()],
+        rowbit_web::Web {
+            sign_in: rowbit_web::SignIn::Password {
+                hash: rowbit_web::hash_password(&rowbit_web::new_password()),
+            },
+            hosts: vec!["127.0.0.1:8080".to_owned()],
+            secure: false,
+            mcp: None,
+        },
     );
     let send = |request: Request<Body>| {
         let page = page.clone();
@@ -501,16 +508,14 @@ async fn approving_through_the_review_page(var: &str, table: &str) {
             .unwrap();
         assert_eq!(send(login).await, StatusCode::FORBIDDEN);
     }
-    let approve = Request::post(format!("/changes/{id}/approve"))
+    let approve = Request::post(format!("/api/changes/{id}/approve"))
         .header(header::HOST, "127.0.0.1:8080")
-        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(header::CONTENT_TYPE, "application/json")
         .header(header::COOKIE, format!("rowbit_session={}", "0".repeat(64)))
-        .body(Body::from(format!(
-            "token={}&review={review}",
-            "0".repeat(64)
-        )))
+        .header("x-rowbit-token", "0".repeat(64))
+        .body(Body::from(format!(r#"{{"review":"{review}"}}"#)))
         .unwrap();
-    assert_eq!(send(approve).await, StatusCode::FORBIDDEN);
+    assert_eq!(send(approve).await, StatusCode::UNAUTHORIZED);
     assert_eq!(w.engine.change(id).unwrap().state.as_str(), "held");
     w.untouched().await;
 }

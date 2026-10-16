@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+http.workspace = true
 rmcp.workspace = true
 rowbit-core.workspace = true
 rowbit-engine.workspace = true

@@ -46,6 +46,11 @@ pub enum Actor {
 pub enum Event {
     /// Policy evaluated the preview and allowed the change.
     PolicyAllowed,
+    /// For an agent in shadow mode: a rule would have held or blocked the
+    /// change, and it goes ahead. `reason` says what would have happened.
+    PolicyShadowed {
+        reason: String,
+    },
     /// Policy evaluated the preview and wants a person to decide.
     PolicyHeld {
         reason: String,
@@ -127,6 +132,7 @@ impl Event {
     pub fn name(&self) -> &'static str {
         match self {
             Event::PolicyAllowed => "PolicyAllowed",
+            Event::PolicyShadowed { .. } => "PolicyShadowed",
             Event::PolicyHeld { .. } => "PolicyHeld",
             Event::PolicyBlocked { .. } => "PolicyBlocked",
             Event::Approve => "Approve",
@@ -143,6 +149,7 @@ impl Event {
     pub fn reason(&self) -> Option<&str> {
         match self {
             Event::PolicyHeld { reason }
+            | Event::PolicyShadowed { reason }
             | Event::PolicyBlocked { reason }
             | Event::Reject { reason }
             | Event::ApplyFailed { reason } => Some(reason),
@@ -172,7 +179,7 @@ pub fn transition(
     use State as S;
 
     let to = match (from, event) {
-        (S::Proposed, E::PolicyAllowed) => S::Approved,
+        (S::Proposed, E::PolicyAllowed | E::PolicyShadowed { .. }) => S::Approved,
         (S::Proposed, E::PolicyHeld { .. }) => S::Held,
         (S::Proposed, E::PolicyBlocked { .. }) => S::Rejected,
         (S::Held, E::Approve) => S::Approved,
@@ -191,7 +198,10 @@ pub fn transition(
     };
 
     let allowed = match event {
-        E::PolicyAllowed | E::PolicyHeld { .. } | E::PolicyBlocked { .. } => {
+        E::PolicyAllowed
+        | E::PolicyShadowed { .. }
+        | E::PolicyHeld { .. }
+        | E::PolicyBlocked { .. } => {
             matches!(actor, Actor::Policy(_))
         }
         E::Approve | E::Reject { .. } => matches!(actor, Actor::Human(_)),
@@ -251,6 +261,23 @@ mod tests {
         assert_eq!(s, State::Applied);
         let s = step(s, Event::UndoSucceeded, Actor::System).unwrap();
         assert_eq!(s, State::Undone);
+    }
+
+    #[test]
+    fn a_shadowed_change_goes_ahead_only_from_policy() {
+        let shadowed = Event::PolicyShadowed {
+            reason: "would hold: large batch".into(),
+        };
+        assert_eq!(
+            step(State::Proposed, shadowed.clone(), policy()),
+            Ok(State::Approved)
+        );
+        assert!(step(State::Proposed, shadowed.clone(), agent()).is_err());
+        assert!(step(State::Proposed, shadowed.clone(), human()).is_err());
+        assert!(
+            step(State::Held, shadowed, policy()).is_err(),
+            "never approves a held change"
+        );
     }
 
     #[test]
@@ -321,6 +348,7 @@ mod tests {
     fn terminal_states_accept_nothing() {
         let events = [
             Event::PolicyAllowed,
+            Event::PolicyShadowed { reason: "x".into() },
             held(),
             Event::PolicyBlocked { reason: "x".into() },
             Event::Approve,

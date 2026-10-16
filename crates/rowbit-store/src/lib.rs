@@ -106,6 +106,79 @@ pub struct Change {
     pub created_at_ms: i64,
 }
 
+/// A notification to queue with a transition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewDelivery {
+    /// The `notify` target's name in `rowbit-server.yml`.
+    pub target: String,
+    /// The same across retries, so receivers can drop duplicates.
+    pub delivery: String,
+    /// JSON, as the target is sent it (before any reformatting).
+    pub payload: String,
+}
+
+/// A queued notification. Not part of the audit log's hash chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Delivery {
+    pub id: i64,
+    pub change_id: ChangeId,
+    pub target: String,
+    pub delivery: String,
+    pub payload: String,
+    /// `pending`, `delivered` or `failed`.
+    pub state: String,
+    pub attempts: i64,
+    pub last_error: Option<String>,
+    pub created_at_ms: i64,
+    pub done_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeliveryOutcome {
+    Delivered,
+    Retry { error: String, retry_in_ms: i64 },
+    Failed { error: String },
+}
+
+/// Removes `agent`'s token and its times, inside a transaction.
+fn revoke_token(tx: &rusqlite::Transaction<'_>, agent: &str) -> Result<bool, StoreError> {
+    let old: Option<String> = tx
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [format!("agent.{agent}.token")],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(hash) = &old {
+        tx.execute(
+            "DELETE FROM settings WHERE key = ?1",
+            [format!("token.{hash}")],
+        )?;
+    }
+    for k in ["token", "token_created_ms", "token_used_ms"] {
+        tx.execute(
+            "DELETE FROM settings WHERE key = ?1",
+            [format!("agent.{agent}.{k}")],
+        )?;
+    }
+    Ok(old.is_some())
+}
+
+fn delivery_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Delivery> {
+    Ok(Delivery {
+        id: r.get(0)?,
+        change_id: r.get(1)?,
+        target: r.get(2)?,
+        delivery: r.get(3)?,
+        payload: r.get(4)?,
+        state: r.get(5)?,
+        attempts: r.get(6)?,
+        last_error: r.get(7)?,
+        created_at_ms: r.get(8)?,
+        done_at_ms: r.get(9)?,
+    })
+}
+
 /// One audit log entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AuditEvent {
@@ -200,7 +273,22 @@ impl Store {
              CREATE TABLE IF NOT EXISTS settings (
                  key TEXT PRIMARY KEY,
                  value TEXT NOT NULL
-             );",
+             );
+             CREATE TABLE IF NOT EXISTS deliveries (
+                 id INTEGER PRIMARY KEY,
+                 change_id INTEGER NOT NULL REFERENCES changes (id),
+                 target TEXT NOT NULL,
+                 delivery TEXT NOT NULL,
+                 payload TEXT NOT NULL,
+                 state TEXT NOT NULL,
+                 attempts INTEGER NOT NULL DEFAULT 0,
+                 next_at_ms INTEGER NOT NULL,
+                 lease_until_ms INTEGER NOT NULL DEFAULT 0,
+                 last_error TEXT,
+                 created_at_ms INTEGER NOT NULL,
+                 done_at_ms INTEGER
+             );
+             CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries (state, next_at_ms);",
         )?;
         Ok(Store { conn })
     }
@@ -284,10 +372,23 @@ impl Store {
         actor: &Actor,
         reviewed: Option<&str>,
     ) -> Result<State, StoreError> {
+        self.transition_notifying(id, event, actor, reviewed, &[])
+    }
+
+    /// [`Store::transition`], and queues `notify` in the same transaction,
+    /// so a notification is never lost to a crash after the state changed.
+    pub fn transition_notifying(
+        &mut self,
+        id: ChangeId,
+        event: &Event,
+        actor: &Actor,
+        reviewed: Option<&str>,
+        notify: &[NewDelivery],
+    ) -> Result<State, StoreError> {
         if matches!(event, Event::ApplySucceeded) {
             return Err(StoreError::ApplyNeedsRecord);
         }
-        self.transition_with(id, event, actor, reviewed, None)
+        self.transition_with(id, event, actor, reviewed, None, notify)
     }
 
     /// Records a successful apply (`ApplySucceeded`, by the system) together
@@ -299,6 +400,7 @@ impl Store {
             &Actor::System,
             None,
             Some(applied.to_canonical_json()),
+            &[],
         )
     }
 
@@ -309,6 +411,7 @@ impl Store {
         actor: &Actor,
         reviewed: Option<&str>,
         applied: Option<Vec<u8>>,
+        notify: &[NewDelivery],
     ) -> Result<State, StoreError> {
         let tx = self
             .conn
@@ -326,7 +429,10 @@ impl Store {
 
         let decides_on_review = matches!(
             event,
-            Event::PolicyAllowed | Event::PolicyHeld { .. } | Event::Approve
+            Event::PolicyAllowed
+                | Event::PolicyShadowed { .. }
+                | Event::PolicyHeld { .. }
+                | Event::Approve
         );
         if decides_on_review && review_hash.is_none() {
             return Err(StoreError::NoReview(id));
@@ -362,8 +468,79 @@ impl Store {
             },
             at,
         )?;
+        for d in notify {
+            tx.execute(
+                "INSERT INTO deliveries (change_id, target, delivery, payload, state, next_at_ms, created_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?5)",
+                params![id, d.target, d.delivery, d.payload, at],
+            )?;
+        }
         tx.commit()?;
         Ok(to)
+    }
+
+    /// Up to `limit` notifications due now, each leased to the caller for
+    /// `lease_ms` so another sender doesn't take it meanwhile.
+    pub fn claim_deliveries(
+        &mut self,
+        limit: usize,
+        lease_ms: i64,
+    ) -> Result<Vec<Delivery>, StoreError> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = now_ms();
+        let due: Vec<Delivery> = {
+            let mut stmt = tx.prepare(
+                "SELECT id, change_id, target, delivery, payload, state, attempts, last_error, created_at_ms, done_at_ms
+                 FROM deliveries WHERE state = 'pending' AND next_at_ms <= ?1 AND lease_until_ms <= ?1
+                 ORDER BY next_at_ms LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![now, limit as i64], delivery_row)?;
+            rows.collect::<Result<_, _>>()?
+        };
+        for d in &due {
+            tx.execute(
+                "UPDATE deliveries SET lease_until_ms = ?1 WHERE id = ?2",
+                params![now + lease_ms, d.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(due)
+    }
+
+    /// Records one attempt to send a notification: delivered, given up on,
+    /// or to try again after `retry_in_ms`.
+    pub fn record_delivery(&mut self, id: i64, outcome: DeliveryOutcome) -> Result<(), StoreError> {
+        let now = now_ms();
+        match outcome {
+            DeliveryOutcome::Delivered => self.conn.execute(
+                "UPDATE deliveries SET state = 'delivered', attempts = attempts + 1, last_error = NULL,
+                 done_at_ms = ?1, lease_until_ms = 0 WHERE id = ?2",
+                params![now, id],
+            )?,
+            DeliveryOutcome::Retry { error, retry_in_ms } => self.conn.execute(
+                "UPDATE deliveries SET attempts = attempts + 1, last_error = ?1, next_at_ms = ?2,
+                 lease_until_ms = 0 WHERE id = ?3",
+                params![error, now + retry_in_ms, id],
+            )?,
+            DeliveryOutcome::Failed { error } => self.conn.execute(
+                "UPDATE deliveries SET state = 'failed', attempts = attempts + 1, last_error = ?1,
+                 done_at_ms = ?2, lease_until_ms = 0 WHERE id = ?3",
+                params![error, now, id],
+            )?,
+        };
+        Ok(())
+    }
+
+    /// The newest notifications, newest first.
+    pub fn deliveries(&self, limit: usize) -> Result<Vec<Delivery>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, change_id, target, delivery, payload, state, attempts, last_error, created_at_ms, done_at_ms
+             FROM deliveries ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], delivery_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Logs something about a change without moving it: an event whose
@@ -419,6 +596,82 @@ impl Store {
             params![key, value],
         )?;
         Ok(())
+    }
+
+    pub fn delete_setting(&mut self, key: &str) -> Result<(), StoreError> {
+        self.conn
+            .execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
+    /// Makes a new MCP token for `agent`, replacing any it had, and returns
+    /// it. Only its SHA-256 is kept. See "MCP over HTTP" in the spec.
+    pub fn issue_agent_token(&mut self, agent: &str) -> Result<String, StoreError> {
+        use base64::Engine as _;
+        let mut bytes = [0u8; 32];
+        getrandom::fill(&mut bytes).expect("the system has a random source");
+        let token = format!(
+            "rbt_{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+        );
+        let hash = hex(&Sha256::digest(token.as_bytes()));
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        revoke_token(&tx, agent)?;
+        let set = |k: String, v: String| {
+            tx.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                params![k, v],
+            )
+        };
+        set(format!("token.{hash}"), agent.to_owned())?;
+        set(format!("agent.{agent}.token"), hash)?;
+        set(
+            format!("agent.{agent}.token_created_ms"),
+            now_ms().to_string(),
+        )?;
+        tx.commit()?;
+        Ok(token)
+    }
+
+    /// Removes `agent`'s MCP token. Returns whether it had one.
+    pub fn revoke_agent_token(&mut self, agent: &str) -> Result<bool, StoreError> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let had = revoke_token(&tx, agent)?;
+        tx.commit()?;
+        Ok(had)
+    }
+
+    /// The agent a token belongs to, and notes that it was used. `None` for
+    /// a token Rowbit didn't issue or has revoked.
+    pub fn agent_for_token(&mut self, token: &str) -> Result<Option<String>, StoreError> {
+        let hash = hex(&Sha256::digest(token.as_bytes()));
+        let Some(agent) = self.setting(&format!("token.{hash}"))? else {
+            return Ok(None);
+        };
+        self.set_setting(
+            &format!("agent.{agent}.token_used_ms"),
+            &now_ms().to_string(),
+        )?;
+        Ok(Some(agent))
+    }
+
+    /// When `agent`'s token was made and last used, if it has one.
+    pub fn agent_token_times(&self, agent: &str) -> Result<Option<(i64, Option<i64>)>, StoreError> {
+        if self.setting(&format!("agent.{agent}.token"))?.is_none() {
+            return Ok(None);
+        }
+        let num = |k: String| -> Result<Option<i64>, StoreError> {
+            Ok(self.setting(&k)?.and_then(|v| v.parse().ok()))
+        };
+        Ok(Some((
+            num(format!("agent.{agent}.token_created_ms"))?.unwrap_or(0),
+            num(format!("agent.{agent}.token_used_ms"))?,
+        )))
     }
 
     pub fn get(&self, id: ChangeId) -> Result<Change, StoreError> {

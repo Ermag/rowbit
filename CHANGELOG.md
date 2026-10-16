@@ -4,6 +4,33 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 
 ## Unreleased
 
+### Shadow mode
+
+- `mode: shadow` on an agent in `rowbit.yml` applies writes its rules would hold or block, and logs what would have happened (`PolicyShadowed`, `would hold: ...`), so a team can put Rowbit in front of an agent on day one without slowing it down. Floors still apply: statements Rowbit refuses, tables without a primary key, and schema changes, which are still held. Shadowed changes can be undone like any other.
+- `rowbit changes --shadowed` and the UI's Shadow page list them, grouped by rule.
+- `rowbit policy test <file>` replays every recorded change against another `rowbit.yml`, from the stored previews, and lists each decision that would differ.
+
+### MCP over HTTP
+
+- With `mcp: { http: true }` in `rowbit-server.yml`, `rowbit serve` also serves agents at `/mcp` over MCP's streamable HTTP transport, with the same tools as `rowbit mcp`. The agent's machine holds only its token, not Rowbit's database credentials or state file.
+- `rowbit agents token <agent>` makes a token for an agent (printed once, kept only as a hash), `rowbit agents revoke <agent>` removes it, and `rowbit agents` lists which agents have one and when it was last used. A request without a valid token for an agent in `rowbit.yml` gets `401`, and browser origins other than Rowbit's own are refused.
+
+### Notifications
+
+- `notify` in `rowbit-server.yml` announces each held change to a Slack incoming webhook (a message with the agent, table, row count, the rule and a Review button) or to any URL as JSON signed with HMAC-SHA256 (`Rowbit-Signature`). Notifications carry no row values and no SQL.
+- They're queued in the state file with the hold, by whichever process proposed the change, and `rowbit serve` sends them, retrying for about ten minutes. The UI's Notifications page shows each one and what happened. A notification never changes the change.
+
+### Review UI
+
+- `rowbit serve` serves a new web UI, built in and needing nothing else: the held queue, each change with its rows before and after (paged, unchanged columns on request), approve, reject and undo, and a log of every change filtered by state, agent or table, with the audit log's check. Approving more than 50 rows needs the row count typed, as on the command line. It replaces the v0.1 page.
+- Numbers are told apart from text by the column's type, not by whether the text looks like a number.
+
+### Signing in
+
+- Reviewers sign in to the review page through an OpenID Connect provider (Google Workspace, Okta, Keycloak, Authentik, GitLab, ...), set in a new `rowbit-server.yml` with `public_url` and `reviewers`. Rowbit uses the code flow with PKCE, checks the ID token, requires a verified email, and lets in only the `emails`, `domains` or `groups` listed. The audit log records the reviewer's email.
+- Secrets in `rowbit-server.yml` are `${VARIABLE}` references to the environment; a literal secret is an error. `rowbit server check` validates the file.
+- Without a provider, the page password still works, but only on a loopback address: `rowbit serve` refuses to listen anywhere else, and with a provider it requires an `https://` `public_url`. (Breaking: v0.1 served the password page on any address with a warning.)
+
 ### Fixes
 
 - The review page's sign-in and buttons work in browsers. The page sent `Referrer-Policy: no-referrer`, which makes browsers send `Origin: null` on the page's own forms, and the origin check refused them. It now sends `same-origin`.

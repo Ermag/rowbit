@@ -178,6 +178,22 @@ For any client with a JSON config, such as Claude Desktop:
 
 The agent gets three tools: `query` to read, `propose_write` to ask for a write, and `change_status` to follow it. Ask it to fix something in the shop and watch `rowbit serve`.
 
+### Over HTTP
+
+Over stdio, the machine running the agent holds Rowbit's database URL and state file. Over HTTP, it holds only a token of its own. Turn it on in `rowbit-server.yml` next to `rowbit.yml`, make the agent a token, and start the server:
+
+```sh
+printf 'version: 0\nmcp:\n  http: true\n' > rowbit-server.yml
+rowbit agents token coding-agent
+rowbit serve
+```
+
+`rowbit agents token` prints the token once; making a new one replaces it, and `rowbit agents revoke coding-agent` removes it. Then point the agent at `/mcp` with the token as a bearer token, for Claude Code:
+
+```sh
+claude mcp add --transport http rowbit http://127.0.0.1:8080/mcp --header "Authorization: Bearer <token>"
+```
+
 ## Before you use it for real
 
 - **Keep the agent away from Rowbit's credentials, state and review page.** The setup above is for trying Rowbit only. An agent that can read the database URL can connect around Rowbit. An agent that can also read `rowbit.db` can run `rowbit approve` and approve its own change: the CLI records whatever name `--as` gives. The review page needs its password, so keep that from the agent too. So run Rowbit and its files as an operating system user the agent can't act as. With stdio, one way is to have the MCP client start Rowbit through `sudo`:
@@ -197,6 +213,7 @@ The agent gets three tools: `query` to read, `propose_write` to ask for a write,
   ```
 
   Then configure the MCP client to run `sudo -n -u rowbit /usr/local/bin/rowbit-mcp-coding-agent`. Reviewers run `rowbit` as the `rowbit` user too, or use the review page. Over a network, put the page behind HTTPS; it is plain HTTP.
+- **Sign reviewers in with your identity provider.** The page password is for one machine: `rowbit serve` won't listen beyond loopback without a provider. Copy [examples/rowbit-server.yml](../examples/rowbit-server.yml), register `https://<your Rowbit>/auth/callback` with your provider, and run `rowbit server check`. See [rowbit-server.yml](spec/server.md#signing-in).
 - **Keep the page's password out of logs.** The first `rowbit serve` prints it to standard error, so under a service manager like systemd it would land in the journal. Run the first `serve` in a terminal, or set the password with `rowbit serve --set-password` before installing the service.
 - **Give Rowbit its own database user** with the grants in [database privileges](privileges.md), and nothing else.
 - **Protect `rowbit.db`.** It holds before and after copies of every row a change touched. Rowbit makes it readable by its owner only; back it up like the database. See [the SQLite file](privileges.md#the-sqlite-file).

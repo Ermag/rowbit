@@ -425,3 +425,123 @@ fn settings_are_kept_and_replaced() {
     store.set_setting("web.password", "b").unwrap();
     assert_eq!(store.setting("web.password").unwrap().as_deref(), Some("b"));
 }
+
+#[test]
+fn notifications_are_queued_with_the_hold_and_sent_once() {
+    let mut store = Store::open_in_memory().unwrap();
+    let (id, _) = previewed(&mut store);
+    let notify = [
+        NewDelivery {
+            target: "slack".into(),
+            delivery: "d1".into(),
+            payload: "{}".into(),
+        },
+        NewDelivery {
+            target: "pager".into(),
+            delivery: "d2".into(),
+            payload: "{}".into(),
+        },
+    ];
+    store
+        .transition_notifying(id, &held(), &policy(), None, &notify)
+        .unwrap();
+    assert_eq!(store.deliveries(10).unwrap().len(), 2);
+
+    // Leased: a second sender gets nothing until the lease runs out.
+    let due = store.claim_deliveries(10, 60_000).unwrap();
+    assert_eq!(due.len(), 2);
+    assert!(store.claim_deliveries(10, 60_000).unwrap().is_empty());
+
+    store
+        .record_delivery(due[0].id, DeliveryOutcome::Delivered)
+        .unwrap();
+    store
+        .record_delivery(
+            due[1].id,
+            DeliveryOutcome::Retry {
+                error: "HTTP 503".into(),
+                retry_in_ms: 60_000,
+            },
+        )
+        .unwrap();
+    // The retry isn't due yet, and the delivered one never comes back.
+    assert!(store.claim_deliveries(10, 60_000).unwrap().is_empty());
+    let all = store.deliveries(10).unwrap();
+    let by_target = |t: &str| all.iter().find(|d| d.target == t).unwrap().clone();
+    assert_eq!(by_target("slack").state, "delivered");
+    let pager = by_target("pager");
+    assert_eq!((pager.state.as_str(), pager.attempts), ("pending", 1));
+    assert_eq!(pager.last_error.as_deref(), Some("HTTP 503"));
+    store
+        .record_delivery(
+            pager.id,
+            DeliveryOutcome::Failed {
+                error: "gave up".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(store.deliveries(10).unwrap()[0].state, "failed");
+    // Deliveries are outside the hash chain: the log still verifies.
+    assert_eq!(store.verify().unwrap(), Ok(()));
+}
+
+#[test]
+fn a_refused_transition_queues_nothing() {
+    let mut store = Store::open_in_memory().unwrap();
+    let id = store
+        .propose("refund-bot", "billing", "DELETE FROM t")
+        .unwrap();
+    let notify = [NewDelivery {
+        target: "slack".into(),
+        delivery: "d1".into(),
+        payload: "{}".into(),
+    }];
+    // No review stored yet, so PolicyHeld is refused, and so is the queueing.
+    assert!(
+        store
+            .transition_notifying(id, &held(), &policy(), None, &notify)
+            .is_err()
+    );
+    assert!(store.deliveries(10).unwrap().is_empty());
+}
+
+#[test]
+fn agent_tokens_are_kept_as_hashes_and_replaced() {
+    let mut store = Store::open_in_memory().unwrap();
+    let first = store.issue_agent_token("refund-bot").unwrap();
+    assert!(
+        first.starts_with("rbt_") && first.len() == 4 + 43,
+        "{first}"
+    );
+    assert_eq!(
+        store.agent_for_token(&first).unwrap().as_deref(),
+        Some("refund-bot")
+    );
+    let (created, used) = store.agent_token_times("refund-bot").unwrap().unwrap();
+    assert!(created > 0 && used.is_some());
+    // The token itself is stored nowhere.
+    let n: i64 = store
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM settings WHERE key LIKE ?1 OR value LIKE ?1",
+            [format!("%{}%", &first[4..])],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0);
+
+    // A new token replaces the old one.
+    let second = store.issue_agent_token("refund-bot").unwrap();
+    assert_ne!(first, second);
+    assert_eq!(store.agent_for_token(&first).unwrap(), None);
+    assert_eq!(
+        store.agent_for_token(&second).unwrap().as_deref(),
+        Some("refund-bot")
+    );
+    assert_eq!(store.agent_for_token("rbt_made-up").unwrap(), None);
+
+    assert!(store.revoke_agent_token("refund-bot").unwrap());
+    assert_eq!(store.agent_for_token(&second).unwrap(), None);
+    assert_eq!(store.agent_token_times("refund-bot").unwrap(), None);
+    assert!(!store.revoke_agent_token("refund-bot").unwrap());
+}

@@ -58,6 +58,10 @@ enum Command {
         /// Only changes in this state: held, applied, rejected, ...
         #[arg(long)]
         state: Option<String>,
+        /// Only changes from agents in shadow mode that a rule would have
+        /// held or blocked
+        #[arg(long)]
+        shadowed: bool,
         #[command(flatten)]
         store: StoreArgs,
     },
@@ -108,17 +112,43 @@ enum Command {
     },
     /// Serve the review page: held changes, approve, reject, undo
     ///
-    /// Reviewers sign in with the page's password and their name. The first
-    /// time, Rowbit makes up a password and prints it once; only its hash is
-    /// kept, in the state file. --set-password asks for one instead.
+    /// With reviewers.oidc in rowbit-server.yml, reviewers sign in through
+    /// that identity provider. Without it, Rowbit serves on a loopback
+    /// address only, and reviewers sign in with the page's password and
+    /// their name: the first time, Rowbit makes up a password and prints it
+    /// once, keeping only its hash in the state file; --set-password asks
+    /// for one instead.
     Serve {
-        #[arg(long, default_value = "127.0.0.1:8080")]
-        listen: std::net::SocketAddr,
+        /// Where to listen; overrides rowbit-server.yml (default 127.0.0.1:8080)
+        #[arg(long)]
+        listen: Option<std::net::SocketAddr>,
         /// Choose the page's password (asked for on the terminal) and serve
         #[arg(long)]
         set_password: bool,
         #[command(flatten)]
+        server: ServerArgs,
+        #[command(flatten)]
         setup: Setup,
+    },
+    /// MCP tokens for agents that connect over HTTP
+    ///
+    /// With mcp.http in rowbit-server.yml, `rowbit serve` serves agents at
+    /// /mcp. Each agent signs in with a token of its own, sent as
+    /// `Authorization: Bearer <token>`. Without a subcommand, lists which
+    /// agents have one.
+    Agents {
+        #[command(subcommand)]
+        command: Option<AgentsCommand>,
+        /// The policy file
+        #[arg(long, env = "ROWBIT_POLICY", default_value = "rowbit.yml")]
+        policy: PathBuf,
+        #[command(flatten)]
+        store: StoreArgs,
+    },
+    /// Work with rowbit-server.yml
+    Server {
+        #[command(subcommand)]
+        command: ServerCommand,
     },
     /// Check the audit log for tampering
     Verify {
@@ -264,6 +294,14 @@ impl Setup {
     }
 }
 
+fn decision_name(d: rowbit_policy::Decision) -> &'static str {
+    match d {
+        rowbit_policy::Decision::Allow => "allowed",
+        rowbit_policy::Decision::Hold => "held",
+        rowbit_policy::Decision::Block => "blocked",
+    }
+}
+
 /// The database a `mysql://` URL names; Rowbit needs one as the default.
 fn mysql_database(url: &str) -> anyhow::Result<String> {
     let path = url
@@ -280,11 +318,69 @@ fn mysql_database(url: &str) -> anyhow::Result<String> {
 }
 
 #[derive(Subcommand)]
+enum AgentsCommand {
+    /// Make a new token for an agent, replacing any it had, and print it once
+    Token { agent: String },
+    /// Remove an agent's token
+    Revoke { agent: String },
+}
+
+#[derive(Subcommand)]
+enum ServerCommand {
+    /// Parse and validate rowbit-server.yml, secrets included, without
+    /// starting anything
+    Check {
+        #[command(flatten)]
+        server: ServerArgs,
+    },
+}
+
+/// Where rowbit-server.yml is.
+#[derive(clap::Args)]
+struct ServerArgs {
+    /// Server settings: sign-in, public URL. Optional: without it, Rowbit
+    /// serves on a loopback address with a page password
+    #[arg(
+        long = "config",
+        env = "ROWBIT_SERVER_CONFIG",
+        default_value = "rowbit-server.yml"
+    )]
+    config: PathBuf,
+}
+
+impl ServerArgs {
+    /// The settings, or the defaults if the default file doesn't exist. A
+    /// file named on purpose must exist.
+    fn load(&self) -> anyhow::Result<rowbit_web::config::ServerConfig> {
+        let named = self.config != std::path::Path::new("rowbit-server.yml");
+        if !self.config.exists() && !named {
+            return Ok(Default::default());
+        }
+        let src = std::fs::read_to_string(&self.config)
+            .with_context(|| format!("reading {}", self.config.display()))?;
+        Ok(rowbit_web::config::ServerConfig::from_yaml(&src, |name| {
+            std::env::var(name).ok()
+        })?)
+    }
+}
+
+#[derive(Subcommand)]
 enum PolicyCommand {
     /// Parse and validate a policy file
     Check {
         #[arg(default_value = "rowbit.yml")]
         path: PathBuf,
+    },
+    /// Replay the changes Rowbit has recorded against a policy file, and
+    /// list every decision that would differ
+    ///
+    /// Uses each change's stored preview, so it needs no database. Scopes
+    /// aren't replayed: they need the database's own check.
+    Test {
+        /// The policy to try
+        path: PathBuf,
+        #[command(flatten)]
+        store: StoreArgs,
     },
 }
 
@@ -302,6 +398,51 @@ async fn main() -> anyhow::Result<()> {
                 "{}: ok ({} agent(s), {rules} rule(s))",
                 path.display(),
                 policy.agents.len()
+            );
+        }
+        Command::Policy {
+            command: PolicyCommand::Test { path, store },
+        } => {
+            let src = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let policy = PolicyFile::from_yaml(&src)?;
+            let store = store.open()?;
+            let mut ids = Vec::new();
+            for state in State::ALL {
+                ids.extend(store.list(state)?);
+            }
+            ids.sort_unstable();
+            let (mut checked, mut differ) = (0, 0);
+            for id in ids {
+                let change = store.get(id)?;
+                let Some(was) = rowbit_engine::recorded_decision(&store.events(id)?) else {
+                    continue;
+                };
+                let Some(now) = rowbit_engine::replay(&policy, &change) else {
+                    continue;
+                };
+                checked += 1;
+                if now.decision == was {
+                    continue;
+                }
+                differ += 1;
+                let by = now.rule.map(|r| format!("rule {r}")).unwrap_or_else(|| {
+                    if now.floor {
+                        "a floor".into()
+                    } else {
+                        "the default".into()
+                    }
+                });
+                println!(
+                    "{}  was {}, would be {} by {by}",
+                    review::line(&change),
+                    decision_name(was),
+                    decision_name(now.decision)
+                );
+            }
+            println!(
+                "{checked} recorded change(s) replayed against {}: {differ} would be decided differently",
+                path.display()
             );
         }
         Command::Mcp { agent, setup } => {
@@ -328,7 +469,11 @@ async fn main() -> anyhow::Result<()> {
             let status = engine.propose(&agent, &database, &sql).await?;
             println!("{}", rowbit_mcp::status_json(&status));
         }
-        Command::Changes { state, store } => {
+        Command::Changes {
+            state,
+            shadowed,
+            store,
+        } => {
             let store = store.open()?;
             let states = match state {
                 Some(s) => vec![State::parse(&s).with_context(|| format!("unknown state {s}"))?],
@@ -340,7 +485,20 @@ async fn main() -> anyhow::Result<()> {
             }
             ids.sort_unstable();
             for id in ids {
-                println!("{}", review::line(&store.get(id)?));
+                let events = store.events(id)?;
+                let shadow = events.iter().find(|e| e.event == "PolicyShadowed");
+                if shadowed && shadow.is_none() {
+                    continue;
+                }
+                let line = review::line(&store.get(id)?);
+                match shadow {
+                    Some(e) if shadowed => println!(
+                        "{line}  {} ({})",
+                        rowbit_core::text::reveal(e.detail.as_deref().unwrap_or_default()),
+                        rowbit_core::text::reveal(&e.actor)
+                    ),
+                    _ => println!("{line}"),
+                }
             }
         }
         Command::Show { id, all, store } => {
@@ -384,18 +542,124 @@ async fn main() -> anyhow::Result<()> {
         Command::Serve {
             listen,
             set_password,
+            server,
             setup,
         } => {
-            let hash = page_password(&setup.store, set_password)?;
-            let (engine, _) = setup.engine()?;
-            if !listen.ip().is_loopback() {
-                eprintln!(
-                    "rowbit: the page is served over plain HTTP on {listen}; \
-                     put it behind HTTPS before anyone signs in over a network"
-                );
+            let config = server.load()?;
+            let listen = config.listen(listen);
+            config.check_listen(listen)?;
+            let sign_in = match (&config.oidc, &config.public_url) {
+                (Some(oidc), Some(public_url)) => {
+                    anyhow::ensure!(
+                        !set_password,
+                        "reviewers sign in through {}; there is no page password",
+                        oidc.issuer
+                    );
+                    let login = rowbit_web::oidc::OidcLogin::discover(oidc, public_url)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                    rowbit_web::SignIn::Oidc(Box::new(login))
+                }
+                _ => rowbit_web::SignIn::Password {
+                    hash: page_password(&setup.store, set_password)?,
+                },
+            };
+            let (engine, database) = setup.engine()?;
+            // Every process that proposes changes queues notifications from
+            // this setting; only this one sends them, with the secrets.
+            engine.set_notify(&rowbit_engine::NotifySetting {
+                review_url: config.public_url.clone(),
+                targets: config
+                    .notify
+                    .iter()
+                    .map(|n| rowbit_engine::NotifyTarget {
+                        name: n.name.clone(),
+                        agents: n.agents.clone(),
+                    })
+                    .collect(),
+            })?;
+            let engine = std::sync::Arc::new(engine);
+            tokio::spawn(
+                rowbit_web::notify::Notifier::new(engine.clone(), config.notify.clone()).run(),
+            );
+            let web = rowbit_web::Web {
+                sign_in,
+                hosts: config.public_host().into_iter().collect(),
+                secure: config.https(),
+                mcp: config.mcp_http.then_some(database),
+            };
+            let address = config
+                .public_url
+                .clone()
+                .unwrap_or_else(|| format!("http://{listen}"));
+            eprintln!("rowbit: review page on {address}/");
+            rowbit_web::serve(engine, web, listen).await?;
+        }
+        Command::Agents {
+            command,
+            policy,
+            store,
+        } => {
+            let src = std::fs::read_to_string(&policy)
+                .with_context(|| format!("reading {}", policy.display()))?;
+            let policy = PolicyFile::from_yaml(&src)?;
+            match command {
+                Some(AgentsCommand::Token { agent }) => {
+                    anyhow::ensure!(
+                        policy.agents.contains_key(&agent),
+                        "{agent} is not an agent in rowbit.yml"
+                    );
+                    // Creates the state file if this is the first command run.
+                    let mut store = Store::open(&store.store)
+                        .with_context(|| format!("opening {}", store.store.display()))?;
+                    let token = store.issue_agent_token(&agent)?;
+                    eprintln!(
+                        "rowbit: {agent}'s MCP token, shown this once (any older one no longer works):\n"
+                    );
+                    println!("{token}");
+                }
+                Some(AgentsCommand::Revoke { agent }) => {
+                    let mut store = store.open()?;
+                    if store.revoke_agent_token(&agent)? {
+                        println!("{agent}'s token is revoked");
+                    } else {
+                        println!("{agent} had no token");
+                    }
+                }
+                None => {
+                    let store = store.open()?;
+                    for agent in policy.agents.keys() {
+                        match store.agent_token_times(agent)? {
+                            None => println!("{agent}  no token"),
+                            Some((created, used)) => println!(
+                                "{agent}  token made {}, {}",
+                                review::when(created),
+                                used.map(|u| format!("last used {}", review::when(u)))
+                                    .unwrap_or_else(|| "never used".into())
+                            ),
+                        }
+                    }
+                }
             }
-            eprintln!("rowbit: review page on http://{listen}/");
-            rowbit_web::serve(std::sync::Arc::new(engine), hash, listen).await?;
+        }
+        Command::Server {
+            command: ServerCommand::Check { server },
+        } => {
+            anyhow::ensure!(
+                server.config.exists(),
+                "{} does not exist",
+                server.config.display()
+            );
+            let config = server.load()?;
+            config.check_listen(config.listen(None))?;
+            println!(
+                "{}: ok (sign-in: {})",
+                server.config.display(),
+                match &config.oidc {
+                    Some(o) => format!("OIDC through {}", o.issuer),
+                    None => "page password, loopback only".to_owned(),
+                }
+            );
         }
         Command::Verify { store } => {
             let store = store.open()?;

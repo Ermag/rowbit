@@ -151,6 +151,11 @@ fn show(cell: &Cell) -> String {
     }
 }
 
+/// A time in Unix milliseconds, in UTC.
+pub fn when(ms: i64) -> String {
+    rowbit_engine::rfc3339(ms.div_euclid(1000))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

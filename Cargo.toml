@@ -22,12 +22,18 @@ rowbit-web = { path = "crates/rowbit-web" }
 
 anyhow = "1"
 argon2 = "0.5"
-axum = { version = "0.8", default-features = false, features = ["form", "http1", "tokio", "query"] }
+base64 = "0.22"
+axum = { version = "0.8", default-features = false, features = ["form", "http1", "json", "tokio", "query"] }
 getrandom = "0.3"
+hmac = "0.12"
 clap = { version = "4", features = ["derive", "env"] }
+openidconnect = { version = "4", default-features = false, features = ["reqwest", "timing-resistant-secret-traits"] }
+# The system's trusted CAs, so an identity provider behind a company CA works.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 mysql_async = { version = "0.36", default-features = false, features = ["minimal-rust"] }
 rpassword = "7"
-rmcp = { version = "3.5", features = ["server", "macros", "transport-io"] }
+rmcp = { version = "3.5", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
+http = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -52,6 +52,19 @@ Every pull request carries exactly one of these, which groups it in the release 
 
 Issues labelled `good first issue` are small and self-contained; `help wanted` marks ones we'd welcome help on.
 
+## The review UI
+
+The UI is a Svelte app in `web/`. Its build is committed in `crates/rowbit-web/dist`, which the binary embeds, so building Rowbit needs no Node. After changing anything in `web/`, rebuild and commit the result; CI fails if `dist` isn't a build of the source.
+
+```sh
+cd web
+npm ci
+npm run build
+./e2e/run.sh   # browser tests against the MariaDB test database; needs `npx playwright install chromium` once
+```
+
+The UI inserts values only as text (no `{@html}`), and the server sends them with hidden characters already made visible. Its content security policy allows no inline scripts or styles, so no `style=` attributes either.
+
 ## Licenses
 
 The server crates are AGPL-3.0-only. `rowbit-policy` (the `rowbit.yml` schema) and future client SDKs are Apache-2.0. Contributions are accepted under the license of the crate they touch.

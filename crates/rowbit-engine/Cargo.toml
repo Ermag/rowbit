@@ -13,6 +13,9 @@ rowbit-core.workspace = true
 rowbit-mysql.workspace = true
 rowbit-policy.workspace = true
 rowbit-store.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
