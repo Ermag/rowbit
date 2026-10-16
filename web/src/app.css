@@ -73,3 +73,4 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .state.rejected, .state.failed { color: var(--before); }
 .pager { display: flex; gap: 12px; align-items: center; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.shadow { color: var(--held); }
