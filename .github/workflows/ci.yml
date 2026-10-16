@@ -58,9 +58,37 @@ jobs:
         env:
           ROWBIT_OIDC_CLIENT_SECRET: not-a-real-secret
         run: cargo run --locked -q -p rowbit-cli -- server check --config examples/rowbit-server.yml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Browser tests of the review UI
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          ./e2e/run.sh
       - name: Database logs
         if: failure()
         run: docker compose logs
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: The committed UI is a build of its source
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          git status --porcelain -- ../crates/rowbit-web/dist
+          test -z "$(git status --porcelain -- ../crates/rowbit-web/dist)"
 
   deny:
     runs-on: ubuntu-latest

@@ -10,6 +10,8 @@ target/
 # Node
 node_modules/
 dist/
+# The built review UI is committed, so the binary builds without Node.
+!crates/rowbit-web/dist/
 
 # Python
 __pycache__/

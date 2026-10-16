@@ -319,8 +319,8 @@ async fn a_verified_allowed_reviewer_signs_in() {
     // Moves on with a page of its own, so the Strict cookie is sent.
     assert!(page.contains("http-equiv=refresh"), "{page}");
     let cookie = session.split(';').next().unwrap();
-    let queue = body(send(&router, "/", Some(cookie)).await).await;
-    assert!(queue.contains("Signed in as ann@example.com"), "{queue}");
+    let me = body(send(&router, "/api/session", Some(cookie)).await).await;
+    assert!(me.contains(r#""reviewer":"ann@example.com""#), "{me}");
 
     // By group, from outside the allowed domains.
     let mut next = Next::as_("contractor@elsewhere.dev");
