@@ -33,6 +33,39 @@ struct File {
     public_url: Option<String>,
     listen: Option<SocketAddr>,
     reviewers: Option<ReviewersFile>,
+    #[serde(default)]
+    notify: Vec<NotifyFile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NotifyFile {
+    name: String,
+    kind: NotifyKind,
+    url: String,
+    secret: Option<String>,
+    agents: Option<Vec<String>>,
+}
+
+/// How a notification is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotifyKind {
+    /// A Slack incoming webhook. Its URL is the secret.
+    Slack,
+    /// Signed JSON to any URL.
+    Webhook,
+}
+
+/// Where to announce held changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notify {
+    pub name: String,
+    pub kind: NotifyKind,
+    pub url: Secret,
+    /// The signing key, for a webhook.
+    pub secret: Option<Secret>,
+    pub agents: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -109,6 +142,7 @@ pub struct ServerConfig {
     pub public_url: Option<String>,
     pub listen: Option<SocketAddr>,
     pub oidc: Option<Oidc>,
+    pub notify: Vec<Notify>,
 }
 
 impl ServerConfig {
@@ -167,6 +201,42 @@ impl ServerConfig {
                 })
             }
         };
+        let mut notify = Vec::new();
+        let mut names = BTreeSet::new();
+        for n in file.notify {
+            let at = format!("notify.{}", n.name);
+            if n.name.trim().is_empty() || !names.insert(n.name.clone()) {
+                return invalid("every notify target needs a name of its own");
+            }
+            // A Slack webhook's URL is the secret; a webhook's may be plain.
+            let url = match n.kind {
+                NotifyKind::Slack => from_env(&format!("{at}.url"), &n.url, &env)?,
+                NotifyKind::Webhook if n.url.starts_with("${") => {
+                    from_env(&format!("{at}.url"), &n.url, &env)?
+                }
+                NotifyKind::Webhook => Secret(n.url.clone()),
+            };
+            check_url(&format!("{at}.url"), url.expose())?;
+            let secret = match (n.kind, &n.secret) {
+                (NotifyKind::Webhook, Some(s)) => Some(from_env(&format!("{at}.secret"), s, &env)?),
+                (NotifyKind::Webhook, None) => {
+                    return invalid(format!("{at}: a webhook needs a secret to sign with"));
+                }
+                (NotifyKind::Slack, Some(_)) => {
+                    return invalid(format!(
+                        "{at}: Slack webhooks aren't signed; leave out secret"
+                    ));
+                }
+                (NotifyKind::Slack, None) => None,
+            };
+            notify.push(Notify {
+                name: n.name,
+                kind: n.kind,
+                url,
+                secret,
+                agents: n.agents,
+            });
+        }
         if oidc.is_some() && public_url.is_none() {
             return invalid(
                 "public_url is needed with reviewers.oidc: the provider redirects back to it",
@@ -176,6 +246,7 @@ impl ServerConfig {
             public_url,
             listen: file.listen,
             oidc,
+            notify,
         })
     }
 
@@ -326,7 +397,7 @@ mod tests {
                 "public_url is needed",
             ),
             (
-                EXAMPLE.replace("version: 0", "version: 0\nnotify: []"),
+                EXAMPLE.replace("version: 0", "version: 0\nmcp: {}"),
                 "unknown field",
             ),
             (
@@ -335,6 +406,48 @@ mod tests {
             ),
         ] {
             let err = ServerConfig::from_yaml(&src, env).unwrap_err().to_string();
+            assert!(err.contains(needle), "{src}\n gave {err}");
+        }
+    }
+
+    #[test]
+    fn notify_targets_keep_their_secrets_in_the_environment() {
+        let env = |name: &str| match name {
+            "SLACK" => Some("https://hooks.slack.com/services/T/B/x".to_owned()),
+            "HOOK" => Some("k".to_owned()),
+            _ => None,
+        };
+        let ok = "version: 0\nnotify:\n  - { name: s, kind: slack, url: \"${SLACK}\", agents: [bot] }\n  - { name: w, kind: webhook, url: https://h.example.com/rowbit, secret: \"${HOOK}\" }\n";
+        let c = ServerConfig::from_yaml(ok, env).unwrap();
+        assert_eq!(c.notify.len(), 2);
+        assert_eq!(c.notify[1].secret.as_ref().unwrap().expose(), "k");
+        for (src, needle) in [
+            (
+                "version: 0\nnotify:\n  - { name: s, kind: slack, url: https://hooks.slack.com/x }\n",
+                "reference",
+            ),
+            (
+                "version: 0\nnotify:\n  - { name: w, kind: webhook, url: https://h.example.com }\n",
+                "needs a secret",
+            ),
+            (
+                "version: 0\nnotify:\n  - { name: w, kind: webhook, url: https://h.example.com, secret: plain }\n",
+                "reference",
+            ),
+            (
+                "version: 0\nnotify:\n  - { name: w, kind: webhook, url: http://h.example.com, secret: \"${HOOK}\" }\n",
+                "https",
+            ),
+            (
+                "version: 0\nnotify:\n  - { name: w, kind: email, url: https://h.example.com }\n",
+                "unknown variant",
+            ),
+            (
+                "version: 0\nnotify:\n  - { name: s, kind: slack, url: \"${SLACK}\" }\n  - { name: s, kind: slack, url: \"${SLACK}\" }\n",
+                "name of its own",
+            ),
+        ] {
+            let err = ServerConfig::from_yaml(src, env).unwrap_err().to_string();
             assert!(err.contains(needle), "{src}\n gave {err}");
         }
     }
