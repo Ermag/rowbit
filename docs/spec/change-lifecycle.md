@@ -172,7 +172,9 @@ No statement, read or write, may name the server's own schemas (`information_sch
 
 ## Reviewing (CLI)
 
-`rowbit changes [--state held]` lists changes. `rowbit show <id>` prints the statement, every row's changed columns before and after (the first 50 rows), the history and the review hash. `rowbit approve <id> --review <hash>` needs at least the first 12 characters of that hash, so a person approves what they looked at; the change is then applied. `rowbit reject <id> --reason <text>`, `rowbit undo <id>` and `rowbit verify` (the audit log check) complete the set.
+`rowbit changes [--state held]` lists changes. `rowbit show <id>` prints the statement as Rowbit understood it (comments dropped), every row's changed columns before and after (the first 50 rows, or all with `--all`), the history and the review hash. Everything the agent or the database controls is printed with control characters and invisible or direction-changing Unicode shown as `\u{..}`, so an agent can't recolour, hide or move text in the reviewer's terminal.
+
+`rowbit approve <id> --review <hash>` needs at least the first 12 characters of that hash, so a person approves what they looked at; the change is then applied. A change of more than 50 rows also needs `--rows <count>` with its exact row count, so an approval never covers rows the person didn't know about. `rowbit reject <id> --reason <text>`, `rowbit undo <id>` and `rowbit verify` (the audit log check) complete the set.
 
 ## Audit log
 

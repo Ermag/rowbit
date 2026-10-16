@@ -8,7 +8,35 @@ use rowbit_core::preview::{Cell, Preview, WriteKind};
 use rowbit_store::{AuditEvent, Change, Review};
 
 /// Rows shown per change before the rest is summarised.
-const SHOWN_ROWS: usize = 50;
+pub const SHOWN_ROWS: usize = 50;
+
+/// Text the agent or the database controls, made safe for a terminal:
+/// control characters (escape sequences that recolour, hide or move text,
+/// or write to the clipboard) and invisible or direction-changing Unicode
+/// are shown as `\u{..}` instead of acting on the screen. Newlines too, so
+/// a value can't fake a line of its own.
+pub fn clean(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        let hidden = c.is_control()
+            || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}');
+        if hidden {
+            out.push_str(&format!("\\u{{{:x}}}", c as u32));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The statement as Rowbit understood it (comments dropped), or the
+/// agent's text if it never parsed. Cleaned either way.
+fn statement(sql: &str) -> String {
+    match rowbit_mysql::statement::classify(sql) {
+        Ok(c) => clean(&c.canonical),
+        Err(_) => clean(sql),
+    }
+}
 
 pub fn line(change: &Change) -> String {
     let (table, rows) = match &change.review {
@@ -20,26 +48,28 @@ pub fn line(change: &Change) -> String {
         "{:>5}  {:<9} {:<16} {:<32} {}",
         change.id,
         change.state.as_str(),
-        change.agent,
-        table,
+        clean(&change.agent),
+        clean(&table),
         rows
     )
 }
 
-pub fn full(change: &Change, history: &[AuditEvent]) -> String {
+/// Everything about one change. `all` lists every row, not just the first
+/// [`SHOWN_ROWS`].
+pub fn full(change: &Change, history: &[AuditEvent], all: bool) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "Change {}  {}", change.id, change.state.as_str());
-    let _ = writeln!(out, "Agent     {}", change.agent);
-    let _ = writeln!(out, "Database  {}", change.database);
-    let _ = writeln!(out, "Statement {}", change.sql);
+    let _ = writeln!(out, "Agent     {}", clean(&change.agent));
+    let _ = writeln!(out, "Database  {}", clean(&change.database));
+    let _ = writeln!(out, "Statement {}", statement(&change.sql));
     match &change.review {
         Some(Review::Rows(p)) => {
-            let _ = writeln!(out, "Table     {}", p.table.qualified_name());
+            let _ = writeln!(out, "Table     {}", clean(&p.table.qualified_name()));
             let _ = writeln!(out);
-            out.push_str(&rows(p));
+            out.push_str(&rows(p, all));
         }
         Some(Review::Ddl { sql }) => {
-            let _ = writeln!(out, "\nRuns      {sql}");
+            let _ = writeln!(out, "\nRuns      {}", clean(sql));
             let _ = writeln!(out, "Schema changes cannot be undone.");
         }
         None => {}
@@ -53,15 +83,21 @@ pub fn full(change: &Change, history: &[AuditEvent]) -> String {
             .detail
             .as_deref()
             .filter(|d| !d.is_empty() && e.event != "ApplySucceeded")
-            .map(|d| format!("  {d}"))
+            .map(|d| format!("  {}", clean(d)))
             .unwrap_or_default();
-        let _ = writeln!(out, "  {:<15} {:<28} {}{detail}", e.event, e.actor, e.to);
+        let _ = writeln!(
+            out,
+            "  {:<15} {:<28} {}{detail}",
+            clean(&e.event),
+            clean(&e.actor),
+            clean(&e.to)
+        );
     }
     out
 }
 
 /// Each row's key and the columns that change, before and after.
-fn rows(p: &Preview) -> String {
+fn rows(p: &Preview, all: bool) -> String {
     let mut out = String::new();
     let verb = match p.kind {
         WriteKind::Insert => "inserts",
@@ -69,7 +105,8 @@ fn rows(p: &Preview) -> String {
         WriteKind::Delete => "deletes",
     };
     let _ = writeln!(out, "This change {verb} {} rows:", p.rows.len());
-    for row in p.rows.iter().take(SHOWN_ROWS) {
+    let shown = if all { p.rows.len() } else { SHOWN_ROWS };
+    for row in p.rows.iter().take(shown) {
         let key = match p.key(row) {
             Some(key) => key.iter().map(show).collect::<Vec<_>>().join(", "),
             None => "new".to_owned(),
@@ -85,11 +122,16 @@ fn rows(p: &Preview) -> String {
                 (None, Some(a)) => show(a),
                 (None, None) => continue,
             };
-            let _ = writeln!(out, "    {:<20} {line}", column.name);
+            let _ = writeln!(out, "    {:<20} {line}", clean(&column.name));
         }
     }
-    if p.rows.len() > SHOWN_ROWS {
-        let _ = writeln!(out, "  ... and {} more", p.rows.len() - SHOWN_ROWS);
+    if p.rows.len() > shown {
+        let _ = writeln!(
+            out,
+            "  ... and {} more. Approving covers all {}; `rowbit show {{id}} --all` lists them.",
+            p.rows.len() - shown,
+            p.rows.len()
+        );
     }
     out
 }
@@ -104,5 +146,31 @@ fn show(cell: &Cell) -> String {
                 format!("0x{hex}")
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Found in review: an agent's string literal carried ESC[8m (conceal)
+    // to the reviewer's terminal, hiding what followed.
+    #[test]
+    fn agent_text_cannot_drive_the_terminal() {
+        let nasty = "a\u{1b}[8mhidden\u{7}\nfake line\u{202e}rtl\u{200b}\u{1b}]52;c;Zm9v\u{7}";
+        let cleaned = clean(nasty);
+        assert!(!cleaned.chars().any(|c| c.is_control()), "{cleaned:?}");
+        assert!(!cleaned.contains('\u{202e}') && !cleaned.contains('\u{200b}'));
+        assert!(cleaned.contains("\\u{1b}[8m"), "{cleaned}");
+        assert_eq!(clean("plain 'text', 12.50"), "plain 'text', 12.50");
+    }
+
+    #[test]
+    fn statements_show_without_comments() {
+        assert_eq!(
+            statement("UPDATE t SET a = 1 /* reviewed, safe */ WHERE id = 2 -- trust me"),
+            "UPDATE t SET a = 1 WHERE id = 2"
+        );
+        assert_eq!(statement("not sql \u{1b}[2J"), "not sql \\u{1b}[2J");
     }
 }

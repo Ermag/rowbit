@@ -179,3 +179,56 @@ async fn a_person_rejects(var: &str, table: &str) {
     assert_eq!(statuses(&s.url, &t).await, ["approved", "approved"]);
     cleanup(&s.dir);
 }
+
+// Found in review: approving covered rows no surface ever showed, and an
+// agent's escape codes reached the reviewer's terminal.
+on_both!(big_changes_and_hostile_text);
+async fn big_changes_and_hostile_text(var: &str, table: &str) {
+    let t = format!("{table}_b");
+    let Some(s) = setup(var, &t).await else {
+        return;
+    };
+    let mut conn = mysql_async::Conn::from_url(&s.url).await.unwrap();
+    for id in 3..=60 {
+        conn.query_drop(format!("INSERT INTO {t} VALUES ({id}, 'approved')"))
+            .await
+            .unwrap();
+    }
+    conn.disconnect().await.unwrap();
+
+    let id = s
+        .propose(&format!(
+            "UPDATE {t} SET status = 'x\u{1b}[8m' /* \u{202e} safe */ WHERE id > 0"
+        ))
+        .await
+        .to_string();
+    let (ok, show) = s.rowbit(&["show", &id]);
+    assert!(ok, "{show}");
+    assert!(
+        !show.contains('\u{1b}') && !show.contains('\u{202e}'),
+        "{show:?}"
+    );
+    let statement = show.lines().find(|l| l.starts_with("Statement")).unwrap();
+    assert!(
+        !statement.contains("safe"),
+        "comments are not shown: {statement}"
+    );
+    assert!(
+        show.contains("... and 10 more. Approving covers all 60"),
+        "{show}"
+    );
+    // Keys may print quoted or plain; either way row 60 is not listed.
+    let row_60 = |text: &str| text.contains("row 60\n") || text.contains("row \"60\"\n");
+    assert!(!row_60(&show), "{show}");
+    let (_, all) = s.rowbit(&["show", &id, "--all"]);
+    assert!(row_60(&all), "{all}");
+
+    let hash = review_hash(&show);
+    let (ok, out) = s.rowbit(&["approve", &id, "--review", &hash]);
+    assert!(!ok && out.contains("--rows 60"), "{out}");
+    let (ok, out) = s.rowbit(&["approve", &id, "--review", &hash, "--rows", "59"]);
+    assert!(!ok, "{out}");
+    let (ok, out) = s.rowbit(&["approve", &id, "--review", &hash, "--rows", "60"]);
+    assert!(ok && out.contains("applied"), "{out}");
+    cleanup(&s.dir);
+}

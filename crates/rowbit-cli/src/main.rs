@@ -50,17 +50,25 @@ enum Command {
     /// Show one change: the statement, every row before and after, and its history
     Show {
         id: i64,
+        /// List every row, not just the first 50
+        #[arg(long)]
+        all: bool,
         #[command(flatten)]
         setup: Setup,
     },
     /// Approve a held change and apply it
     ///
     /// --review is the review hash `rowbit show` printed (at least its first
-    /// 12 characters), so you approve exactly what you looked at.
+    /// 12 characters), so you approve exactly what you looked at. A change
+    /// of more rows than `show` lists by default also needs --rows with its
+    /// row count, so you say how many rows you approve.
     Approve {
         id: i64,
         #[arg(long)]
         review: String,
+        /// The change's row count; needed above 50 rows
+        #[arg(long)]
+        rows: Option<usize>,
         #[command(flatten)]
         person: Person,
         #[command(flatten)]
@@ -131,6 +139,26 @@ fn review_hash(stored: Option<&str>, typed: &str) -> anyhow::Result<String> {
         "that is not this change's review hash; run `rowbit show` again"
     );
     Ok(stored.to_owned())
+}
+
+/// Above the rows `show` lists by default, the person must name the total,
+/// so an approval never covers rows they didn't know about.
+fn confirm_rows(change: &rowbit_store::Change, rows: Option<usize>) -> anyhow::Result<()> {
+    let total = match &change.review {
+        Some(rowbit_store::Review::Rows(p)) => p.rows.len(),
+        _ => return Ok(()),
+    };
+    match rows {
+        Some(n) if n == total => Ok(()),
+        Some(n) => anyhow::bail!("this change writes {total} rows, not {n}"),
+        None if total <= review::SHOWN_ROWS => Ok(()),
+        None => anyhow::bail!(
+            "this change writes {total} rows and `rowbit show` lists {} of them; \
+             check them with `rowbit show {} --all`, then approve with --rows {total}",
+            review::SHOWN_ROWS,
+            change.id
+        ),
+    }
 }
 
 /// Where Rowbit's database, policy and state are.
@@ -230,21 +258,24 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", review::line(&engine.change(id)?));
             }
         }
-        Command::Show { id, setup } => {
+        Command::Show { id, all, setup } => {
             let (engine, _) = setup.engine()?;
             print!(
                 "{}",
-                review::full(&engine.change(id)?, &engine.history(id)?)
+                review::full(&engine.change(id)?, &engine.history(id)?, all)
             );
         }
         Command::Approve {
             id,
             review,
+            rows,
             person,
             setup,
         } => {
             let (engine, _) = setup.engine()?;
-            let hash = review_hash(engine.change(id)?.review_hash.as_deref(), &review)?;
+            let change = engine.change(id)?;
+            let hash = review_hash(change.review_hash.as_deref(), &review)?;
+            confirm_rows(&change, rows)?;
             let change = engine.approve(&person.name()?, id, &hash).await?;
             println!("{}", review::line(&change));
         }

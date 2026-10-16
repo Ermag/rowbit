@@ -316,15 +316,7 @@ impl Engine {
         let store = self.store();
         let states = match state {
             Some(state) => vec![state],
-            None => vec![
-                State::Proposed,
-                State::Held,
-                State::Approved,
-                State::Applied,
-                State::Rejected,
-                State::Failed,
-                State::Undone,
-            ],
+            None => State::ALL.to_vec(),
         };
         let mut ids = Vec::new();
         for state in states {
