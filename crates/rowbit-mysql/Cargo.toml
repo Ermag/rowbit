@@ -13,9 +13,11 @@ mysql_async.workspace = true
 sqlparser.workspace = true
 thiserror.workspace = true
 rowbit-core.workspace = true
+rowbit-policy.workspace = true
 tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
+serde_norway.workspace = true
 tokio.workspace = true
 
 [lints]

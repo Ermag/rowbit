@@ -2075,6 +2075,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "getrandom 0.3.4",
  "mysql_async",
  "rowbit-core",
  "rowbit-engine",
@@ -2138,6 +2139,8 @@ version = "0.1.0"
 dependencies = [
  "mysql_async",
  "rowbit-core",
+ "rowbit-policy",
+ "serde_norway",
  "sqlparser",
  "thiserror 2.0.21",
  "tokio",

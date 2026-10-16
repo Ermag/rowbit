@@ -4,6 +4,14 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 
 ## Unreleased
 
+### Scopes
+
+- `rowbit.yml` accepts `scopes` per agent: tables it may read, insert into, update, delete from or change, and tables and columns it may never read. `rowbit policy check` warns about a table an agent may update or delete from but not read.
+- `rowbit grants diff` and `rowbit grants apply` give each scoped agent a database user of its own, `rowbit_<agent>`, with grants compiled from its scopes, using an administrator's URL for that run only. Privileges added by hand are revoked; roles and proxy grants are listed for a person to remove.
+- The database enforces them. A scoped agent's reads run on its own user, every write is checked with an `EXPLAIN` on that user before preview and again before apply, and approved schema changes run on it. A parser check in front gives the agent a clear reason (`shop.cards is outside coding-agent's read scope`). Writes outside scopes are blocked by `policy:scope`.
+- Rowbit checks every scoped agent's user when it starts, and refuses an agent whose user holds more than its scopes.
+- A new MCP tool, `describe_schema`, lists the tables an agent may use, with their columns and what it may do with each, leaving out denied tables and columns.
+
 ### Shadow mode
 
 - `mode: shadow` on an agent in `rowbit.yml` applies writes its rules would hold or block, and logs what would have happened (`PolicyShadowed`, `would hold: ...`), so a team can put Rowbit in front of an agent on day one without slowing it down. Floors still apply: statements Rowbit refuses, tables without a primary key, and schema changes, which are still held. Shadowed changes can be undone like any other.
