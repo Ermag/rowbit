@@ -21,7 +21,9 @@ cd examples/quickstart
 docker compose up -d --wait
 ```
 
-This starts MariaDB 11.4 on `127.0.0.1:33070` with a `shop` database holding 1,500 orders, 1,284 of them `pending`. It also creates the database user Rowbit connects as, with exactly the grants in [database privileges](privileges.md). The files are in [examples/quickstart](../examples/quickstart).
+If you've run the quickstart before, run the [clean up](#clean-up) step first, so you start from the same data.
+
+This starts MariaDB 11.4 on `127.0.0.1:33070` with a `shop` database holding 1,500 orders, one placed each minute over the last day. The newest 1,284 are `pending`, so some of them were placed in the last hour. (Rowbit works the same with MySQL 8.4.) It also creates the database user Rowbit connects as, with exactly the grants in [database privileges](privileges.md). The files are in [examples/quickstart](../examples/quickstart).
 
 Point Rowbit at it. Every `rowbit` command below reads this variable, and finds `rowbit.yml` and its state file `rowbit.db` in the current directory.
 
@@ -31,7 +33,7 @@ rowbit ping
 rowbit policy check
 ```
 
-`ping` prints the server version, and `policy check` says `rowbit.yml: ok (1 agents, 2 rules)`.
+`ping` prints the server version, and `policy check` says `rowbit.yml: ok (1 agent(s), 2 rule(s))`.
 
 ## 3. Read the rules
 
@@ -60,7 +62,7 @@ An agent normally talks to Rowbit over MCP (step 7). To try it without one, `row
 A small fix goes straight through:
 
 ```sh
-rowbit propose --agent coding-agent "UPDATE orders SET status = 'refunded' WHERE id IN (1300, 1301)"
+rowbit propose --agent coding-agent "UPDATE orders SET status = 'refunded' WHERE id IN (10, 11)"
 ```
 
 ```json
@@ -87,7 +89,7 @@ rowbit propose --agent coding-agent "DELETE FROM orders WHERE id = 3"
 {"id":3,"reason":"Data fixes don't delete rows.","rows":1,"state":"rejected","table":"shop.orders"}
 ```
 
-Nothing in the table changed for the held or the refused change. Rowbit only read the rows to preview them.
+Nothing in the table changed for the held or the refused change. Rowbit only read the rows to preview them. It also created `rowbit.db`, its state file, readable only by you: it holds copies of every row a change touched.
 
 ## 5. Review the held change
 
@@ -98,7 +100,7 @@ rowbit changes --state held
 rowbit show 2
 ```
 
-`show` prints the statement, every row's changed columns before and after (the first 50), the history, and a review hash on the `Review` line.
+`show` prints the statement, every row's changed columns before and after (the first 50), the history, and a review hash on the `Review` line. It shows only the columns that change, so check the statement's `WHERE` too: here it catches every pending order, including the ones placed minutes ago. These commands only need `rowbit.db`, not the database password.
 
 Or in the browser. Leave this running and open <http://127.0.0.1:8080>:
 
@@ -111,7 +113,7 @@ The page lists the held change with a before and after table, and buttons to app
 Reject it from the page, or in another terminal:
 
 ```sh
-rowbit reject 2 --reason "That cancels orders from the last hour too."
+rowbit reject 2 --reason "That cancels orders from the last hour too." --as you
 ```
 
 ## 6. Approve, then undo
@@ -119,8 +121,14 @@ rowbit reject 2 --reason "That cancels orders from the last hour too."
 Have the agent propose something narrower, approve it, and take it back.
 
 ```sh
-rowbit propose --agent coding-agent "UPDATE orders SET status = 'cancelled' WHERE status = 'pending' AND placed_at < NOW() - INTERVAL 1 DAY"
+rowbit propose --agent coding-agent "UPDATE orders SET status = 'cancelled' WHERE status = 'pending' AND placed_at < NOW() - INTERVAL 20 HOUR"
 rowbit show 4
+```
+
+It's held too, since it changes more than 20 rows. The count depends on how long the database has been up, about 84 rows if you started it just now:
+
+```json
+{"id":4,"reason":"no rule matched","rows":84,"state":"held","table":"shop.orders"}
 ```
 
 Approve it with the first 12 or more characters of the review hash `show` printed. Rowbit refuses any other hash, so you approve exactly what you looked at.
@@ -147,10 +155,10 @@ rowbit verify
 
 `rowbit mcp` serves one agent over MCP on stdin and stdout. The agent's identity is the `--agent` flag, set by you in the MCP client's config, never by the agent.
 
-For Claude Code, run this from `examples/quickstart`:
+For Claude Code, run this from `examples/quickstart`. It registers Rowbit for this directory only (Claude Code's default `local` scope), with full paths so it works however Claude Code is started:
 
 ```sh
-claude mcp add rowbit --env ROWBIT_DATABASE_URL=$ROWBIT_DATABASE_URL -- rowbit mcp --agent coding-agent --policy $PWD/rowbit.yml --store $PWD/rowbit.db
+claude mcp add rowbit --env ROWBIT_DATABASE_URL=$ROWBIT_DATABASE_URL -- $(command -v rowbit) mcp --agent coding-agent --policy $PWD/rowbit.yml --store $PWD/rowbit.db
 ```
 
 For any client with a JSON config, such as Claude Desktop:
@@ -172,9 +180,25 @@ The agent gets three tools: `query` to read, `propose_write` to ask for a write,
 
 ## Before you use it for real
 
-- **Keep the database credentials away from the agent.** With stdio, the MCP client's config holds Rowbit's database URL. An agent that can read files or run commands on that machine could read it and connect around Rowbit. Run Rowbit under a user the agent can't read files as, or on another machine.
+- **Keep the agent away from Rowbit's credentials, state and review page.** The setup above is for trying Rowbit only. An agent that can read the database URL can connect around Rowbit. An agent that can also read `rowbit.db` can run `rowbit approve` and approve its own change, and one that can reach the review page can press Approve: v0.1 has no sign-in, and `--as` is whatever name is typed. So run Rowbit, its files and the review page as an operating system user the agent can't act as. With stdio, one way is to have the MCP client start Rowbit through `sudo`:
+
+  ```sh
+  # /etc/sudoers.d/rowbit: the agent's user may start only this, as rowbit
+  agent ALL=(rowbit) NOPASSWD: /usr/local/bin/rowbit-mcp-coding-agent
+  ```
+
+  ```sh
+  #!/bin/sh
+  # /usr/local/bin/rowbit-mcp-coding-agent, owned by root, mode 755.
+  # The URL lives in /etc/rowbit/env (owner rowbit, mode 600).
+  set -a; . /etc/rowbit/env; set +a
+  exec /usr/local/bin/rowbit mcp --agent coding-agent \
+    --policy /etc/rowbit/rowbit.yml --store /var/lib/rowbit/rowbit.db
+  ```
+
+  Then configure the MCP client to run `sudo -n -u rowbit /usr/local/bin/rowbit-mcp-coding-agent`. Reviewers run `rowbit` as the `rowbit` user too, and reach the review page only through your own authenticating proxy.
 - **Give Rowbit its own database user** with the grants in [database privileges](privileges.md), and nothing else.
-- **Protect `rowbit.db`.** It holds before and after copies of every row a change touched. See [the SQLite file](privileges.md#the-sqlite-file).
+- **Protect `rowbit.db`.** It holds before and after copies of every row a change touched. Rowbit makes it readable by its owner only; back it up like the database. See [the SQLite file](privileges.md#the-sqlite-file).
 - **Know the limits of v0.1.** One statement per change, tables with a primary key, no triggers or cascading foreign keys, no sign-in for reviewers, and size rules can be met by splitting a write into smaller ones. See [Not in v0.1](spec/change-lifecycle.md#not-in-v01).
 
 ## Clean up

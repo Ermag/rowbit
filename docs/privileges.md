@@ -38,6 +38,6 @@ None. An agent that has its own connection string can write around Rowbit, and n
 
 Change state, previews and the audit log live in a SQLite file next to Rowbit. Previews include full before and after copies of every row a change touched, every column of them, so the file holds real production data and keeps it after the change is applied. Protect it like a replica of the database:
 
-- Make it readable only by the user Rowbit runs as (`chmod 600`). Rowbit doesn't set the file's permissions itself.
+- Keep it readable only by the user Rowbit runs as. On Unix, Rowbit sets the file to `600` when it opens it; keep the directory private too, since SQLite writes `rowbit.db-wal` and `rowbit.db-shm` next to it.
 - Keep agents away from it. The audit log's hash chain shows edits made by hand, but anyone who can write the file can rewrite the whole chain, and anyone who can read it sees the copies.
 - Back it up and encrypt it the way you would the database. Undo needs the before images in it.

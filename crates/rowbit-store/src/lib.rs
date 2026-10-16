@@ -66,6 +66,8 @@ pub enum StoreError {
     Corrupt(String),
     #[error("SQLite: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("cannot make the store readable by its owner only: {0}")]
+    Permissions(std::io::Error),
 }
 
 /// What [`Store::verify`] found wrong.
@@ -140,8 +142,17 @@ pub struct Store {
 }
 
 impl Store {
+    /// Opens or creates the store. On Unix the file is made readable by its
+    /// owner only: it holds copies of database rows.
     pub fn open(path: &Path) -> Result<Store, StoreError> {
-        Self::init(Connection::open(path)?)
+        let store = Self::init(Connection::open(path)?)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .map_err(StoreError::Permissions)?;
+        }
+        Ok(store)
     }
 
     pub fn open_in_memory() -> Result<Store, StoreError> {

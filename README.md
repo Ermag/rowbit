@@ -23,7 +23,7 @@ Rowbit sits between your agents and your database. Agents talk to Rowbit, never 
 - **Rules and humans.** A small YAML file decides whether a write is auto-approved, held for a person, or blocked. Agents can propose changes and check their status. Only people approve.
 - **Apply what you approved.** If the rows changed between preview and approval, nothing is written.
 - **Undo one change.** Before-images are kept per change, so you can roll back one bad write and keep everything else.
-- **Audit log.** Every proposed write is recorded with who asked, what the rules decided, who approved it and what it changed.
+- **Audit log.** Every proposed write is recorded with who asked, what the rules decided, who approved it and what it changed. (Reviewers don't sign in yet in v0.1: the log records the name they give.)
 
 ```yaml
 # rowbit.yml

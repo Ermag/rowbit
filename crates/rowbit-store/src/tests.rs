@@ -280,6 +280,12 @@ fn survives_reopening() {
         let mut store = Store::open(&path).unwrap();
         previewed(&mut store).0
     };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "the store holds copies of rows");
+    }
     let mut store = Store::open(&path).unwrap();
     store.transition(id, &held(), &policy(), None).unwrap();
     assert_eq!(store.events(id).unwrap().len(), 2);

@@ -1,4 +1,5 @@
--- The quickstart's shop: 1,500 orders, 1,284 of them still pending.
+-- The quickstart's shop: 1,500 orders, one a minute. The newest 1,284 are
+-- still pending, so some were placed in the last hour.
 CREATE DATABASE shop;
 USE shop;
 
@@ -15,7 +16,7 @@ INSERT INTO orders (id, customer, status, total, placed_at)
 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1500)
 SELECT i,
        CONCAT('customer-', i % 97),
-       IF(i <= 1284, 'pending', 'shipped'),
+       IF(i > 216, 'pending', 'shipped'),
        ROUND(5 + (i * 7919 % 20000) / 100, 2),
        NOW() - INTERVAL (1500 - i) MINUTE
 FROM n;
