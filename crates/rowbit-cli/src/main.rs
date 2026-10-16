@@ -462,10 +462,11 @@ async fn main() -> anyhow::Result<()> {
                 hosts: config.public_host().into_iter().collect(),
                 secure: config.https(),
             };
-            match &config.public_url {
-                Some(url) => eprintln!("rowbit: review page on {url}/ (listening on {listen})"),
-                None => eprintln!("rowbit: review page on http://{listen}/"),
-            }
+            let address = config
+                .public_url
+                .clone()
+                .unwrap_or_else(|| format!("http://{listen}"));
+            eprintln!("rowbit: review page on {address}/");
             rowbit_web::serve(std::sync::Arc::new(engine), web, listen).await?;
         }
         Command::Server {

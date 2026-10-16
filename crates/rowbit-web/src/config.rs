@@ -157,7 +157,7 @@ impl ServerConfig {
                 Some(Oidc {
                     issuer: r.oidc.issuer,
                     client_id: r.oidc.client_id,
-                    client_secret: secret(
+                    client_secret: from_env(
                         "reviewers.oidc.client_secret",
                         &r.oidc.client_secret,
                         &env,
@@ -245,7 +245,7 @@ fn check_url<'a>(key: &str, url: &'a str) -> Result<&'a str, ConfigError> {
 
 /// A `${VARIABLE}` reference, read from the environment. A literal value is
 /// an error, so secrets never end up in the file.
-fn secret(
+fn from_env(
     key: &str,
     value: &str,
     env: &impl Fn(&str) -> Option<String>,
