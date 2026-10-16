@@ -23,5 +23,9 @@ rowbit-policy.workspace = true
 rowbit-store.workspace = true
 tokio.workspace = true
 
+[dev-dependencies]
+mysql_async.workspace = true
+rowbit-engine.workspace = true
+
 [lints]
 workspace = true

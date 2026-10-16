@@ -311,6 +311,26 @@ impl Engine {
         }
     }
 
+    /// Changes in `state`, or in any state, oldest first.
+    pub fn list(&self, state: Option<State>) -> Result<Vec<ChangeId>, EngineError> {
+        let store = self.store();
+        let states = match state {
+            Some(state) => vec![state],
+            None => State::ALL.to_vec(),
+        };
+        let mut ids = Vec::new();
+        for state in states {
+            ids.extend(store.list(state)?);
+        }
+        ids.sort_unstable();
+        Ok(ids)
+    }
+
+    /// Checks the whole audit log; see [`Store::verify`].
+    pub fn verify(&self) -> Result<Result<(), rowbit_store::Tampered>, EngineError> {
+        Ok(self.store().verify()?)
+    }
+
     /// Changes waiting for a person, oldest first.
     pub fn held(&self) -> Result<Vec<ChangeId>, EngineError> {
         Ok(self.store().list(State::Held)?)

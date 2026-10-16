@@ -68,7 +68,7 @@ Every other pair is an error. Notable consequences:
 Actors come from the transport's authentication, never from arguments an agent passes:
 
 - `agent:<id>`: the MCP connection's or proxy user's configured agent id. Must match a key in `rowbit.yml`.
-- `human:<id>`: a signed-in reviewer (CLI user in v0.1, OIDC subject from v0.2).
+- `human:<id>`: a reviewer. In v0.1 the CLI records `--as <name>`, or the login name, without checking it: anyone who can run `rowbit` against the store file can act as a person, so keep that file and the database credentials to reviewers. Signed-in reviewers (OIDC) come in v0.2.
 - `policy:<rule>`: the policy engine, naming the deciding rule, or `default` or a floor.
 - `system`: Rowbit's executor and timers.
 
@@ -169,6 +169,12 @@ In one transaction: lock the rows by primary key and check each still equals its
 | `change_status` | Looks up one of the agent's own changes. Another agent's change is reported as not found. | The same as `propose_write`. |
 
 No statement, read or write, may name the server's own schemas (`information_schema`, `performance_schema`, `mysql`, `sys`), and none of them may be the default database: with the `PROCESS` grant Rowbit needs, they show every session's running SQL on the server. There is no tool to approve, reject, apply or undo. Nothing a tool returns about a change includes preview values (see Preview). A read runs with Rowbit's database privileges, so an agent can read whatever Rowbit's user can; scope that user accordingly until per-agent grants arrive in v0.2.
+
+## Reviewing (CLI)
+
+`rowbit changes [--state held]` lists changes. `rowbit show <id>` prints the statement as Rowbit understood it (comments dropped), every row's changed columns before and after (the first 50 rows, or all with `--all`), the history and the review hash. Everything the agent or the database controls is printed with control characters and invisible or direction-changing Unicode shown as `\u{..}`, so an agent can't recolour, hide or move text in the reviewer's terminal.
+
+`rowbit approve <id> --review <hash>` needs at least the first 12 characters of that hash, so a person approves what they looked at; the change is then applied. A change of more than 50 rows also needs `--rows <count>` with its exact row count, so an approval never covers rows the person didn't know about. `rowbit reject <id> --reason <text>`, `rowbit undo <id>` and `rowbit verify` (the audit log check) complete the set.
 
 ## Audit log
 

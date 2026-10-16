@@ -73,6 +73,16 @@ pub enum Event {
 }
 
 impl State {
+    pub const ALL: [State; 7] = [
+        State::Proposed,
+        State::Held,
+        State::Approved,
+        State::Applied,
+        State::Rejected,
+        State::Failed,
+        State::Undone,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             State::Proposed => "proposed",
