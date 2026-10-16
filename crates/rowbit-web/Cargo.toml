@@ -10,16 +10,28 @@ publish.workspace = true
 
 [dependencies]
 argon2.workspace = true
+base64.workspace = true
 axum.workspace = true
 getrandom.workspace = true
+openidconnect.workspace = true
+reqwest.workspace = true
 rowbit-core.workspace = true
 rowbit-engine.workspace = true
 rowbit-mysql.workspace = true
 rowbit-store.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+serde_norway.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
+base64.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+rsa = "0.9"
+serde_json.workspace = true
+sha2.workspace = true
 mysql_async.workspace = true
 rowbit-policy.workspace = true
 tower = { version = "0.5", features = ["util"] }
