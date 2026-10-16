@@ -178,7 +178,11 @@ impl Store {
                  prev_hash TEXT NOT NULL,
                  hash TEXT NOT NULL UNIQUE
              );
-             CREATE INDEX IF NOT EXISTS events_by_change ON events (change_id, seq);",
+             CREATE INDEX IF NOT EXISTS events_by_change ON events (change_id, seq);
+             CREATE TABLE IF NOT EXISTS settings (
+                 key TEXT PRIMARY KEY,
+                 value TEXT NOT NULL
+             );",
         )?;
         Ok(Store { conn })
     }
@@ -376,6 +380,26 @@ impl Store {
             now_ms(),
         )?;
         tx.commit()?;
+        Ok(())
+    }
+
+    /// A setting Rowbit keeps with its state, such as the review page's
+    /// password hash.
+    pub fn setting(&self, key: &str) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()?)
+    }
+
+    pub fn set_setting(&mut self, key: &str, value: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
         Ok(())
     }
 

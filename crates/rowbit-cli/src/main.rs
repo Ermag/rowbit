@@ -92,6 +92,20 @@ enum Command {
         #[command(flatten)]
         setup: Setup,
     },
+    /// Serve the review page: held changes, approve, reject, undo
+    ///
+    /// Reviewers sign in with the page's password and their name. The first
+    /// time, Rowbit makes up a password and prints it once; only its hash is
+    /// kept, in the state file. --set-password asks for one instead.
+    Serve {
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        listen: std::net::SocketAddr,
+        /// Choose the page's password (asked for on the terminal) and serve
+        #[arg(long)]
+        set_password: bool,
+        #[command(flatten)]
+        setup: Setup,
+    },
     /// Check the audit log for tampering
     Verify {
         #[command(flatten)]
@@ -159,6 +173,33 @@ fn confirm_rows(change: &rowbit_store::Change, rows: Option<usize>) -> anyhow::R
             change.id
         ),
     }
+}
+
+/// The review page's password hash, kept in the state file. Makes one up
+/// and prints it once if there is none; asks for one with `set`.
+fn page_password(store: &std::path::Path, set: bool) -> anyhow::Result<String> {
+    const KEY: &str = "web.password";
+    let mut store = Store::open(store).with_context(|| format!("opening {}", store.display()))?;
+    if set {
+        let password = rpassword::prompt_password("New review page password: ")?;
+        anyhow::ensure!(password.chars().count() >= 12, "use at least 12 characters");
+        let again = rpassword::prompt_password("Again: ")?;
+        anyhow::ensure!(password == again, "the two passwords differ");
+        let hash = rowbit_web::hash_password(&password);
+        store.set_setting(KEY, &hash)?;
+        eprintln!("rowbit: review page password set");
+        return Ok(hash);
+    }
+    if let Some(hash) = store.setting(KEY)? {
+        return Ok(hash);
+    }
+    let password = rowbit_web::new_password();
+    let hash = rowbit_web::hash_password(&password);
+    store.set_setting(KEY, &hash)?;
+    eprintln!(
+        "rowbit: review page password, shown this once (change it with --set-password):\n\n    {password}\n"
+    );
+    Ok(hash)
 }
 
 /// Where Rowbit's database, policy and state are.
@@ -293,6 +334,22 @@ async fn main() -> anyhow::Result<()> {
             let (engine, _) = setup.engine()?;
             let change = engine.undo(&person.name()?, id).await?;
             println!("{}", review::line(&change));
+        }
+        Command::Serve {
+            listen,
+            set_password,
+            setup,
+        } => {
+            let hash = page_password(&setup.store, set_password)?;
+            let (engine, _) = setup.engine()?;
+            if !listen.ip().is_loopback() {
+                eprintln!(
+                    "rowbit: the page is served over plain HTTP on {listen}; \
+                     put it behind HTTPS before anyone signs in over a network"
+                );
+            }
+            eprintln!("rowbit: review page on http://{listen}/");
+            rowbit_web::serve(std::sync::Arc::new(engine), hash, listen).await?;
         }
         Command::Verify { setup } => {
             let (engine, _) = setup.engine()?;

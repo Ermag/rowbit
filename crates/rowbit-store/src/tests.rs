@@ -400,3 +400,12 @@ fn apply_record_is_chained_and_refusals_are_logged() {
         Err(Tampered::ApplyRecordModified(id))
     );
 }
+
+#[test]
+fn settings_are_kept_and_replaced() {
+    let mut store = Store::open_in_memory().unwrap();
+    assert_eq!(store.setting("web.password").unwrap(), None);
+    store.set_setting("web.password", "a").unwrap();
+    store.set_setting("web.password", "b").unwrap();
+    assert_eq!(store.setting("web.password").unwrap().as_deref(), Some("b"));
+}

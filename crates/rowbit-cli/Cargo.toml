@@ -21,6 +21,8 @@ rowbit-mcp.workspace = true
 rowbit-mysql.workspace = true
 rowbit-policy.workspace = true
 rowbit-store.workspace = true
+rowbit-web.workspace = true
+rpassword.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
