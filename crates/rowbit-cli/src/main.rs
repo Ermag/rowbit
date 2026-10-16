@@ -130,6 +130,21 @@ enum Command {
         #[command(flatten)]
         setup: Setup,
     },
+    /// MCP tokens for agents that connect over HTTP
+    ///
+    /// With mcp.http in rowbit-server.yml, `rowbit serve` serves agents at
+    /// /mcp. Each agent signs in with a token of its own, sent as
+    /// `Authorization: Bearer <token>`. Without a subcommand, lists which
+    /// agents have one.
+    Agents {
+        #[command(subcommand)]
+        command: Option<AgentsCommand>,
+        /// The policy file
+        #[arg(long, env = "ROWBIT_POLICY", default_value = "rowbit.yml")]
+        policy: PathBuf,
+        #[command(flatten)]
+        store: StoreArgs,
+    },
     /// Work with rowbit-server.yml
     Server {
         #[command(subcommand)]
@@ -300,6 +315,14 @@ fn mysql_database(url: &str) -> anyhow::Result<String> {
         "the database URL must name a database, as in mysql://user@host:3306/app"
     );
     Ok(path.to_owned())
+}
+
+#[derive(Subcommand)]
+enum AgentsCommand {
+    /// Make a new token for an agent, replacing any it had, and print it once
+    Token { agent: String },
+    /// Remove an agent's token
+    Revoke { agent: String },
 }
 
 #[derive(Subcommand)]
@@ -541,7 +564,7 @@ async fn main() -> anyhow::Result<()> {
                     hash: page_password(&setup.store, set_password)?,
                 },
             };
-            let (engine, _) = setup.engine()?;
+            let (engine, database) = setup.engine()?;
             // Every process that proposes changes queues notifications from
             // this setting; only this one sends them, with the secrets.
             engine.set_notify(&rowbit_engine::NotifySetting {
@@ -563,6 +586,7 @@ async fn main() -> anyhow::Result<()> {
                 sign_in,
                 hosts: config.public_host().into_iter().collect(),
                 secure: config.https(),
+                mcp: config.mcp_http.then_some(database),
             };
             let address = config
                 .public_url
@@ -570,6 +594,53 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|| format!("http://{listen}"));
             eprintln!("rowbit: review page on {address}/");
             rowbit_web::serve(engine, web, listen).await?;
+        }
+        Command::Agents {
+            command,
+            policy,
+            store,
+        } => {
+            let src = std::fs::read_to_string(&policy)
+                .with_context(|| format!("reading {}", policy.display()))?;
+            let policy = PolicyFile::from_yaml(&src)?;
+            match command {
+                Some(AgentsCommand::Token { agent }) => {
+                    anyhow::ensure!(
+                        policy.agents.contains_key(&agent),
+                        "{agent} is not an agent in rowbit.yml"
+                    );
+                    // Creates the state file if this is the first command run.
+                    let mut store = Store::open(&store.store)
+                        .with_context(|| format!("opening {}", store.store.display()))?;
+                    let token = store.issue_agent_token(&agent)?;
+                    eprintln!(
+                        "rowbit: {agent}'s MCP token, shown this once (any older one no longer works):\n"
+                    );
+                    println!("{token}");
+                }
+                Some(AgentsCommand::Revoke { agent }) => {
+                    let mut store = store.open()?;
+                    if store.revoke_agent_token(&agent)? {
+                        println!("{agent}'s token is revoked");
+                    } else {
+                        println!("{agent} had no token");
+                    }
+                }
+                None => {
+                    let store = store.open()?;
+                    for agent in policy.agents.keys() {
+                        match store.agent_token_times(agent)? {
+                            None => println!("{agent}  no token"),
+                            Some((created, used)) => println!(
+                                "{agent}  token made {}, {}",
+                                review::when(created),
+                                used.map(|u| format!("last used {}", review::when(u)))
+                                    .unwrap_or_else(|| "never used".into())
+                            ),
+                        }
+                    }
+                }
+            }
         }
         Command::Server {
             command: ServerCommand::Check { server },

@@ -51,3 +51,33 @@ fn server_check_reads_secrets_from_the_environment_only() {
     let (ok, out) = rowbit(&["server", "check", "--config", "missing.yml"], &d);
     assert!(!ok && out.contains("does not exist"), "{out}");
 }
+
+#[test]
+fn agent_tokens_are_shown_once_and_revocable() {
+    let d = dir("tokens");
+    std::fs::write(
+        d.join("rowbit.yml"),
+        "version: 0\nagents:\n  refund-bot: {}\n",
+    )
+    .unwrap();
+    let (ok, out) = rowbit(&["agents", "token", "stranger"], &d);
+    assert!(!ok && out.contains("not an agent"), "{out}");
+    let (ok, out) = rowbit(&["agents", "token", "refund-bot"], &d);
+    assert!(ok, "{out}");
+    let token = out
+        .lines()
+        .find(|l| l.starts_with("rbt_"))
+        .expect("the token")
+        .to_owned();
+    assert_eq!(token.len(), 47);
+    let (ok, out) = rowbit(&["agents"], &d);
+    assert!(
+        ok && out.contains("refund-bot  token made") && out.contains("never used"),
+        "{out}"
+    );
+    assert!(!out.contains(&token));
+    let (ok, out) = rowbit(&["agents", "revoke", "refund-bot"], &d);
+    assert!(ok && out.contains("revoked"), "{out}");
+    let (_, out) = rowbit(&["agents"], &d);
+    assert!(out.contains("refund-bot  no token"), "{out}");
+}

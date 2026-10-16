@@ -140,6 +140,30 @@ pub enum DeliveryOutcome {
     Failed { error: String },
 }
 
+/// Removes `agent`'s token and its times, inside a transaction.
+fn revoke_token(tx: &rusqlite::Transaction<'_>, agent: &str) -> Result<bool, StoreError> {
+    let old: Option<String> = tx
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [format!("agent.{agent}.token")],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(hash) = &old {
+        tx.execute(
+            "DELETE FROM settings WHERE key = ?1",
+            [format!("token.{hash}")],
+        )?;
+    }
+    for k in ["token", "token_created_ms", "token_used_ms"] {
+        tx.execute(
+            "DELETE FROM settings WHERE key = ?1",
+            [format!("agent.{agent}.{k}")],
+        )?;
+    }
+    Ok(old.is_some())
+}
+
 fn delivery_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Delivery> {
     Ok(Delivery {
         id: r.get(0)?,
@@ -572,6 +596,82 @@ impl Store {
             params![key, value],
         )?;
         Ok(())
+    }
+
+    pub fn delete_setting(&mut self, key: &str) -> Result<(), StoreError> {
+        self.conn
+            .execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
+    /// Makes a new MCP token for `agent`, replacing any it had, and returns
+    /// it. Only its SHA-256 is kept. See "MCP over HTTP" in the spec.
+    pub fn issue_agent_token(&mut self, agent: &str) -> Result<String, StoreError> {
+        use base64::Engine as _;
+        let mut bytes = [0u8; 32];
+        getrandom::fill(&mut bytes).expect("the system has a random source");
+        let token = format!(
+            "rbt_{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+        );
+        let hash = hex(&Sha256::digest(token.as_bytes()));
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        revoke_token(&tx, agent)?;
+        let set = |k: String, v: String| {
+            tx.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                params![k, v],
+            )
+        };
+        set(format!("token.{hash}"), agent.to_owned())?;
+        set(format!("agent.{agent}.token"), hash)?;
+        set(
+            format!("agent.{agent}.token_created_ms"),
+            now_ms().to_string(),
+        )?;
+        tx.commit()?;
+        Ok(token)
+    }
+
+    /// Removes `agent`'s MCP token. Returns whether it had one.
+    pub fn revoke_agent_token(&mut self, agent: &str) -> Result<bool, StoreError> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let had = revoke_token(&tx, agent)?;
+        tx.commit()?;
+        Ok(had)
+    }
+
+    /// The agent a token belongs to, and notes that it was used. `None` for
+    /// a token Rowbit didn't issue or has revoked.
+    pub fn agent_for_token(&mut self, token: &str) -> Result<Option<String>, StoreError> {
+        let hash = hex(&Sha256::digest(token.as_bytes()));
+        let Some(agent) = self.setting(&format!("token.{hash}"))? else {
+            return Ok(None);
+        };
+        self.set_setting(
+            &format!("agent.{agent}.token_used_ms"),
+            &now_ms().to_string(),
+        )?;
+        Ok(Some(agent))
+    }
+
+    /// When `agent`'s token was made and last used, if it has one.
+    pub fn agent_token_times(&self, agent: &str) -> Result<Option<(i64, Option<i64>)>, StoreError> {
+        if self.setting(&format!("agent.{agent}.token"))?.is_none() {
+            return Ok(None);
+        }
+        let num = |k: String| -> Result<Option<i64>, StoreError> {
+            Ok(self.setting(&k)?.and_then(|v| v.parse().ok()))
+        };
+        Ok(Some((
+            num(format!("agent.{agent}.token_created_ms"))?.unwrap_or(0),
+            num(format!("agent.{agent}.token_used_ms"))?,
+        )))
     }
 
     pub fn get(&self, id: ChangeId) -> Result<Change, StoreError> {

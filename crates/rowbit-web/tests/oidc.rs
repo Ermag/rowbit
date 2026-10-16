@@ -225,6 +225,7 @@ async fn rowbit(p: &Provider) -> axum::Router {
             sign_in: rowbit_web::SignIn::Oidc(Box::new(login)),
             hosts: vec![HOST.into()],
             secure: false,
+            mcp: None,
         },
     )
 }

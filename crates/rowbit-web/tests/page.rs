@@ -52,6 +52,7 @@ impl Page {
                     sign_in: rowbit_web::SignIn::Password { hash },
                     hosts: vec![HOST.to_owned()],
                     secure: false,
+                    mcp: None,
                 },
             ),
             engine,

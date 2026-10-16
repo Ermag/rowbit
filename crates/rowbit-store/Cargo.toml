@@ -9,6 +9,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+base64.workspace = true
+getrandom.workspace = true
 rowbit-core.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
