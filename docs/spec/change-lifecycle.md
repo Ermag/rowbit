@@ -176,6 +176,10 @@ No statement, read or write, may name the server's own schemas (`information_sch
 
 `rowbit approve <id> --review <hash>` needs at least the first 12 characters of that hash, so a person approves what they looked at; the change is then applied. A change of more than 50 rows also needs `--rows <count>` with its exact row count, so an approval never covers rows the person didn't know about. `rowbit reject <id> --reason <text>`, `rowbit undo <id>` and `rowbit verify` (the audit log check) complete the set.
 
+## Reviewing (web page)
+
+`rowbit serve --as <name>` serves one plain page on `127.0.0.1:8080`: the held changes with each row's changed columns before and after (the first 50 rows), approve and reject buttons, and the recent changes with an undo button for applied ones. Approve sends the review hash shown on the page. The page has no sign-in in v0.1 and acts as `--as`; it answers only requests addressed to the host it listens on (against DNS rebinding), every form carries a random per-process token and is refused from another origin, and it sends a content security policy that allows no scripts. Listening on anything but localhost prints a warning.
+
 ## Audit log
 
 Every transition appends one event: sequence number, change id, from, to, event, detail (the reason, if the event has one), actor, time, and the hash of the previous event. The event's own hash is SHA-256 over all of that, so the events form a chain and editing or deleting one breaks it. Proposing a change appends a first `Proposed` event whose detail records the target database and the statement exactly as the agent sent it.

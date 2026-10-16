@@ -92,6 +92,19 @@ enum Command {
         #[command(flatten)]
         setup: Setup,
     },
+    /// Serve the review page: held changes, approve, reject, undo
+    ///
+    /// The page has no sign-in in v0.1 and acts as --as. It listens on
+    /// localhost unless told otherwise; keep it there or behind your own
+    /// authenticating proxy.
+    Serve {
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        listen: std::net::SocketAddr,
+        #[command(flatten)]
+        person: Person,
+        #[command(flatten)]
+        setup: Setup,
+    },
     /// Check the audit log for tampering
     Verify {
         #[command(flatten)]
@@ -293,6 +306,22 @@ async fn main() -> anyhow::Result<()> {
             let (engine, _) = setup.engine()?;
             let change = engine.undo(&person.name()?, id).await?;
             println!("{}", review::line(&change));
+        }
+        Command::Serve {
+            listen,
+            person,
+            setup,
+        } => {
+            let (engine, _) = setup.engine()?;
+            let reviewer = person.name()?;
+            if !listen.ip().is_loopback() {
+                eprintln!(
+                    "rowbit: the review page has no sign-in, and anyone who can reach {listen} \
+                     can approve changes as {reviewer}"
+                );
+            }
+            eprintln!("rowbit: review page on http://{listen}/ as {reviewer}");
+            rowbit_web::serve(std::sync::Arc::new(engine), reviewer, listen).await?;
         }
         Command::Verify { setup } => {
             let (engine, _) = setup.engine()?;

@@ -18,8 +18,11 @@ rowbit-mcp = { path = "crates/rowbit-mcp" }
 rowbit-policy = { path = "crates/rowbit-policy" }
 rowbit-mysql = { path = "crates/rowbit-mysql" }
 rowbit-store = { path = "crates/rowbit-store" }
+rowbit-web = { path = "crates/rowbit-web" }
 
 anyhow = "1"
+axum = { version = "0.8", default-features = false, features = ["form", "http1", "tokio", "query"] }
+getrandom = "0.3"
 clap = { version = "4", features = ["derive", "env"] }
 mysql_async = { version = "0.36", default-features = false, features = ["minimal-rust"] }
 rmcp = { version = "3.5", features = ["server", "macros", "transport-io"] }
