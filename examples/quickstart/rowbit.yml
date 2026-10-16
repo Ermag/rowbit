@@ -1,0 +1,16 @@
+# The quickstart's policy. See docs/spec/policy.md.
+version: 0
+
+agents:
+  coding-agent:
+    description: Fixes data in the shop when asked.
+    # Anything no rule covers waits for a person.
+    default: hold
+    rules:
+      - name: small-order-fixes
+        when: { statement: update, table: shop.orders, columns: status, rows: { max: 20 } }
+        then: allow
+      - name: no-deletes
+        when: { statement: delete }
+        then: block
+        reason: Data fixes don't delete rows.

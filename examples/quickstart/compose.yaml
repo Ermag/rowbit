@@ -1,0 +1,17 @@
+# A shop database to try Rowbit on. See docs/quickstart.md.
+#
+#   docker compose up -d --wait
+name: rowbit-quickstart
+
+services:
+  mariadb:
+    image: mariadb:11.4
+    environment:
+      MARIADB_ROOT_PASSWORD: quickstart-root
+    ports: ["127.0.0.1:33070:3306"]
+    volumes: ["./shop.sql:/docker-entrypoint-initdb.d/shop.sql:ro"]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 60

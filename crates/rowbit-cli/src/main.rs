@@ -39,6 +39,19 @@ enum Command {
         #[command(flatten)]
         setup: Setup,
     },
+    /// Propose a write as an agent would, without an MCP client
+    ///
+    /// For trying Rowbit and for scripts. Prints what the agent would get
+    /// back: the change's id, state, table, row count and reason.
+    Propose {
+        /// The agent's id, as listed in rowbit.yml
+        #[arg(long)]
+        agent: String,
+        /// One INSERT, UPDATE or DELETE, or one schema change
+        sql: String,
+        #[command(flatten)]
+        setup: Setup,
+    },
     /// List changes, newest last
     Changes {
         /// Only changes in this state: held, applied, rejected, ...
@@ -288,6 +301,11 @@ async fn main() -> anyhow::Result<()> {
                 .serve_stdio()
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
+        }
+        Command::Propose { agent, sql, setup } => {
+            let (engine, database) = setup.engine()?;
+            let status = engine.propose(&agent, &database, &sql).await?;
+            println!("{}", rowbit_mcp::status_json(&status));
         }
         Command::Changes { state, setup } => {
             let (engine, _) = setup.engine()?;
