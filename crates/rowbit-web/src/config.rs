@@ -35,6 +35,14 @@ struct File {
     reviewers: Option<ReviewersFile>,
     #[serde(default)]
     notify: Vec<NotifyFile>,
+    mcp: Option<McpFile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct McpFile {
+    #[serde(default)]
+    http: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -143,6 +151,8 @@ pub struct ServerConfig {
     pub listen: Option<SocketAddr>,
     pub oidc: Option<Oidc>,
     pub notify: Vec<Notify>,
+    /// Serve agents over MCP at `/mcp`.
+    pub mcp_http: bool,
 }
 
 impl ServerConfig {
@@ -247,6 +257,7 @@ impl ServerConfig {
             listen: file.listen,
             oidc,
             notify,
+            mcp_http: file.mcp.is_some_and(|m| m.http),
         })
     }
 
@@ -397,7 +408,7 @@ mod tests {
                 "public_url is needed",
             ),
             (
-                EXAMPLE.replace("version: 0", "version: 0\nmcp: {}"),
+                EXAMPLE.replace("version: 0", "version: 0\nmcp: { https: true }"),
                 "unknown field",
             ),
             (

@@ -3,12 +3,12 @@
 Rowbit sits between AI agents and a database. Agents propose writes; Rowbit previews them, checks them against `rowbit.yml`, waits for a person when needed, applies exactly what was previewed, and can undo it.
 
 ```
-agent ──MCP──▶ rowbit-mcp ─┐
-                           ├──▶ rowbit-engine ──▶ adapter (rowbit-mysql) ──▶ MariaDB / MySQL
-person ─CLI/web─▶ rowbit ──┘        │
-                                    ├──▶ rowbit-core (state machine)
-                                    ├──▶ rowbit-policy (rowbit.yml)
-                                    └──▶ rowbit-store (state + audit log, SQLite)
+agent ──MCP (stdio, HTTP)──▶ rowbit-mcp ─┐
+                                         ├──▶ rowbit-engine ──▶ adapter (rowbit-mysql) ──▶ MariaDB / MySQL
+person ──CLI, web UI──▶ rowbit ──────────┘        │
+                                                  ├──▶ rowbit-core (state machine)
+                                                  ├──▶ rowbit-policy (rowbit.yml)
+                                                  └──▶ rowbit-store (state + audit log, SQLite)
 ```
 
 ## Crates
@@ -20,7 +20,7 @@ person ─CLI/web─▶ rowbit ──┘        │
 | `rowbit-mysql` | AGPL-3.0-only | Adapter for MariaDB and MySQL (one wire protocol). |
 | `rowbit-store` | AGPL-3.0-only | Change state and the hash-chained audit log, in SQLite. |
 | `rowbit-engine` | AGPL-3.0-only | Runs a proposed change through classify, preview, policy and the store. What surfaces call. |
-| `rowbit-mcp` | AGPL-3.0-only | MCP server: the `query`, `propose_write` and `change_status` tools, over stdio. |
+| `rowbit-mcp` | AGPL-3.0-only | MCP server: the `query`, `propose_write` and `change_status` tools, over stdio or streamable HTTP. |
 | `rowbit-web` | AGPL-3.0-only | The review UI and its JSON API: held changes with their rows, approve, reject, undo, the log, and reviewer sign-in through an OpenID Connect provider. Reads `rowbit-server.yml`. The UI is a Svelte app in `web/`, built into `crates/rowbit-web/dist` and embedded in the binary. |
 | `rowbit-cli` | AGPL-3.0-only | The `rowbit` binary: `mcp` for agents; `changes`, `show`, `approve`, `reject`, `undo`, `verify` and `serve` (the review page) for people; `policy check`, `ping`. |
 

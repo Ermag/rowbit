@@ -483,6 +483,7 @@ async fn approving_through_the_review_page(var: &str, table: &str) {
             },
             hosts: vec!["127.0.0.1:8080".to_owned()],
             secure: false,
+            mcp: None,
         },
     );
     let send = |request: Request<Body>| {

@@ -504,3 +504,44 @@ fn a_refused_transition_queues_nothing() {
     );
     assert!(store.deliveries(10).unwrap().is_empty());
 }
+
+#[test]
+fn agent_tokens_are_kept_as_hashes_and_replaced() {
+    let mut store = Store::open_in_memory().unwrap();
+    let first = store.issue_agent_token("refund-bot").unwrap();
+    assert!(
+        first.starts_with("rbt_") && first.len() == 4 + 43,
+        "{first}"
+    );
+    assert_eq!(
+        store.agent_for_token(&first).unwrap().as_deref(),
+        Some("refund-bot")
+    );
+    let (created, used) = store.agent_token_times("refund-bot").unwrap().unwrap();
+    assert!(created > 0 && used.is_some());
+    // The token itself is stored nowhere.
+    let n: i64 = store
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM settings WHERE key LIKE ?1 OR value LIKE ?1",
+            [format!("%{}%", &first[4..])],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0);
+
+    // A new token replaces the old one.
+    let second = store.issue_agent_token("refund-bot").unwrap();
+    assert_ne!(first, second);
+    assert_eq!(store.agent_for_token(&first).unwrap(), None);
+    assert_eq!(
+        store.agent_for_token(&second).unwrap().as_deref(),
+        Some("refund-bot")
+    );
+    assert_eq!(store.agent_for_token("rbt_made-up").unwrap(), None);
+
+    assert!(store.revoke_agent_token("refund-bot").unwrap());
+    assert_eq!(store.agent_for_token(&second).unwrap(), None);
+    assert_eq!(store.agent_token_times("refund-bot").unwrap(), None);
+    assert!(!store.revoke_agent_token("refund-bot").unwrap());
+}

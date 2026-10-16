@@ -31,3 +31,8 @@ notify:
   #   kind: webhook
   #   url: https://hooks.example.com/rowbit
   #   secret: ${ROWBIT_WEBHOOK_SECRET}
+
+# Serve agents over MCP at /mcp too. Each signs in with its own token:
+# rowbit agents token <agent>.
+mcp:
+  http: true

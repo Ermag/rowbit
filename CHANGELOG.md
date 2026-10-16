@@ -10,6 +10,11 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 - `rowbit changes --shadowed` and the UI's Shadow page list them, grouped by rule.
 - `rowbit policy test <file>` replays every recorded change against another `rowbit.yml`, from the stored previews, and lists each decision that would differ.
 
+### MCP over HTTP
+
+- With `mcp: { http: true }` in `rowbit-server.yml`, `rowbit serve` also serves agents at `/mcp` over MCP's streamable HTTP transport, with the same tools as `rowbit mcp`. The agent's machine holds only its token, not Rowbit's database credentials or state file.
+- `rowbit agents token <agent>` makes a token for an agent (printed once, kept only as a hash), `rowbit agents revoke <agent>` removes it, and `rowbit agents` lists which agents have one and when it was last used. A request without a valid token for an agent in `rowbit.yml` gets `401`, and browser origins other than Rowbit's own are refused.
+
 ### Notifications
 
 - `notify` in `rowbit-server.yml` announces each held change to a Slack incoming webhook (a message with the agent, table, row count, the rule and a Review button) or to any URL as JSON signed with HMAC-SHA256 (`Rowbit-Signature`). Notifications carry no row values and no SQL.
