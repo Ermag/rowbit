@@ -124,7 +124,7 @@ fn matches(m: &Match, facts: &ChangeFacts) -> Result<bool, String> {
 }
 
 /// `*` matches any run of characters, including none. Everything else is literal.
-fn glob(pattern: &str, text: &str) -> bool {
+pub fn glob(pattern: &str, text: &str) -> bool {
     let p = pattern.as_bytes();
     let t = text.as_bytes();
     let (mut pi, mut ti) = (0, 0);
@@ -280,8 +280,16 @@ mod tests {
                 "cannot be allow",
             ),
             (
-                "version: 0\nagents:\n  bot:\n    scopes: {}\n",
+                "version: 0\nagents:\n  bot:\n    budget: {}\n",
                 "unknown field",
+            ),
+            (
+                "version: 0\nagents:\n  bot:\n    scopes: { read: ['*.*'] }\n",
+                "database part",
+            ),
+            (
+                "version: 0\nagents:\n  an-agent-id-that-is-too-long:\n    scopes: {}\n",
+                "at most 25",
             ),
             (
                 "version: 0\nagents:\n  bot:\n    rules:\n      - {name: a, then: allow, when: {statement: ddl}}\n",

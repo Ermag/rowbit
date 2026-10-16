@@ -2,6 +2,14 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
+## Unreleased
+
+### Scopes (in progress)
+
+- `rowbit.yml` accepts `scopes` per agent: tables it may read, insert into, update, delete from or change, and tables and columns it may never read. `rowbit policy check` warns about a table an agent may write but not read.
+- `rowbit grants diff` and `rowbit grants apply` give each scoped agent a database user of its own, `rowbit_<agent>`, with grants compiled from its scopes, using an administrator's URL for that run only. Privileges added by hand are revoked; roles and proxy grants are listed for a person to remove.
+- Scopes are not enforced yet, so `rowbit mcp`, `serve` and `propose` refuse a `rowbit.yml` that has them.
+
 ## 0.1.0 (2026-10-16)
 
 The first working version: an MCP server that previews, checks, holds, applies and undoes writes from AI agents to MariaDB and MySQL.
