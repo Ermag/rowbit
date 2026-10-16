@@ -300,6 +300,15 @@ async fn other_hosts_are_refused() {
     // Signed out, the queue redirects to sign-in and shows nothing.
     let (status, html) = page.get(HOST).await;
     assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    // Found by a browser test: with `Referrer-Policy: no-referrer`, browsers
+    // send `Origin: null` on the page's own forms, so the origin check
+    // refused every sign-in. Same-origin requests must carry their origin.
+    let request = Request::get("/login")
+        .header(header::HOST, HOST)
+        .body(Body::empty())
+        .unwrap();
+    let response = page.router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.headers()[header::REFERRER_POLICY], "same-origin");
     let (status, html) = page.get_path(HOST, "/login").await;
     assert_eq!(status, StatusCode::OK);
     assert!(html.contains("type=password"), "{html}");
