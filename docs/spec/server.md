@@ -53,7 +53,7 @@ mcp:
 
 Unknown keys are errors, as in `rowbit.yml`.
 
-**Secrets are never written in the file.** Fields that hold one (`client_secret`, a Slack `url`, a webhook `secret`) must be a `${VARIABLE}` reference, read from the environment at startup, and a literal value is an error. So the file can be committed and reviewed. `rowbit server check` validates the file without starting anything.
+**Secrets are never written in the file.** (In YAML's `{ ... }` flow style, quote a reference: `url: "${ROWBIT_SLACK_WEBHOOK_URL}"`.) Fields that hold one (`client_secret`, a Slack `url`, a webhook `secret`) must be a `${VARIABLE}` reference, read from the environment at startup, and a literal value is an error. So the file can be committed and reviewed. `rowbit server check` validates the file without starting anything.
 
 ## Signing in
 
@@ -99,14 +99,14 @@ What a notification carries is the change's id, agent, database, table, statemen
     "table": "billing.refunds", "statement": "update", "rows": 37,
     "rule": "refunds-need-a-person",
     "reason": "Large or unusual refund batches are reviewed by billing.",
-    "url": "https://rowbit.internal.example.com/changes/42"
+    "url": "https://rowbit.internal.example.com/#/changes/42"
   }
 }
 ```
 
 with a header `Rowbit-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>" with the secret>`. Receivers should check the signature and refuse a `t` more than five minutes old. `delivery` is the same across retries, so receivers can drop duplicates.
 
-**Delivery.** Each notification is queued in the state file when the change is held, so a restart doesn't lose it. Rowbit sends it within a 10-second time limit, and retries a network error, a `429` or a `5xx` up to five more times, waiting longer each time, up to about ten minutes in all. Every attempt and its outcome are shown in the web UI. Deliveries are not part of the audit log's hash chain.
+**Delivery.** Each notification is queued in the state file when the change is held, in the same transaction, so a restart doesn't lose it. Whichever process proposed the change queues it, using the targets `rowbit serve` last recorded in the state file (names and agent filters, never secrets), and `rowbit serve` sends it, so notifications go out while `rowbit serve` runs. Rowbit sends it within a 10-second time limit, and retries a network error, a `429` or a `5xx` up to five more times, waiting longer each time, up to about ten minutes in all. Every attempt and its outcome are shown in the web UI. Deliveries are not part of the audit log's hash chain.
 
 ## MCP over HTTP
 
