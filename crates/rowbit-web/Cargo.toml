@@ -17,7 +17,7 @@ rowbit-engine.workspace = true
 rowbit-mysql.workspace = true
 rowbit-store.workspace = true
 serde.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
 mysql_async.workspace = true

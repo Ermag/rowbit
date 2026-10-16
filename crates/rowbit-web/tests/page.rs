@@ -414,3 +414,31 @@ async fn big_changes_show_every_row_before_approval(var: &str, table: &str) {
     assert_eq!(status, StatusCode::OK);
     assert!(all.contains("<td>60</td><td>status</td>"), "{all}");
 }
+
+// Found in review 4: wrong guesses were checked in parallel, so the wait
+// didn't cap the rate. Now they queue: two at once take 1 s + 2 s.
+#[tokio::test]
+async fn wrong_passwords_are_checked_one_at_a_time() {
+    let engine = Arc::new(Engine::new(
+        MySqlAdapter::new("mysql://nobody@127.0.0.1:1/none").unwrap(),
+        PolicyFile::from_yaml(POLICY).unwrap(),
+        Store::open_in_memory().unwrap(),
+    ));
+    let page = Page::new(engine);
+    let started = std::time::Instant::now();
+    let guess = |p: &Page| {
+        let mut p = Page {
+            router: p.router.clone(),
+            engine: p.engine.clone(),
+            cookie: None,
+        };
+        async move { p.sign_in("evil", "guess").await }
+    };
+    let (a, b) = tokio::join!(guess(&page), guess(&page));
+    assert_eq!((a, b), (StatusCode::FORBIDDEN, StatusCode::FORBIDDEN));
+    assert!(
+        started.elapsed() >= std::time::Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+}

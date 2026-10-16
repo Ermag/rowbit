@@ -47,8 +47,11 @@ struct App {
     hosts: Arc<Vec<String>>,
     password: Arc<String>,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
-    /// Wrong passwords in a row, across all clients: each one waits longer.
-    failures: Arc<Mutex<u32>>,
+    /// Wrong passwords in a row, across all clients. Held for the whole of
+    /// a sign-in, so passwords are checked one at a time and each wrong one
+    /// waits longer: the wait caps the guessing rate, and only one Argon2
+    /// check uses memory at a time.
+    failures: Arc<tokio::sync::Mutex<u32>>,
 }
 
 #[derive(Clone)]
@@ -68,7 +71,7 @@ pub fn router(engine: Arc<Engine>, password_hash: String, hosts: Vec<String>) ->
         hosts: Arc::new(hosts),
         password: Arc::new(password_hash),
         sessions: Arc::new(Mutex::new(HashMap::new())),
-        failures: Arc::new(Mutex::new(0)),
+        failures: Arc::new(tokio::sync::Mutex::new(0)),
     };
     Router::new()
         .route("/", get(index))
@@ -98,15 +101,23 @@ pub async fn serve(
 }
 
 /// A random password for the page: 24 characters from an alphabet without
-/// look-alikes, about 120 bits.
+/// look-alikes, about 119 bits.
 pub fn new_password() -> String {
     const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
-    let mut bytes = [0u8; 24];
-    getrandom::fill(&mut bytes).expect("the system has a random source");
-    let chars: Vec<char> = bytes
-        .iter()
-        .map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char)
-        .collect();
+    // Bytes from 248 up are dropped, so every letter is equally likely.
+    let limit = 256 - 256 % ALPHABET.len();
+    let mut chars = Vec::with_capacity(24);
+    while chars.len() < 24 {
+        let mut bytes = [0u8; 32];
+        getrandom::fill(&mut bytes).expect("the system has a random source");
+        chars.extend(
+            bytes
+                .iter()
+                .filter(|b| (**b as usize) < limit)
+                .map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char),
+        );
+    }
+    chars.truncate(24);
     chars
         .chunks(6)
         .map(|c| c.iter().collect::<String>())
@@ -255,19 +266,18 @@ async fn login(
         .filter(|c| !c.is_control())
         .take(64)
         .collect();
+    // One sign-in at a time, wait included.
+    let mut failures = app.failures.lock().await;
     let password = Arc::clone(&app.password);
     let given = form.password;
     let ok = tokio::task::spawn_blocking(move || password_matches(&password, &given))
         .await
         .unwrap_or(false);
     if !ok || name.is_empty() {
-        // Each wrong try in a row waits longer, up to 8 seconds.
-        let wait = {
-            let mut failures = app.failures.lock().unwrap_or_else(|p| p.into_inner());
-            *failures = failures.saturating_add(1);
-            Duration::from_secs(1 << (*failures - 1).min(3))
-        };
-        tokio::time::sleep(wait).await;
+        // Each wrong try in a row waits longer, up to 8 seconds, and no
+        // other sign-in is checked meanwhile.
+        *failures = failures.saturating_add(1);
+        tokio::time::sleep(Duration::from_secs(1 << (*failures - 1).min(3))).await;
         return (
             StatusCode::FORBIDDEN,
             Html(page(
@@ -277,7 +287,8 @@ async fn login(
         )
             .into_response();
     }
-    *app.failures.lock().unwrap_or_else(|p| p.into_inner()) = 0;
+    *failures = 0;
+    drop(failures);
     let id = random_token();
     let session = Session {
         reviewer: name,
@@ -563,14 +574,18 @@ fn rows(p: &Preview, id: i64, all: bool) -> String {
     };
     let _ = write!(
         out,
-        "<p>{verb} {} rows in <b>{}</b>:</p><table><tr><th>Row</th><th>Column</th><th>Before</th><th>After</th></tr>",
-        p.rows.len(),
+        "<p>{verb} {} in <b>{}</b>:</p><table><tr><th>Row</th><th>Column</th><th>Before</th><th>After</th></tr>",
+        if p.rows.len() == 1 {
+            "1 row".to_owned()
+        } else {
+            format!("{} rows", p.rows.len())
+        },
         esc(&p.table.qualified_name())
     );
     let shown = if all { p.rows.len() } else { SHOWN_ROWS };
     for row in p.rows.iter().take(shown) {
         let key = match p.key(row) {
-            Some(key) => key.iter().map(show).collect::<Vec<_>>().join(", "),
+            Some(key) => key.iter().map(cell_html).collect::<Vec<_>>().join(", "),
             None => "new".to_owned(),
         };
         for (i, column) in p.table.columns.iter().enumerate() {
@@ -584,10 +599,10 @@ fn rows(p: &Preview, id: i64, all: bool) -> String {
             let _ = write!(
                 out,
                 "<tr><td>{}</td><td>{}</td><td class=before>{}</td><td class=after>{}</td></tr>",
-                esc(&key),
+                key,
                 esc(&column.name),
-                before.map(|c| esc(&show(c))).unwrap_or_default(),
-                after.map(|c| esc(&show(c))).unwrap_or_default(),
+                before.map(cell_html).unwrap_or_default(),
+                after.map(cell_html).unwrap_or_default(),
             );
         }
     }
@@ -607,14 +622,18 @@ fn token_field(session: &Session) -> String {
     format!("<input type=hidden name=token value=\"{}\">", session.token)
 }
 
-fn show(cell: &Cell) -> String {
+/// A value as HTML that can't be mistaken for another: SQL NULL is marked
+/// up apart from the text "NULL", text is quoted (so '' and ' x ' show),
+/// numbers are plain, and bytes that aren't text are hex.
+fn cell_html(cell: &Cell) -> String {
     match cell {
-        None => "NULL".to_owned(),
+        None => "<i class=null>NULL</i>".to_owned(),
         Some(bytes) => match std::str::from_utf8(bytes) {
-            Ok(text) => text.to_owned(),
+            Ok(text) if !text.is_empty() && text.parse::<f64>().is_ok() => esc(text),
+            Ok(text) => format!("<span class=text>&quot;{}&quot;</span>", esc(text)),
             Err(_) => {
                 let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-                format!("0x{hex}")
+                format!("<span class=bytes>0x{hex}</span>")
             }
         },
     }
@@ -634,7 +653,7 @@ body{font:15px/1.5 system-ui,sans-serif;max-width:960px;margin:24px auto;padding
 section{background:#fff;border:1px solid #d9deea;border-radius:8px;padding:16px;margin:16px 0}\
 pre{white-space:pre-wrap;background:#f4f6fa;padding:8px;border-radius:4px}\
 table{border-collapse:collapse;width:100%;margin:8px 0}th,td{text-align:left;padding:4px 8px;border-bottom:1px solid #d9deea;vertical-align:top}\
-td.before{color:#a03030}td.after{color:#17794a}.muted{color:#59627a}.error{color:#a03030}\
+td.before{color:#a03030}td.after{color:#17794a}td{white-space:pre-wrap}i.null{color:#59627a}.muted{color:#59627a}.error{color:#a03030}\
 .actions{display:flex;gap:12px;flex-wrap:wrap}.actions form{display:flex;gap:6px}\
 form.login{display:flex;flex-direction:column;gap:10px;max-width:320px}form.login input{font:inherit;padding:4px}\
 button{font:inherit;padding:4px 12px;cursor:pointer}button.approve{background:#2b47c9;color:#fff;border:0;border-radius:4px}\
@@ -649,15 +668,14 @@ fn statement(sql: &str) -> String {
         .unwrap_or_else(|_| sql.to_owned())
 }
 
-/// Escapes text for HTML content and double-quoted attributes. Control
-/// characters and invisible or direction-changing Unicode are shown as
-/// `\u{..}`, so agent text can't hide or reorder what a reviewer reads.
+/// Escapes text for HTML content and double-quoted attributes. Hidden
+/// characters (see [`rowbit_core::text::is_hidden`]) other than newlines
+/// are shown as `\u{..}`, so agent text can't hide, reorder or smuggle
+/// anything past a reviewer.
 fn esc(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        let hidden = (c.is_control() && c != '\n')
-            || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}');
-        if hidden {
+        if rowbit_core::text::is_hidden(c) && c != '\n' {
             out.push_str(&format!("\\u{{{:x}}}", c as u32));
             continue;
         }
@@ -693,9 +711,35 @@ mod tests {
             esc("a\u{202e}b\u{200b}c\u{1b}"),
             "a\\u{202e}b\\u{200b}c\\u{1b}"
         );
+        // Found in review 4.
+        assert_eq!(
+            esc("ok\u{61c}X\u{2028}Y\u{ad}Z\u{e0041}"),
+            "ok\\u{61c}X\\u{2028}Y\\u{ad}Z\\u{e0041}"
+        );
         assert_eq!(
             statement("UPDATE t SET a = 1 /* reviewed, safe */ WHERE id = 2"),
             "UPDATE t SET a = 1 WHERE id = 2"
+        );
+    }
+
+    // Found in review 4: the text 'NULL' looked like NULL, '' like nothing.
+    #[test]
+    fn values_cannot_pass_for_other_values() {
+        let text = |s: &str| Some(s.as_bytes().to_vec());
+        assert_eq!(cell_html(&None), "<i class=null>NULL</i>");
+        assert_eq!(
+            cell_html(&text("NULL")),
+            "<span class=text>&quot;NULL&quot;</span>"
+        );
+        assert_eq!(cell_html(&text("")), "<span class=text>&quot;&quot;</span>");
+        assert_eq!(
+            cell_html(&text(" x ")),
+            "<span class=text>&quot; x &quot;</span>"
+        );
+        assert_eq!(cell_html(&text("12.50")), "12.50");
+        assert_eq!(
+            cell_html(&Some(vec![0xff])),
+            "<span class=bytes>0xff</span>"
         );
     }
 
