@@ -42,9 +42,10 @@ mcp:
 | Key | Type | Required | Meaning |
 |---|---|---|---|
 | `version` | integer | yes | Must be `0`. |
-| `public_url` | URL | yes, unless `listen` is a loopback address | Must be `https://` unless it is a loopback address. Rowbit does not terminate TLS; put it behind a reverse proxy that does. |
+| `public_url` | URL | yes, unless `listen` is a loopback address | Must be `https://` unless it is a loopback address. Rowbit does not terminate TLS; put it behind a reverse proxy that does, and that passes the `Host` header through: Rowbit answers only requests addressed to `public_url`'s host or the address it listens on. |
 | `listen` | address | no, `127.0.0.1:8080` | `--listen` overrides it. |
 | `reviewers.oidc` | map | yes, unless `listen` is a loopback address | The identity provider. See [Signing in](#signing-in). |
+| `reviewers.oidc.scopes` | list | no | Scopes to ask for beyond `openid` and `email`, such as `groups` for providers that put the groups claim behind one (Okta, Keycloak). |
 | `reviewers.allow` | map | yes, with `oidc` | Who may sign in. At least one of `emails`, `domains`, `groups`. |
 | `notify` | list | no | Where to announce held changes. See [Notifications](#notifications). |
 | `mcp.http` | boolean | no, `false` | Serve agents over MCP at `/mcp`. See [MCP over HTTP](#mcp-over-http). |
@@ -64,7 +65,7 @@ Reviewers sign in to the web UI through an OpenID Connect provider: Google Works
 - `reviewers.allow` decides who may sign in: an exact `emails` entry, an email in one of the `domains`, or membership of one of the `groups` (the token's `groups` claim). Anyone else is refused, and an empty `allow` refuses everyone.
 - The audit log records the reviewer as `human:<email>`.
 
-Signing in gives the same session as v0.1: an `HttpOnly`, `SameSite=Strict` cookie (and `Secure` behind HTTPS), valid for 12 hours or until the process stops, and a per-session token every action must send. The short-lived cookie that carries `state`, `nonce` and the PKCE verifier through the provider is `SameSite=Lax`, since the provider's redirect back is a cross-site navigation, and is deleted at the callback.
+Signing in gives the same session as v0.1: an `HttpOnly`, `SameSite=Strict` cookie (and `Secure` behind HTTPS), valid for 12 hours or until the process stops, and a per-session token every action must send. The short-lived cookie that brings the browser back to its login is `SameSite=Lax`, since the provider's redirect back is a cross-site navigation; it holds only a random id, while `state`, `nonce` and the PKCE verifier stay in Rowbit's memory, and each login can be finished once, within 10 minutes. After sign-in, the callback answers with a page that moves on to the queue itself, because browsers don't send a `SameSite=Strict` cookie on a redirect chain that started at another site.
 
 **Without `reviewers.oidc`,** `rowbit serve` keeps v0.1's shared password and typed name, but only on a loopback address. It refuses to listen anywhere else, so the password never crosses a network. This is for trying Rowbit on one machine.
 
