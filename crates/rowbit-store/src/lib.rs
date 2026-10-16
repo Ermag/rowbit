@@ -66,6 +66,8 @@ pub enum StoreError {
     Corrupt(String),
     #[error("SQLite: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("cannot make the store readable by its owner only: {0}")]
+    Permissions(std::io::Error),
 }
 
 /// What [`Store::verify`] found wrong.
@@ -140,7 +142,23 @@ pub struct Store {
 }
 
 impl Store {
+    /// Opens or creates the store. On Unix a new file is created readable
+    /// by its owner only, before SQLite writes anything, so the journal
+    /// files it adds (`-wal`, `-shm`) get the same mode: they hold copies of
+    /// database rows too. An existing file keeps the mode its owner gave it.
     pub fn open(path: &Path) -> Result<Store, StoreError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            if !path.exists() {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path)
+                    .map_err(StoreError::Permissions)?;
+            }
+        }
         Self::init(Connection::open(path)?)
     }
 

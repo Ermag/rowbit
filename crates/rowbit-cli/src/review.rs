@@ -140,6 +140,8 @@ fn show(cell: &Cell) -> String {
     match cell {
         None => "NULL".to_owned(),
         Some(bytes) => match std::str::from_utf8(bytes) {
+            // Numbers plain, text quoted, so "12" and 12 can't be confused.
+            Ok(text) if !text.is_empty() && text.parse::<f64>().is_ok() => text.to_owned(),
             Ok(text) => format!("{text:?}"),
             Err(_) => {
                 let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();

@@ -4,9 +4,10 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use rowbit_core::adapter::Adapter;
-use rowbit_core::change::State;
-use rowbit_engine::Engine;
+use rowbit_core::adapter::{Adapter, Engine};
+use rowbit_core::change::{Actor, Event, State};
+
+use rowbit_engine::Engine as RowbitEngine;
 use rowbit_policy::PolicyFile;
 use rowbit_store::Store;
 
@@ -39,13 +40,26 @@ enum Command {
         #[command(flatten)]
         setup: Setup,
     },
+    /// Propose a write as an agent would, without an MCP client
+    ///
+    /// For trying Rowbit and for scripts. Prints what the agent would get
+    /// back: the change's id, state, table, row count and reason.
+    Propose {
+        /// The agent's id, as listed in rowbit.yml
+        #[arg(long)]
+        agent: String,
+        /// One INSERT, UPDATE or DELETE, or one schema change
+        sql: String,
+        #[command(flatten)]
+        setup: Setup,
+    },
     /// List changes, newest last
     Changes {
         /// Only changes in this state: held, applied, rejected, ...
         #[arg(long)]
         state: Option<String>,
         #[command(flatten)]
-        setup: Setup,
+        store: StoreArgs,
     },
     /// Show one change: the statement, every row before and after, and its history
     Show {
@@ -54,7 +68,7 @@ enum Command {
         #[arg(long)]
         all: bool,
         #[command(flatten)]
-        setup: Setup,
+        store: StoreArgs,
     },
     /// Approve a held change and apply it
     ///
@@ -82,7 +96,7 @@ enum Command {
         #[command(flatten)]
         person: Person,
         #[command(flatten)]
-        setup: Setup,
+        store: StoreArgs,
     },
     /// Undo an applied change, if no row changed since
     Undo {
@@ -109,7 +123,7 @@ enum Command {
     /// Check the audit log for tampering
     Verify {
         #[command(flatten)]
-        setup: Setup,
+        store: StoreArgs,
     },
     /// Check that Rowbit can reach a database
     Ping {
@@ -117,6 +131,26 @@ enum Command {
         #[arg(long, env = "ROWBIT_DATABASE_URL", hide_env_values = true)]
         url: String,
     },
+}
+
+/// Only Rowbit's state file: for commands that don't touch the database,
+/// so reviewers can look without its credentials.
+#[derive(clap::Args)]
+struct StoreArgs {
+    /// Change state and the audit log (SQLite)
+    #[arg(long, env = "ROWBIT_STORE", default_value = "rowbit.db")]
+    store: PathBuf,
+}
+
+impl StoreArgs {
+    fn open(&self) -> anyhow::Result<Store> {
+        anyhow::ensure!(
+            self.store.exists(),
+            "{} does not exist; run this where Rowbit keeps its state, or pass --store",
+            self.store.display()
+        );
+        Store::open(&self.store).with_context(|| format!("opening {}", self.store.display()))
+    }
 }
 
 /// Who is acting. Recorded in the audit log as `human:<name>`.
@@ -218,7 +252,7 @@ struct Setup {
 
 impl Setup {
     /// The engine, and the database named in the URL.
-    fn engine(&self) -> anyhow::Result<(Engine, String)> {
+    fn engine(&self) -> anyhow::Result<(RowbitEngine, String)> {
         let src = std::fs::read_to_string(&self.policy)
             .with_context(|| format!("reading {}", self.policy.display()))?;
         let policy = PolicyFile::from_yaml(&src)?;
@@ -226,7 +260,7 @@ impl Setup {
         let adapter = rowbit_mysql::MySqlAdapter::new(&self.url)?;
         let store = Store::open(&self.store)
             .with_context(|| format!("opening {}", self.store.display()))?;
-        Ok((Engine::new(adapter, policy, store), database))
+        Ok((RowbitEngine::new(adapter, policy, store), database))
     }
 }
 
@@ -265,7 +299,7 @@ async fn main() -> anyhow::Result<()> {
             let policy = PolicyFile::from_yaml(&src)?;
             let rules: usize = policy.agents.values().map(|a| a.rules.len()).sum();
             println!(
-                "{}: ok ({} agents, {rules} rules)",
+                "{}: ok ({} agent(s), {rules} rule(s))",
                 path.display(),
                 policy.agents.len()
             );
@@ -289,22 +323,29 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
-        Command::Changes { state, setup } => {
-            let (engine, _) = setup.engine()?;
-            let state = match state {
-                Some(s) => Some(State::parse(&s).with_context(|| format!("unknown state {s}"))?),
-                None => None,
+        Command::Propose { agent, sql, setup } => {
+            let (engine, database) = setup.engine()?;
+            let status = engine.propose(&agent, &database, &sql).await?;
+            println!("{}", rowbit_mcp::status_json(&status));
+        }
+        Command::Changes { state, store } => {
+            let store = store.open()?;
+            let states = match state {
+                Some(s) => vec![State::parse(&s).with_context(|| format!("unknown state {s}"))?],
+                None => State::ALL.to_vec(),
             };
-            for id in engine.list(state)? {
-                println!("{}", review::line(&engine.change(id)?));
+            let mut ids = Vec::new();
+            for state in states {
+                ids.extend(store.list(state)?);
+            }
+            ids.sort_unstable();
+            for id in ids {
+                println!("{}", review::line(&store.get(id)?));
             }
         }
-        Command::Show { id, all, setup } => {
-            let (engine, _) = setup.engine()?;
-            print!(
-                "{}",
-                review::full(&engine.change(id)?, &engine.history(id)?, all)
-            );
+        Command::Show { id, all, store } => {
+            let store = store.open()?;
+            print!("{}", review::full(&store.get(id)?, &store.events(id)?, all));
         }
         Command::Approve {
             id,
@@ -324,11 +365,16 @@ async fn main() -> anyhow::Result<()> {
             id,
             reason,
             person,
-            setup,
+            store,
         } => {
-            let (engine, _) = setup.engine()?;
-            let change = engine.reject(&person.name()?, id, &reason)?;
-            println!("{}", review::line(&change));
+            let mut store = store.open()?;
+            store.transition(
+                id,
+                &Event::Reject { reason },
+                &Actor::Human(person.name()?),
+                None,
+            )?;
+            println!("{}", review::line(&store.get(id)?));
         }
         Command::Undo { id, person, setup } => {
             let (engine, _) = setup.engine()?;
@@ -351,17 +397,25 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("rowbit: review page on http://{listen}/");
             rowbit_web::serve(std::sync::Arc::new(engine), hash, listen).await?;
         }
-        Command::Verify { setup } => {
-            let (engine, _) = setup.engine()?;
-            match engine.verify()? {
-                Ok(()) => println!("audit log ok"),
+        Command::Verify { store } => {
+            let store = store.open()?;
+            let changes: usize = State::ALL
+                .iter()
+                .map(|s| store.list(*s).map(|ids| ids.len()))
+                .sum::<Result<usize, _>>()?;
+            match store.verify()? {
+                Ok(()) => println!("audit log ok ({changes} changes checked)"),
                 Err(problem) => anyhow::bail!("audit log tampered: {problem}"),
             }
         }
         Command::Ping { url } => {
             let adapter = rowbit_mysql::MySqlAdapter::new(&url)?;
             let info = adapter.server_info().await?;
-            println!("{:?} {}", info.engine, info.version);
+            let engine = match info.engine {
+                Engine::MariaDb => "MariaDB",
+                Engine::MySql => "MySQL",
+            };
+            println!("{engine} {}", info.version);
             adapter.close().await?;
         }
     }

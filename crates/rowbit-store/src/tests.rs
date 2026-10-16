@@ -275,10 +275,26 @@ fn survives_reopening() {
     let dir = std::env::temp_dir().join(format!("rowbit-store-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("rowbit.db");
-    let _ = std::fs::remove_file(&path);
+    for file in ["rowbit.db", "rowbit.db-wal", "rowbit.db-shm"] {
+        let _ = std::fs::remove_file(dir.join(file));
+    }
     let id = {
         let mut store = Store::open(&path).unwrap();
-        previewed(&mut store).0
+        let id = previewed(&mut store).0;
+        // Found in review: the journal files were world-readable. Checked
+        // while the store is open, since SQLite removes them on close.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for file in ["rowbit.db", "rowbit.db-wal", "rowbit.db-shm"] {
+                let mode = std::fs::metadata(dir.join(file))
+                    .unwrap()
+                    .permissions()
+                    .mode();
+                assert_eq!(mode & 0o777, 0o600, "{file} holds copies of rows");
+            }
+        }
+        id
     };
     let mut store = Store::open(&path).unwrap();
     store.transition(id, &held(), &policy(), None).unwrap();

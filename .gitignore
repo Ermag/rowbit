@@ -22,3 +22,7 @@ __pycache__/
 
 # Local registry placeholder sources (kept out of the repo)
 placeholders/
+
+# Rowbit state (change log and previews; holds copies of database rows)
+rowbit.db
+rowbit.db-*
