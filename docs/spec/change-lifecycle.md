@@ -142,7 +142,7 @@ A change outside the agent's scopes is `PolicyBlocked` by `policy:scope`. A chan
 
 For an agent with `mode: shadow`, a decision of `hold` or `block` from a rule or the agent's default is recorded instead of enforced: Rowbit sends `PolicyShadowed`, whose detail names the decision it replaced and the rule's reason (`would hold: Large or unusual refund batches are reviewed by billing.`), and whose actor is `policy:<rule>` as usual. It moves the change to `approved` and carries the review hash like `PolicyAllowed`, and the change is applied right away. The agent is told `applied`, with no reason.
 
-Only rule decisions are shadowed. `policy:floor` and `policy:scope` still block, and the floor that holds every schema change still holds it, since none of those can be applied safely or undone. A shadowed change can be undone like any other.
+Only rule decisions about row writes are shadowed. `policy:floor` and `policy:scope` still block, and schema changes are never shadowed: their rules are enforced and they are at least held, since none of those can be applied safely or undone. A shadowed change can be undone like any other.
 
 ### Apply
 

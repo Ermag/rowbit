@@ -146,7 +146,7 @@ In shadow mode, each write is still classified, scope-checked and previewed, and
 
 - If the rules allow it, it is applied as in `enforce` mode.
 - If the rules would hold or block it, it is applied anyway, and the log records which rule would have decided and why (`PolicyShadowed`, see the [change lifecycle](change-lifecycle.md#shadow-mode)). The review page lists these changes apart, by rule.
-- What Rowbit can't do safely is still refused, as in `enforce` mode: statements it refuses, failed previews, writes outside `scopes`, agents not in the file. Schema changes are still held, since they can't be undone.
+- What Rowbit can't do safely is still refused, as in `enforce` mode: statements it refuses, failed previews, writes outside `scopes`, agents not in the file. Schema changes aren't shadowed: their rules are enforced and they are at least held, since they can't be undone.
 
 Applied changes can be undone like any other. The agent isn't told that a change would have been held; it sees `applied`.
 
