@@ -45,7 +45,14 @@ impl Page {
     fn new(engine: Arc<Engine>) -> Page {
         let hash = rowbit_web::hash_password(password());
         Page {
-            router: rowbit_web::router(engine.clone(), hash, vec![HOST.to_owned()]),
+            router: rowbit_web::router(
+                engine.clone(),
+                rowbit_web::Web {
+                    sign_in: rowbit_web::SignIn::Password { hash },
+                    hosts: vec![HOST.to_owned()],
+                    secure: false,
+                },
+            ),
             engine,
             cookie: None,
         }

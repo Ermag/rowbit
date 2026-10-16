@@ -108,17 +108,28 @@ enum Command {
     },
     /// Serve the review page: held changes, approve, reject, undo
     ///
-    /// Reviewers sign in with the page's password and their name. The first
-    /// time, Rowbit makes up a password and prints it once; only its hash is
-    /// kept, in the state file. --set-password asks for one instead.
+    /// With reviewers.oidc in rowbit-server.yml, reviewers sign in through
+    /// that identity provider. Without it, Rowbit serves on a loopback
+    /// address only, and reviewers sign in with the page's password and
+    /// their name: the first time, Rowbit makes up a password and prints it
+    /// once, keeping only its hash in the state file; --set-password asks
+    /// for one instead.
     Serve {
-        #[arg(long, default_value = "127.0.0.1:8080")]
-        listen: std::net::SocketAddr,
+        /// Where to listen; overrides rowbit-server.yml (default 127.0.0.1:8080)
+        #[arg(long)]
+        listen: Option<std::net::SocketAddr>,
         /// Choose the page's password (asked for on the terminal) and serve
         #[arg(long)]
         set_password: bool,
         #[command(flatten)]
+        server: ServerArgs,
+        #[command(flatten)]
         setup: Setup,
+    },
+    /// Work with rowbit-server.yml
+    Server {
+        #[command(subcommand)]
+        command: ServerCommand,
     },
     /// Check the audit log for tampering
     Verify {
@@ -280,6 +291,45 @@ fn mysql_database(url: &str) -> anyhow::Result<String> {
 }
 
 #[derive(Subcommand)]
+enum ServerCommand {
+    /// Parse and validate rowbit-server.yml, secrets included, without
+    /// starting anything
+    Check {
+        #[command(flatten)]
+        server: ServerArgs,
+    },
+}
+
+/// Where rowbit-server.yml is.
+#[derive(clap::Args)]
+struct ServerArgs {
+    /// Server settings: sign-in, public URL. Optional: without it, Rowbit
+    /// serves on a loopback address with a page password
+    #[arg(
+        long = "config",
+        env = "ROWBIT_SERVER_CONFIG",
+        default_value = "rowbit-server.yml"
+    )]
+    config: PathBuf,
+}
+
+impl ServerArgs {
+    /// The settings, or the defaults if the default file doesn't exist. A
+    /// file named on purpose must exist.
+    fn load(&self) -> anyhow::Result<rowbit_web::config::ServerConfig> {
+        let named = self.config != std::path::Path::new("rowbit-server.yml");
+        if !self.config.exists() && !named {
+            return Ok(Default::default());
+        }
+        let src = std::fs::read_to_string(&self.config)
+            .with_context(|| format!("reading {}", self.config.display()))?;
+        Ok(rowbit_web::config::ServerConfig::from_yaml(&src, |name| {
+            std::env::var(name).ok()
+        })?)
+    }
+}
+
+#[derive(Subcommand)]
 enum PolicyCommand {
     /// Parse and validate a policy file
     Check {
@@ -384,18 +434,58 @@ async fn main() -> anyhow::Result<()> {
         Command::Serve {
             listen,
             set_password,
+            server,
             setup,
         } => {
-            let hash = page_password(&setup.store, set_password)?;
+            let config = server.load()?;
+            let listen = config.listen(listen);
+            config.check_listen(listen)?;
+            let sign_in = match (&config.oidc, &config.public_url) {
+                (Some(oidc), Some(public_url)) => {
+                    anyhow::ensure!(
+                        !set_password,
+                        "reviewers sign in through {}; there is no page password",
+                        oidc.issuer
+                    );
+                    let login = rowbit_web::oidc::OidcLogin::discover(oidc, public_url)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                    rowbit_web::SignIn::Oidc(Box::new(login))
+                }
+                _ => rowbit_web::SignIn::Password {
+                    hash: page_password(&setup.store, set_password)?,
+                },
+            };
             let (engine, _) = setup.engine()?;
-            if !listen.ip().is_loopback() {
-                eprintln!(
-                    "rowbit: the page is served over plain HTTP on {listen}; \
-                     put it behind HTTPS before anyone signs in over a network"
-                );
+            let web = rowbit_web::Web {
+                sign_in,
+                hosts: config.public_host().into_iter().collect(),
+                secure: config.https(),
+            };
+            match &config.public_url {
+                Some(url) => eprintln!("rowbit: review page on {url}/ (listening on {listen})"),
+                None => eprintln!("rowbit: review page on http://{listen}/"),
             }
-            eprintln!("rowbit: review page on http://{listen}/");
-            rowbit_web::serve(std::sync::Arc::new(engine), hash, listen).await?;
+            rowbit_web::serve(std::sync::Arc::new(engine), web, listen).await?;
+        }
+        Command::Server {
+            command: ServerCommand::Check { server },
+        } => {
+            anyhow::ensure!(
+                server.config.exists(),
+                "{} does not exist",
+                server.config.display()
+            );
+            let config = server.load()?;
+            config.check_listen(config.listen(None))?;
+            println!(
+                "{}: ok (sign-in: {})",
+                server.config.display(),
+                match &config.oidc {
+                    Some(o) => format!("OIDC through {}", o.issuer),
+                    None => "page password, loopback only".to_owned(),
+                }
+            );
         }
         Command::Verify { store } => {
             let store = store.open()?;

@@ -1,0 +1,21 @@
+# Rowbit server settings, schema version 0. See docs/spec/server.md.
+# Secrets are ${VARIABLE} references to the environment, never values.
+version: 0
+
+# Where reviewers reach Rowbit, behind a proxy that terminates TLS and
+# passes the Host header through. The provider redirects back here.
+public_url: https://rowbit.internal.example.com
+listen: 127.0.0.1:8080
+
+reviewers:
+  oidc:
+    issuer: https://accounts.google.com
+    client_id: 1234-abc.apps.googleusercontent.com
+    client_secret: ${ROWBIT_OIDC_CLIENT_SECRET}
+    # Asked for beyond openid and email, for providers that put groups
+    # behind a scope (Okta, Keycloak).
+    # scopes: [groups]
+  allow:
+    domains: [example.com]
+    emails: [contractor@elsewhere.dev]
+    # groups: [db-reviewers]

@@ -476,8 +476,13 @@ async fn approving_through_the_review_page(var: &str, table: &str) {
     let review = w.engine.change(id).unwrap().review_hash.unwrap();
     let page = rowbit_web::router(
         w.engine.clone(),
-        rowbit_web::hash_password(&rowbit_web::new_password()),
-        vec!["127.0.0.1:8080".to_owned()],
+        rowbit_web::Web {
+            sign_in: rowbit_web::SignIn::Password {
+                hash: rowbit_web::hash_password(&rowbit_web::new_password()),
+            },
+            hosts: vec!["127.0.0.1:8080".to_owned()],
+            secure: false,
+        },
     );
     let send = |request: Request<Body>| {
         let page = page.clone();

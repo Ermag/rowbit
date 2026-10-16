@@ -7,7 +7,13 @@ all-features = true
 [advisories]
 # Every advisory fails the build, including unmaintained and unsound crates.
 # To accept one, add it here with a reason and a date to revisit.
-ignore = []
+ignore = [
+    # Marvin: timing leaks when an RSA private key decrypts or signs. Rowbit
+    # only verifies identity providers' ID token signatures with public
+    # keys (openidconnect -> rsa), which the attack doesn't reach. Revisit
+    # when rsa ships a fix, or by 2027-04-01.
+    { id = "RUSTSEC-2023-0071", reason = "rsa is used only to verify signatures with public keys" },
+]
 
 [licenses]
 # Permissive licenses only for dependencies. The server itself is
