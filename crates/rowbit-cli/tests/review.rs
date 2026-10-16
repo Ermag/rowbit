@@ -217,6 +217,14 @@ async fn big_changes_and_hostile_text(var: &str, table: &str) {
         show.contains("... and 10 more. Approving covers all 60"),
         "{show}"
     );
+    assert!(
+        show.contains(&format!("`rowbit show {id} --all`")),
+        "{show}"
+    );
+    assert!(
+        !show.contains("safe"),
+        "the agent's comments never reach the reviewer: {show}"
+    );
     // Keys may print quoted or plain; either way row 60 is not listed.
     let row_60 = |text: &str| text.contains("row 60\n") || text.contains("row \"60\"\n");
     assert!(!row_60(&show), "{show}");

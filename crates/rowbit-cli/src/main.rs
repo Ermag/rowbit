@@ -150,7 +150,7 @@ fn confirm_rows(change: &rowbit_store::Change, rows: Option<usize>) -> anyhow::R
     };
     match rows {
         Some(n) if n == total => Ok(()),
-        Some(n) => anyhow::bail!("this change writes {total} rows, not {n}"),
+        Some(n) => anyhow::bail!("this change writes {}, not {n}", review::count(total)),
         None if total <= review::SHOWN_ROWS => Ok(()),
         None => anyhow::bail!(
             "this change writes {total} rows and `rowbit show` lists {} of them; \

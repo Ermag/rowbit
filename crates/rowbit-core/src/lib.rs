@@ -6,3 +6,4 @@
 pub mod adapter;
 pub mod change;
 pub mod preview;
+pub mod text;
