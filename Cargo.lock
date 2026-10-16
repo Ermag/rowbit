@@ -1123,6 +1123,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "mysql_async",
  "rowbit-core",
  "rowbit-engine",
  "rowbit-mcp",

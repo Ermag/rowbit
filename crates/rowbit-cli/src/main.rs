@@ -1,8 +1,11 @@
+mod review;
+
 use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use rowbit_core::adapter::Adapter;
+use rowbit_core::change::State;
 use rowbit_engine::Engine;
 use rowbit_policy::PolicyFile;
 use rowbit_store::Store;
@@ -36,12 +39,98 @@ enum Command {
         #[command(flatten)]
         setup: Setup,
     },
+    /// List changes, newest last
+    Changes {
+        /// Only changes in this state: held, applied, rejected, ...
+        #[arg(long)]
+        state: Option<String>,
+        #[command(flatten)]
+        setup: Setup,
+    },
+    /// Show one change: the statement, every row before and after, and its history
+    Show {
+        id: i64,
+        #[command(flatten)]
+        setup: Setup,
+    },
+    /// Approve a held change and apply it
+    ///
+    /// --review is the review hash `rowbit show` printed (at least its first
+    /// 12 characters), so you approve exactly what you looked at.
+    Approve {
+        id: i64,
+        #[arg(long)]
+        review: String,
+        #[command(flatten)]
+        person: Person,
+        #[command(flatten)]
+        setup: Setup,
+    },
+    /// Reject a held change
+    Reject {
+        id: i64,
+        #[arg(long)]
+        reason: String,
+        #[command(flatten)]
+        person: Person,
+        #[command(flatten)]
+        setup: Setup,
+    },
+    /// Undo an applied change, if no row changed since
+    Undo {
+        id: i64,
+        #[command(flatten)]
+        person: Person,
+        #[command(flatten)]
+        setup: Setup,
+    },
+    /// Check the audit log for tampering
+    Verify {
+        #[command(flatten)]
+        setup: Setup,
+    },
     /// Check that Rowbit can reach a database
     Ping {
         /// mysql://user:password@host:port/database
         #[arg(long, env = "ROWBIT_DATABASE_URL", hide_env_values = true)]
         url: String,
     },
+}
+
+/// Who is acting. Recorded in the audit log as `human:<name>`.
+#[derive(clap::Args)]
+struct Person {
+    /// Your name in the audit log; defaults to your login name
+    #[arg(long = "as", env = "ROWBIT_USER")]
+    name: Option<String>,
+}
+
+impl Person {
+    fn name(&self) -> anyhow::Result<String> {
+        let name = self
+            .name
+            .clone()
+            .or_else(|| std::env::var("USER").ok())
+            .or_else(|| std::env::var("USERNAME").ok())
+            .unwrap_or_default();
+        anyhow::ensure!(!name.trim().is_empty(), "say who you are with --as <name>");
+        Ok(name)
+    }
+}
+
+/// The full review hash, from the prefix a person typed. Refuses short or
+/// mismatched prefixes, so a typo never approves the wrong change.
+fn review_hash(stored: Option<&str>, typed: &str) -> anyhow::Result<String> {
+    let stored = stored.context("this change has nothing to review")?;
+    anyhow::ensure!(
+        typed.len() >= 12,
+        "give at least the first 12 characters of the review hash"
+    );
+    anyhow::ensure!(
+        stored.starts_with(&typed.to_ascii_lowercase()),
+        "that is not this change's review hash; run `rowbit show` again"
+    );
+    Ok(stored.to_owned())
 }
 
 /// Where Rowbit's database, policy and state are.
@@ -131,6 +220,56 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
+        Command::Changes { state, setup } => {
+            let (engine, _) = setup.engine()?;
+            let state = match state {
+                Some(s) => Some(State::parse(&s).with_context(|| format!("unknown state {s}"))?),
+                None => None,
+            };
+            for id in engine.list(state)? {
+                println!("{}", review::line(&engine.change(id)?));
+            }
+        }
+        Command::Show { id, setup } => {
+            let (engine, _) = setup.engine()?;
+            print!(
+                "{}",
+                review::full(&engine.change(id)?, &engine.history(id)?)
+            );
+        }
+        Command::Approve {
+            id,
+            review,
+            person,
+            setup,
+        } => {
+            let (engine, _) = setup.engine()?;
+            let hash = review_hash(engine.change(id)?.review_hash.as_deref(), &review)?;
+            let change = engine.approve(&person.name()?, id, &hash).await?;
+            println!("{}", review::line(&change));
+        }
+        Command::Reject {
+            id,
+            reason,
+            person,
+            setup,
+        } => {
+            let (engine, _) = setup.engine()?;
+            let change = engine.reject(&person.name()?, id, &reason)?;
+            println!("{}", review::line(&change));
+        }
+        Command::Undo { id, person, setup } => {
+            let (engine, _) = setup.engine()?;
+            let change = engine.undo(&person.name()?, id).await?;
+            println!("{}", review::line(&change));
+        }
+        Command::Verify { setup } => {
+            let (engine, _) = setup.engine()?;
+            match engine.verify()? {
+                Ok(()) => println!("audit log ok"),
+                Err(problem) => anyhow::bail!("audit log tampered: {problem}"),
+            }
+        }
         Command::Ping { url } => {
             let adapter = rowbit_mysql::MySqlAdapter::new(&url)?;
             let info = adapter.server_info().await?;
@@ -139,4 +278,28 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn review_hash_needs_a_real_prefix() {
+        let stored = "ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12";
+        assert_eq!(review_hash(Some(stored), "AB12CD34EF56").unwrap(), stored);
+        assert!(review_hash(Some(stored), "ab12cd").is_err());
+        assert!(review_hash(Some(stored), "ab12cd34ef57").is_err());
+        assert!(review_hash(None, "ab12cd34ef56").is_err());
+    }
+
+    #[test]
+    fn database_comes_from_the_url() {
+        assert_eq!(
+            mysql_database("mysql://u:p@h:3306/app?ssl-mode=required").unwrap(),
+            "app"
+        );
+        assert!(mysql_database("mysql://u:p@h:3306").is_err());
+        assert!(mysql_database("mysql://u:p@h:3306/").is_err());
+    }
 }
