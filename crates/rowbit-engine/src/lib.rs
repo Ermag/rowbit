@@ -181,9 +181,12 @@ impl Engine {
         let diff = Diff::between(&compiled.grants, &current.grants);
         if let Some(extra) = diff.extra.iter().next() {
             return Err(format!(
-                "its database user holds more than rowbit.yml gives it ({extra}, and {} more); \
+                "its database user holds more than rowbit.yml gives it ({extra}{}); \
                  run `rowbit grants apply`",
-                diff.extra.len() - 1
+                match diff.extra.len() - 1 {
+                    0 => String::new(),
+                    n => format!(", and {n} more"),
+                }
             ));
         }
         Ok(diff.missing.len())

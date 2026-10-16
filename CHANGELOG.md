@@ -4,6 +4,10 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 
 ## Unreleased
 
+### Upgrading from 0.1
+
+Back up `rowbit.db`, stop every Rowbit process, and replace the binary. The state file is upgraded in place on start; see [Running Rowbit](docs/operating.md#upgrading). One change is breaking: without an identity provider, `rowbit serve` listens on loopback only.
+
 ### Scopes
 
 - `rowbit.yml` accepts `scopes` per agent: tables it may read, insert into, update, delete from or change, and tables and columns it may never read. `rowbit policy check` warns about a table an agent may update or delete from but not read.

@@ -14,4 +14,4 @@ We aim to acknowledge reports within three working days and will keep you update
 
 ## Supported versions
 
-Nothing is released yet. Until 1.0, only the latest commit on `main` is supported.
+Until 1.0, fixes go into the latest release and `main`; there are no fixes for older releases. Upgrade to the newest tag.

@@ -57,3 +57,5 @@ Change state, previews and the audit log live in a SQLite file next to Rowbit. P
 - Keep it readable only by the user Rowbit runs as. On Unix, Rowbit creates a new file as `600` before writing anything, so the `rowbit.db-wal` and `rowbit.db-shm` files SQLite adds next to it are `600` too. A file that already exists keeps the mode you gave it. It also holds the hash of the review page's password.
 - Keep agents away from it. The audit log's hash chain shows edits made by hand, but anyone who can write the file can rewrite the whole chain, and anyone who can read it sees the copies.
 - Back it up and encrypt it the way you would the database. Undo needs the before images in it.
+- It holds secrets too, all as hashes except one: the review page's password (Argon2id hash), agents' MCP tokens (SHA-256), and **scoped agents' database passwords, in plain text**, because Rowbit has to log in with them. Each of those users can do no more than its agent's scopes allow. `rowbit grants apply --rotate-passwords` replaces them.
+- Rowbit keeps everything; it deletes no change, preview or event. See [Running Rowbit](operating.md#how-long-data-is-kept).

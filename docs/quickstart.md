@@ -176,7 +176,7 @@ For any client with a JSON config, such as Claude Desktop:
 }
 ```
 
-The agent gets three tools: `query` to read, `propose_write` to ask for a write, and `change_status` to follow it. Ask it to fix something in the shop and watch `rowbit serve`.
+The agent gets four tools: `query` to read, `describe_schema` to see the tables it may use, `propose_write` to ask for a write (its argument is `sql`), and `change_status` to follow it. Ask it to fix something in the shop and watch `rowbit serve`.
 
 ### Over HTTP
 
@@ -217,11 +217,13 @@ claude mcp add --transport http rowbit http://127.0.0.1:8080/mcp --header "Autho
 - **Keep the page's password out of logs.** The first `rowbit serve` prints it to standard error, so under a service manager like systemd it would land in the journal. Run the first `serve` in a terminal, or set the password with `rowbit serve --set-password` before installing the service.
 - **Give Rowbit its own database user** with the grants in [database privileges](privileges.md), and nothing else.
 - **Protect `rowbit.db`.** It holds before and after copies of every row a change touched. Rowbit makes it readable by its owner only; back it up like the database. See [the SQLite file](privileges.md#the-sqlite-file).
-- **Know the limits of v0.1.** One statement per change, tables with a primary key, no triggers or cascading foreign keys, one shared password for the review page (sign-in with your identity provider comes in v0.2), and size rules can be met by splitting a write into smaller ones. See [Not in v0.1](spec/change-lifecycle.md#not-in-v01).
+- **Give agents scopes.** Without them an agent reads with Rowbit's privileges. See [Scopes](spec/policy.md#scopes) and `rowbit grants`.
+- **Read [Running Rowbit](operating.md)** for what happens when it's down, upgrades and how long data is kept.
+- **Know the limits.** One statement per change, tables with a primary key, no triggers or cascading foreign keys, held changes don't expire on their own yet, and size rules can be met by splitting a write into smaller ones. See [Not in v0.2](spec/change-lifecycle.md#not-in-v02).
 
 ## Clean up
 
 ```sh
 docker compose down -v
-rm rowbit.db*
+rm -f rowbit.db* rowbit-server.yml
 ```
