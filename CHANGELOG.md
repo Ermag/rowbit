@@ -2,7 +2,7 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-16)
 
 The first working version: an MCP server that previews, checks, holds, applies and undoes writes from AI agents to MariaDB and MySQL.
 
