@@ -11,6 +11,20 @@ use mysql_async::{Conn, Opts};
 use rowbit_mysql::grants::{self, Account, Catalog, Diff, Grant, Object};
 use rowbit_policy::Scopes;
 
+/// The agents' users' password: made up per run, not written in the code.
+fn password() -> String {
+    static PASSWORD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PASSWORD
+        .get_or_init(|| {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            format!("t{nanos:x}{:x}", std::process::id())
+        })
+        .clone()
+}
+
 /// The same server as root, whose password in `compose.yaml` is `rowbit`.
 fn admin_url(url: &str) -> String {
     url.replacen("//rowbit:rowbit@", "//root:rowbit@", 1)
@@ -75,7 +89,11 @@ async fn converge(admin: &mut Conn, account: &Account, want: &BTreeSet<Grant>) {
 /// The agent's user, with no default database: it may hold nothing on the
 /// test database.
 fn agent_url(url: &str, account: &Account) -> String {
-    let url = url.replacen("//rowbit:rowbit@", &format!("//{}:pw@", account.user), 1);
+    let url = url.replacen(
+        "//rowbit:rowbit@",
+        &format!("//{}:{}@", account.user, password()),
+        1,
+    );
     let (base, _db) = url.rsplit_once('/').unwrap();
     format!("{base}/")
 }
@@ -92,7 +110,7 @@ async fn scopes_become_exact_grants(var: &str, db: &str, agent: &str) {
     let Some(url) = common::url(var) else { return };
     let mut admin = connect(&admin_url(&url)).await;
     let account = setup(&mut admin, db, agent).await;
-    grants::create_user(&mut admin, &account, "pw")
+    grants::create_user(&mut admin, &account, &password())
         .await
         .unwrap();
     assert!(grants::exists(&mut admin, &account).await.unwrap());
@@ -194,7 +212,7 @@ async fn underscores_are_not_wildcards(var: &str) {
     let mut admin = connect(&admin_url(&url)).await;
     let account = setup(&mut admin, "rg_wild", "grants-wild").await;
     setup(&mut admin, "rgXwild", "grants-wild-unused").await;
-    grants::create_user(&mut admin, &account, "pw")
+    grants::create_user(&mut admin, &account, &password())
         .await
         .unwrap();
     let want = compile(&mut admin, "read: [rg_wild.*]").await;
@@ -235,7 +253,7 @@ async fn roles_are_unmanaged(var: &str) {
     let Some(url) = common::url(var) else { return };
     let mut admin = connect(&admin_url(&url)).await;
     let account = setup(&mut admin, "rg_role", "grants-role").await;
-    grants::create_user(&mut admin, &account, "pw")
+    grants::create_user(&mut admin, &account, &password())
         .await
         .unwrap();
     run(&mut admin, "DROP ROLE IF EXISTS rowbit_test_role").await;
