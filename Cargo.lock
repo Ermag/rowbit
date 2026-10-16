@@ -2046,11 +2046,14 @@ dependencies = [
 name = "rowbit-engine"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "mysql_async",
  "rowbit-core",
  "rowbit-mysql",
  "rowbit-policy",
  "rowbit-store",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
 ]
@@ -2115,6 +2118,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "getrandom 0.3.4",
+ "hmac",
  "mysql_async",
  "openidconnect",
  "rand_core 0.6.4",

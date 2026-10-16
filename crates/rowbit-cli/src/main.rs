@@ -542,6 +542,23 @@ async fn main() -> anyhow::Result<()> {
                 },
             };
             let (engine, _) = setup.engine()?;
+            // Every process that proposes changes queues notifications from
+            // this setting; only this one sends them, with the secrets.
+            engine.set_notify(&rowbit_engine::NotifySetting {
+                review_url: config.public_url.clone(),
+                targets: config
+                    .notify
+                    .iter()
+                    .map(|n| rowbit_engine::NotifyTarget {
+                        name: n.name.clone(),
+                        agents: n.agents.clone(),
+                    })
+                    .collect(),
+            })?;
+            let engine = std::sync::Arc::new(engine);
+            tokio::spawn(
+                rowbit_web::notify::Notifier::new(engine.clone(), config.notify.clone()).run(),
+            );
             let web = rowbit_web::Web {
                 sign_in,
                 hosts: config.public_host().into_iter().collect(),
@@ -552,7 +569,7 @@ async fn main() -> anyhow::Result<()> {
                 .clone()
                 .unwrap_or_else(|| format!("http://{listen}"));
             eprintln!("rowbit: review page on {address}/");
-            rowbit_web::serve(std::sync::Arc::new(engine), web, listen).await?;
+            rowbit_web::serve(engine, web, listen).await?;
         }
         Command::Server {
             command: ServerCommand::Check { server },

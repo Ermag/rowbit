@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import * as api from './api.js';
   import Change from './Change.svelte';
+  import Deliveries from './Deliveries.svelte';
   import Log from './Log.svelte';
   import Queue from './Queue.svelte';
   import Shadow from './Shadow.svelte';
@@ -30,6 +31,7 @@
     <a href="#/" class:active={route === '' || route === '#/'}>Held</a>
     <a href="#/log" class:active={route === '#/log'}>Log</a>
     <a href="#/shadow" class:active={route === '#/shadow'}>Shadow</a>
+    <a href="#/notifications" class:active={route === '#/notifications'}>Notifications</a>
   </nav>
   <span class="who">
     {#if reviewer}{reviewer} <button class="link" onclick={signOut}>Sign out</button>{/if}
@@ -45,6 +47,8 @@
     <Log />
   {:else if route === '#/shadow'}
     <Shadow />
+  {:else if route === '#/notifications'}
+    <Deliveries />
   {:else}
     <Queue />
   {/if}

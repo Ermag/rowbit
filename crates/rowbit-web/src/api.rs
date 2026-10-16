@@ -429,6 +429,30 @@ fn done(app: &App, id: i64, result: Result<(), rowbit_engine::EngineError>) -> R
     }
 }
 
+/// Notifications sent or waiting, newest first. Payloads stay out: they
+/// repeat what the change's page shows.
+pub(crate) async fn deliveries(State(app): State<App>, headers: HeaderMap) -> Response {
+    if let Err(r) = signed_in(&app, &headers) {
+        return r.into_response();
+    }
+    match app.engine.deliveries(200) {
+        Ok(list) => Json(json!({
+            "deliveries": list.iter().map(|d| json!({
+                "id": d.id,
+                "change_id": d.change_id,
+                "target": visible(&d.target),
+                "state": d.state,
+                "attempts": d.attempts,
+                "last_error": d.last_error.as_deref().map(visible),
+                "created_at_ms": d.created_at_ms,
+                "done_at_ms": d.done_at_ms,
+            })).collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
 pub(crate) async fn verify(State(app): State<App>, headers: HeaderMap) -> Response {
     if let Err(r) = signed_in(&app, &headers) {
         return r.into_response();
