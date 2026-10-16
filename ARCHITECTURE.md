@@ -20,8 +20,8 @@ person ─CLI/web─▶ rowbit ──┘        │
 | `rowbit-mysql` | AGPL-3.0-only | Adapter for MariaDB and MySQL (one wire protocol). |
 | `rowbit-store` | AGPL-3.0-only | Change state and the hash-chained audit log, in SQLite. |
 | `rowbit-engine` | AGPL-3.0-only | Runs a proposed change through classify, preview, policy and the store. What surfaces call. |
-| `rowbit-mcp` | AGPL-3.0-only | MCP server, stdio and HTTP. Placeholder until v0.1. |
-| `rowbit-cli` | AGPL-3.0-only | The `rowbit` binary: `policy check`, `ping`, later `approve`, `reject`, `undo`. |
+| `rowbit-mcp` | AGPL-3.0-only | MCP server: the `query`, `propose_write` and `change_status` tools, over stdio. |
+| `rowbit-cli` | AGPL-3.0-only | The `rowbit` binary: `mcp`, `policy check`, `ping`, later `approve`, `reject`, `undo`. |
 
 Client SDKs, when they exist, will be Apache-2.0 like the policy schema, so platforms can embed them.
 

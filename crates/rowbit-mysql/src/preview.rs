@@ -34,6 +34,16 @@ impl PreviewError {
     }
 }
 
+/// A database error's own words, without the client library's wrapping:
+/// `ERROR 1146 (42S02): Table 'shop.x' doesn't exist`.
+pub fn server_message(e: &mysql_async::Error) -> String {
+    match e {
+        mysql_async::Error::Server(e) => format!("ERROR {} ({}): {}", e.code, e.state, e.message),
+        mysql_async::Error::Io(_) => "database unreachable".to_owned(),
+        other => other.to_string(),
+    }
+}
+
 /// A database error without its message: `database error 1366`.
 pub fn db_error_code(e: &mysql_async::Error) -> String {
     match e {

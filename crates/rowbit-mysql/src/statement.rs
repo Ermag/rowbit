@@ -83,6 +83,28 @@ pub enum PreviewRead {
 
 /// Parses and classifies one statement in MySQL syntax.
 pub fn classify(sql: &str) -> Result<Classified, Refusal> {
+    let statement = parse_one(sql)?;
+    let canonical = statement.to_string();
+    match &statement {
+        Statement::Update(u) => update(u, canonical),
+        Statement::Delete(d) => delete(d, canonical),
+        Statement::Insert(i) => insert(i, canonical),
+        other => ddl(other, canonical),
+    }
+}
+
+/// Checks a read for the query tool: exactly one `SELECT` (or other query
+/// expression) that passes the same checks as a write. Returns the SQL
+/// Rowbit will run, printed from the parsed statement.
+pub fn classify_read(sql: &str) -> Result<String, Refusal> {
+    match parse_one(sql)? {
+        Statement::Query(q) => Ok(q.to_string()),
+        _ => refuse("the query tool only reads; propose writes with propose_write"),
+    }
+}
+
+/// Parses exactly one statement and runs the guard over all of it.
+fn parse_one(sql: &str) -> Result<Statement, Refusal> {
     let dialect = MySqlDialect {};
     refuse_executable_comments(sql)?;
     if sql.contains('\\') {
@@ -102,13 +124,7 @@ pub fn classify(sql: &str) -> Result<Classified, Refusal> {
     if let ControlFlow::Break(refusal) = statement.visit(&mut Guard) {
         return Err(refusal);
     }
-    let canonical = statement.to_string();
-    match &statement {
-        Statement::Update(u) => update(u, canonical),
-        Statement::Delete(d) => delete(d, canonical),
-        Statement::Insert(i) => insert(i, canonical),
-        other => ddl(other, canonical),
-    }
+    Ok(statement)
 }
 
 /// MySQL runs `/*! ... */` comments, and conditional ones (`/*!80000 ... */`)
@@ -361,7 +377,11 @@ fn ddl(statement: &Statement, canonical: String) -> Result<Classified, Refusal> 
             _ => return refuse("truncate one table at a time"),
         },
         Statement::RenameTable(renames) => match renames.as_slice() {
-            [rename] => &rename.old_name,
+            [rename] => {
+                // The new name too: renaming into a system schema is as bad.
+                refuse_system_table(&table_name(&rename.new_name)?)?;
+                &rename.old_name
+            }
             _ => return refuse("rename one table at a time"),
         },
         Statement::Query(_) => {
@@ -374,13 +394,25 @@ fn ddl(statement: &Statement, canonical: String) -> Result<Classified, Refusal> 
             );
         }
     };
+    // The guard sees most table names, but not those of DROP and RENAME.
+    let table = table_name(table)?;
+    refuse_system_table(&table)?;
     Ok(Classified {
         kind: Kind::Ddl,
-        table: table_name(table)?,
+        table,
         columns: Vec::new(),
         canonical,
         preview: None,
     })
+}
+
+fn refuse_system_table(table: &TableName) -> Result<(), Refusal> {
+    match &table.database {
+        Some(db) if is_system_schema(db) => refuse(format!(
+            "{db} is a system schema, which agents may not read or write"
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// The one table an `UPDATE` or `DELETE` targets, and its alias.
@@ -568,6 +600,26 @@ fn refuse_chance(e: &Expr) -> Result<(), Refusal> {
     }
 }
 
+/// The server's own schemas, which hold other sessions' statements, users
+/// and grants. Never read or written for an agent, also not as a default
+/// database.
+pub fn is_system_schema(name: &str) -> bool {
+    ["information_schema", "performance_schema", "mysql", "sys"]
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(name))
+}
+
+fn uses_table_statement(body: &SetExpr) -> bool {
+    match body {
+        SetExpr::Table(_) => true,
+        SetExpr::SetOperation { left, right, .. } => {
+            uses_table_statement(left) || uses_table_statement(right)
+        }
+        SetExpr::Query(q) => uses_table_statement(&q.body),
+        _ => false,
+    }
+}
+
 /// Backquotes an identifier for MySQL.
 fn quote(id: &str) -> String {
     format!("`{}`", id.replace('`', "``"))
@@ -610,6 +662,12 @@ impl Visitor for Guard {
     type Break = Refusal;
 
     fn pre_visit_query(&mut self, q: &Query) -> ControlFlow<Refusal> {
+        if uses_table_statement(&q.body) {
+            // `TABLE t` names its table outside the parts the relation check sees.
+            return ControlFlow::Break(Refusal(
+                "TABLE statements are not supported; use SELECT".into(),
+            ));
+        }
         if !q.locks.is_empty() {
             return ControlFlow::Break(Refusal("locking reads are not allowed".into()));
         }
@@ -628,6 +686,22 @@ impl Visitor for Guard {
             return ControlFlow::Break(Refusal("SELECT ... INTO is not allowed".into()));
         }
         ControlFlow::Continue(())
+    }
+
+    /// Server-wide schemas are off limits: with the PROCESS grant Rowbit
+    /// needs, `information_schema.PROCESSLIST` and `INNODB_TRX` show every
+    /// session's running SQL, for every user and database.
+    fn pre_visit_relation(&mut self, name: &ObjectName) -> ControlFlow<Refusal> {
+        let database = match name.0.as_slice() {
+            [ObjectNamePart::Identifier(db), _] => Some(db.value.as_str()),
+            _ => None,
+        };
+        match database {
+            Some(db) if is_system_schema(db) => ControlFlow::Break(Refusal(format!(
+                "{db} is a system schema, which agents may not read or write"
+            ))),
+            _ => ControlFlow::Continue(()),
+        }
     }
 
     fn pre_visit_table_factor(&mut self, t: &TableFactor) -> ControlFlow<Refusal> {
@@ -852,6 +926,56 @@ mod tests {
             assert_eq!(c.table.table, table, "{sql}");
             assert!(c.preview.is_none());
         }
+    }
+
+    // Found in review: with PROCESS, these show every session's SQL.
+    #[test]
+    fn system_schemas_are_off_limits() {
+        for sql in [
+            "SELECT INFO FROM information_schema.PROCESSLIST",
+            "SELECT trx_query FROM INFORMATION_SCHEMA.INNODB_TRX",
+            "SELECT * FROM performance_schema.events_statements_current",
+            "SELECT user, authentication_string FROM mysql.user",
+            "SELECT * FROM sys.processlist",
+            "SELECT * FROM t WHERE a IN (SELECT ID FROM information_schema.PROCESSLIST)",
+            "SELECT 1 UNION SELECT INFO FROM `information_schema`.`PROCESSLIST`",
+            "TABLE information_schema.PROCESSLIST",
+            "SELECT 1 UNION TABLE t",
+        ] {
+            assert!(classify_read(sql).is_err(), "{sql}");
+        }
+        refused(
+            "UPDATE t SET a = (SELECT MAX(INFO) FROM information_schema.PROCESSLIST)",
+            "system schema",
+        );
+        refused("DELETE FROM mysql.user", "system schema");
+        // Found in review 4: DROP and RENAME names aren't visited as relations.
+        for sql in [
+            "DROP TABLE mysql.user",
+            "RENAME TABLE shop.orders TO sys.orders",
+            "RENAME TABLE mysql.user TO shop.u",
+            "TRUNCATE TABLE mysql.general_log",
+            "ALTER TABLE mysql.user ADD COLUMN x INT",
+            "CREATE TABLE sys.x (id INT PRIMARY KEY)",
+            "CREATE INDEX i ON mysql.user (host)",
+        ] {
+            refused(sql, "system schema");
+        }
+        assert!(classify_read("SELECT * FROM shop.orders").is_ok());
+    }
+
+    #[test]
+    fn reads_are_checked_like_writes() {
+        assert_eq!(
+            classify_read("select id, status from refunds where amount > 10").unwrap(),
+            "SELECT id, status FROM refunds WHERE amount > 10"
+        );
+        assert!(classify_read("UPDATE t SET a = 1").is_err());
+        assert!(classify_read("SELECT SLEEP(10)").is_err());
+        assert!(classify_read("SELECT * FROM t FOR UPDATE").is_err());
+        assert!(classify_read("SELECT * FROM t INTO OUTFILE '/tmp/x'").is_err());
+        assert!(classify_read("SELECT @@version").is_err());
+        assert!(classify_read("SELECT 1; SELECT 2").is_err());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "rowbit-mcp"
-description = "Rowbit MCP server (placeholder until v0.1)"
+description = "Rowbit MCP server"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,19 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+rmcp.workspace = true
+rowbit-core.workspace = true
+rowbit-engine.workspace = true
+rowbit-mysql.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+mysql_async.workspace = true
+rmcp = { workspace = true, features = ["client"] }
+rowbit-policy.workspace = true
+rowbit-store.workspace = true
 
 [lints]
 workspace = true

@@ -158,6 +158,18 @@ DDL is run as the reviewed statement, after approval, and is not checked or undo
 
 In one transaction: lock the rows by primary key and check each still equals its after image (every column, generated ones included). Then restore the before images: delete inserted rows, re-insert deleted rows, and write back the columns apply wrote. Generated columns are never written; the server recomputes them. Read every row back and compare it to its before image. If any row changed since apply, or a restored row does not read back as its before image, roll back and refuse. The change stays `applied`, and the refusal is logged as an `UndoRefused` event that leaves the state unchanged; a person can resolve the conflict and try again. Schema changes cannot be undone.
 
+## Agent tools (MCP)
+
+`rowbit mcp --agent <id>` serves one agent over MCP on stdin and stdout. The agent id comes from that flag, set by whoever configures the MCP client, never from tool arguments. An agent gets three tools and nothing else:
+
+| Tool | Does | Returns |
+|---|---|---|
+| `query` | Runs one `SELECT` that passes the same checks as a write, in a read-only transaction, with a time limit and at most 1,000 rows. Only agents listed in `rowbit.yml` may read. Not logged as a change. | Columns, rows, and whether rows were cut off. A refused read gets Rowbit's reason; a failed one gets the server's message (`database error: ERROR 1146 ...`), which is about the agent's own read. |
+| `propose_write` | Proposes one statement: propose, preview, decide, and apply if allowed. | The change's id, state, table, row count and reason. |
+| `change_status` | Looks up one of the agent's own changes. Another agent's change is reported as not found. | The same as `propose_write`. |
+
+No statement, read or write, may name the server's own schemas (`information_schema`, `performance_schema`, `mysql`, `sys`), and none of them may be the default database: with the `PROCESS` grant Rowbit needs, they show every session's running SQL on the server. There is no tool to approve, reject, apply or undo. Nothing a tool returns about a change includes preview values (see Preview). A read runs with Rowbit's database privileges, so an agent can read whatever Rowbit's user can; scope that user accordingly until per-agent grants arrive in v0.2.
+
 ## Audit log
 
 Every transition appends one event: sequence number, change id, from, to, event, detail (the reason, if the event has one), actor, time, and the hash of the previous event. The event's own hash is SHA-256 over all of that, so the events form a chain and editing or deleting one breaks it. Proposing a change appends a first `Proposed` event whose detail records the target database and the statement exactly as the agent sent it.

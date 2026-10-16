@@ -16,8 +16,11 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 rowbit-core.workspace = true
+rowbit-engine.workspace = true
+rowbit-mcp.workspace = true
 rowbit-mysql.workspace = true
 rowbit-policy.workspace = true
+rowbit-store.workspace = true
 tokio.workspace = true
 
 [lints]
