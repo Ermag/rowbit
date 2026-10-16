@@ -1,6 +1,7 @@
-//! Rowbit's review page: one plain HTML page that lists held changes with
-//! their rows before and after, and lets a person approve or reject them,
-//! and undo applied ones. No JavaScript.
+//! Rowbit's review UI: a Svelte app, built into `dist/` and embedded in the
+//! binary, that lists held changes with their rows before and after, lets a
+//! person approve or reject them and undo applied ones, and shows the log.
+//! It talks to the JSON API in [`api`]. The sign-in pages are plain HTML.
 //!
 //! Reviewers sign in through an OpenID Connect provider ([`oidc`]), or, on a
 //! loopback address only, with the page's password, which `rowbit serve`
@@ -13,11 +14,11 @@
 //!
 //! Sessions live in memory and end when the process stops.
 
+mod api;
 pub mod config;
 pub mod oidc;
 
 use std::collections::HashMap;
-use std::fmt::Write;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,20 +26,23 @@ use std::time::{Duration, Instant};
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use axum::Router;
-use axum::extract::{Form, Path, State};
+use axum::extract::{Form, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use rowbit_core::change::State as ChangeState;
-use rowbit_core::preview::{Cell, Preview, WriteKind};
 use rowbit_engine::Engine;
-use rowbit_store::{Change, Review};
 use serde::Deserialize;
 
-/// Rows shown per change on the queue before the rest is linked.
-const SHOWN_ROWS: usize = 50;
-/// Recent changes shown below the held queue.
-const RECENT: usize = 20;
+/// The built UI. `web/` holds its source; CI checks these match a build.
+const INDEX_HTML: &str = include_str!("../dist/index.html");
+const APP_JS: &str = include_str!("../dist/assets/app.js");
+const APP_CSS: &str = include_str!("../dist/assets/app.css");
+/// For the UI: its own scripts, styles and API, nothing inline, no eval.
+const UI_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; \
+     img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+/// For the plain HTML sign-in pages.
+const PAGE_CSP: &str =
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'";
 /// How long a sign-in lasts.
 const SESSION: Duration = Duration::from_secs(12 * 60 * 60);
 const COOKIE: &str = "rowbit_session";
@@ -96,14 +100,19 @@ pub fn router(engine: Arc<Engine>, web: Web) -> Router {
     };
     Router::new()
         .route("/", get(index))
+        .route("/assets/app.js", get(app_js))
+        .route("/assets/app.css", get(app_css))
         .route("/login", get(login_page).post(login))
-        .route("/logout", post(logout))
         .route("/auth/start", get(auth_start))
         .route("/auth/callback", get(auth_callback))
-        .route("/changes/{id}", get(change_page))
-        .route("/changes/{id}/approve", post(approve))
-        .route("/changes/{id}/reject", post(reject))
-        .route("/changes/{id}/undo", post(undo))
+        .route("/api/session", get(api::me))
+        .route("/api/logout", post(api::logout))
+        .route("/api/changes", get(api::list))
+        .route("/api/changes/{id}", get(api::detail))
+        .route("/api/changes/{id}/approve", post(api::approve))
+        .route("/api/changes/{id}/reject", post(api::reject))
+        .route("/api/changes/{id}/undo", post(api::undo))
+        .route("/api/verify", get(api::verify))
         .layer(axum::middleware::from_fn_with_state(app.clone(), guard))
         .with_state(app)
 }
@@ -183,19 +192,21 @@ async fn guard(
     }
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
-        ),
-    );
+    if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(PAGE_CSP),
+        );
+    }
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
+    // Not `no-referrer`: with it, browsers send `Origin: null` even on
+    // our own forms, and the origin check refuses them.
     headers.insert(
         header::REFERRER_POLICY,
-        HeaderValue::from_static("no-referrer"),
+        HeaderValue::from_static("same-origin"),
     );
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
@@ -217,29 +228,6 @@ fn same_origin(app: &App, headers: &HeaderMap) -> bool {
             .iter()
             .any(|h| origin == format!("http://{h}") || origin == format!("https://{h}")),
     }
-}
-
-/// A posted form that isn't from a signed-in session of this page.
-struct Refused;
-
-impl IntoResponse for Refused {
-    fn into_response(self) -> Response {
-        (
-            StatusCode::FORBIDDEN,
-            "form refused; sign in and reload the page",
-        )
-            .into_response()
-    }
-}
-
-/// The session for a posted form: signed in, same origin, and the
-/// session's own token.
-fn form_session(app: &App, headers: &HeaderMap, token: &str) -> Result<Session, Refused> {
-    let session = session(app, headers).ok_or(Refused)?;
-    if !same_origin(app, headers) || !constant_time_eq(token.as_bytes(), session.token.as_bytes()) {
-        return Err(Refused);
-    }
-    Ok(session)
 }
 
 #[derive(Deserialize)]
@@ -445,333 +433,36 @@ async fn auth_callback(
     }
 }
 
-#[derive(Deserialize)]
-struct TokenForm {
-    token: String,
-}
-
-async fn logout(
-    State(app): State<App>,
-    headers: HeaderMap,
-    Form(form): Form<TokenForm>,
-) -> Response {
-    if form_session(&app, &headers, &form.token).is_ok() {
-        let token = form.token;
-        app.sessions
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .retain(|_, s| s.token != token);
-    }
-    let mut response = Redirect::to("/login").into_response();
-    response.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_static("rowbit_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"),
-    );
-    response
-}
-
-#[derive(Deserialize)]
-struct ApproveForm {
-    token: String,
-    review: String,
-}
-
-#[derive(Deserialize)]
-struct RejectForm {
-    token: String,
-    reason: String,
-}
-
-async fn approve(
-    State(app): State<App>,
-    Path(id): Path<i64>,
-    headers: HeaderMap,
-    Form(form): Form<ApproveForm>,
-) -> Response {
-    let session = match form_session(&app, &headers, &form.token) {
-        Ok(s) => s,
-        Err(refused) => return refused.into_response(),
-    };
-    let result = app
-        .engine
-        .approve(&session.reviewer, id, &form.review)
-        .await;
-    done(result.map(|_| ()).map_err(|e| e.to_string()))
-}
-
-async fn reject(
-    State(app): State<App>,
-    Path(id): Path<i64>,
-    headers: HeaderMap,
-    Form(form): Form<RejectForm>,
-) -> Response {
-    let session = match form_session(&app, &headers, &form.token) {
-        Ok(s) => s,
-        Err(refused) => return refused.into_response(),
-    };
-    let reason = form.reason.trim();
-    if reason.is_empty() {
-        return done(Err("give a reason".to_owned()));
-    }
-    let result = app.engine.reject(&session.reviewer, id, reason);
-    done(result.map(|_| ()).map_err(|e| e.to_string()))
-}
-
-async fn undo(
-    State(app): State<App>,
-    Path(id): Path<i64>,
-    headers: HeaderMap,
-    Form(form): Form<TokenForm>,
-) -> Response {
-    let session = match form_session(&app, &headers, &form.token) {
-        Ok(s) => s,
-        Err(refused) => return refused.into_response(),
-    };
-    let result = app.engine.undo(&session.reviewer, id).await;
-    done(result.map(|_| ()).map_err(|e| e.to_string()))
-}
-
-fn done(result: Result<(), String>) -> Response {
-    match result {
-        Ok(()) => Redirect::to("/").into_response(),
-        Err(message) => (
-            StatusCode::CONFLICT,
-            Html(page(
-                "Not done",
-                &format!(
-                    "<p class=error>{}</p><p><a href=\"/\">Back to the queue</a></p>",
-                    esc(&message)
-                ),
-            )),
-        )
-            .into_response(),
-    }
-}
-
-/// One change with every row, for changes too big for the queue.
-async fn change_page(State(app): State<App>, Path(id): Path<i64>, headers: HeaderMap) -> Response {
-    let Some(session) = session(&app, &headers) else {
-        return Redirect::to("/login").into_response();
-    };
-    match app.engine.change(id) {
-        Ok(change) => Html(page(
-            &format!("Change {id}"),
-            &format!(
-                "<p><a href=\"/\">Back to the queue</a></p>{}",
-                card(&app, &session, &change, true)
-            ),
-        ))
-        .into_response(),
-        Err(e) => (StatusCode::NOT_FOUND, esc(&e.to_string())).into_response(),
-    }
-}
-
+/// The UI, for a signed-in person; the sign-in page for anyone else.
 async fn index(State(app): State<App>, headers: HeaderMap) -> Response {
-    let Some(session) = session(&app, &headers) else {
+    if session(&app, &headers).is_none() {
         return Redirect::to("/login").into_response();
-    };
-    match render_index(&app, &session) {
-        Ok(body) => Html(page("Rowbit review", &body)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, esc(&e)).into_response(),
     }
-}
-
-fn render_index(app: &App, session: &Session) -> Result<String, String> {
-    let engine = &app.engine;
-    let mut out = String::new();
-    let held = engine.held().map_err(|e| e.to_string())?;
-    let _ = write!(
-        out,
-        "<h1>Waiting for a person ({})</h1>\
-         <form method=post action=\"/logout\" class=muted>Signed in as {}. {}<button>Sign out</button></form>",
-        held.len(),
-        esc(&session.reviewer),
-        token_field(session)
+    let mut r = Html(INDEX_HTML).into_response();
+    r.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(UI_CSP),
     );
-    if held.is_empty() {
-        out.push_str("<p class=muted>Nothing is waiting.</p>");
-    }
-    for id in &held {
-        let change = engine.change(*id).map_err(|e| e.to_string())?;
-        out.push_str(&card(app, session, &change, false));
-    }
-
-    let interrupted = engine.interrupted().map_err(|e| e.to_string())?;
-    if !interrupted.is_empty() {
-        let _ = write!(
-            out,
-            "<p class=error>Changes {interrupted:?} were interrupted while applying or undoing. \
-             Compare their rows with the preview before anything else.</p>"
-        );
-    }
-
-    out.push_str("<h2>Recent changes</h2><table><tr><th>#</th><th>State</th><th>Agent</th><th>Table</th><th>Rows</th><th></th></tr>");
-    let all = engine.list(None).map_err(|e| e.to_string())?;
-    for id in all.iter().rev().take(RECENT) {
-        let change = engine.change(*id).map_err(|e| e.to_string())?;
-        let (table, rows) = match &change.review {
-            Some(Review::Rows(p)) => (p.table.qualified_name(), p.rows.len().to_string()),
-            Some(Review::Ddl { .. }) => ("schema change".to_owned(), String::new()),
-            None => (String::new(), String::new()),
-        };
-        let action = if change.state == ChangeState::Applied
-            && matches!(change.review, Some(Review::Rows(_)))
-        {
-            format!(
-                "<form method=post action=\"/changes/{id}/undo\">{}<button>Undo</button></form>",
-                token_field(session)
-            )
-        } else {
-            String::new()
-        };
-        let _ = write!(
-            out,
-            "<tr><td>{id}</td><td>{}</td><td>{}</td><td>{}</td><td>{rows}</td><td>{action}</td></tr>",
-            change.state.as_str(),
-            esc(&change.agent),
-            esc(&table),
-        );
-    }
-    out.push_str("</table>");
-    Ok(out)
+    r
 }
 
-/// One change: what the agent sent, what it would do, and, while it is
-/// held, the forms. `all` shows every row instead of the first
-/// [`SHOWN_ROWS`].
-fn card(app: &App, session: &Session, change: &Change, all: bool) -> String {
-    let mut out = String::new();
-    let _ = write!(
-        out,
-        "<section><h3>#{} from {}</h3><pre>{}</pre>",
-        change.id,
-        esc(&change.agent),
-        esc(&statement(&change.sql))
+fn asset(content_type: &'static str, body: &'static str) -> Response {
+    let mut r = body.into_response();
+    r.headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    r.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(UI_CSP),
     );
-    match &change.review {
-        Some(Review::Rows(p)) => out.push_str(&rows(p, change.id, all)),
-        Some(Review::Ddl { sql }) => {
-            let _ = write!(
-                out,
-                "<p>Runs this schema change, which cannot be undone:</p><pre>{}</pre>",
-                esc(sql)
-            );
-        }
-        None => {}
-    }
-    if let Some(reason) = held_reason(app, change.id) {
-        let _ = write!(out, "<p class=muted>Held: {}</p>", esc(&reason));
-    }
-    if change.state != ChangeState::Held {
-        out.push_str("</section>");
-        return out;
-    }
-    let id = change.id;
-    let review = change.review_hash.as_deref().unwrap_or_default();
-    // The button names what an approval covers: every row, not the ones shown.
-    let approve = match &change.review {
-        Some(Review::Rows(p)) if p.rows.len() == 1 => "Approve and apply 1 row".to_owned(),
-        Some(Review::Rows(p)) => format!("Approve and apply all {} rows", p.rows.len()),
-        _ => "Approve and run".to_owned(),
-    };
-    let _ = write!(
-        out,
-        "<div class=actions>\
-         <form method=post action=\"/changes/{id}/approve\">{token}\
-           <input type=hidden name=review value=\"{review}\">\
-           <button class=approve>{approve}</button></form>\
-         <form method=post action=\"/changes/{id}/reject\">{token}\
-           <input name=reason placeholder=\"Why reject?\" required>\
-           <button>Reject</button></form>\
-         </div></section>",
-        token = token_field(session),
-        review = esc(review),
-    );
-    out
+    r
 }
 
-fn held_reason(app: &App, id: i64) -> Option<String> {
-    app.engine
-        .history(id)
-        .ok()?
-        .into_iter()
-        .rev()
-        .find(|e| e.event == "PolicyHeld")
-        .and_then(|e| e.detail)
+async fn app_js() -> Response {
+    asset("text/javascript; charset=utf-8", APP_JS)
 }
 
-fn rows(p: &Preview, id: i64, all: bool) -> String {
-    let mut out = String::new();
-    let verb = match p.kind {
-        WriteKind::Insert => "inserts",
-        WriteKind::Update => "updates",
-        WriteKind::Delete => "deletes",
-    };
-    let _ = write!(
-        out,
-        "<p>{verb} {} in <b>{}</b>:</p><table><tr><th>Row</th><th>Column</th><th>Before</th><th>After</th></tr>",
-        if p.rows.len() == 1 {
-            "1 row".to_owned()
-        } else {
-            format!("{} rows", p.rows.len())
-        },
-        esc(&p.table.qualified_name())
-    );
-    let shown = if all { p.rows.len() } else { SHOWN_ROWS };
-    for row in p.rows.iter().take(shown) {
-        let key = match p.key(row) {
-            Some(key) => key.iter().map(cell_html).collect::<Vec<_>>().join(", "),
-            None => "new".to_owned(),
-        };
-        for (i, column) in p.table.columns.iter().enumerate() {
-            let before = row.before.as_ref().map(|b| &b[i]);
-            let after = row.after.as_ref().map(|a| &a[i]);
-            if let (Some(b), Some(a)) = (before, after)
-                && b == a
-            {
-                continue;
-            }
-            let _ = write!(
-                out,
-                "<tr><td>{}</td><td>{}</td><td class=before>{}</td><td class=after>{}</td></tr>",
-                key,
-                esc(&column.name),
-                before.map(cell_html).unwrap_or_default(),
-                after.map(cell_html).unwrap_or_default(),
-            );
-        }
-    }
-    out.push_str("</table>");
-    if p.rows.len() > shown {
-        let _ = write!(
-            out,
-            "<p class=muted>... and {} more rows. <a href=\"/changes/{id}\">See all {}</a> before approving.</p>",
-            p.rows.len() - shown,
-            p.rows.len()
-        );
-    }
-    out
-}
-
-fn token_field(session: &Session) -> String {
-    format!("<input type=hidden name=token value=\"{}\">", session.token)
-}
-
-/// A value as HTML that can't be mistaken for another: SQL NULL is marked
-/// up apart from the text "NULL", text is quoted (so '' and ' x ' show),
-/// numbers are plain, and bytes that aren't text are hex.
-fn cell_html(cell: &Cell) -> String {
-    match cell {
-        None => "<i class=null>NULL</i>".to_owned(),
-        Some(bytes) => match std::str::from_utf8(bytes) {
-            Ok(text) if !text.is_empty() && text.parse::<f64>().is_ok() => esc(text),
-            Ok(text) => format!("<span class=text>&quot;{}&quot;</span>", esc(text)),
-            Err(_) => {
-                let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-                format!("<span class=bytes>0x{hex}</span>")
-            }
-        },
-    }
+async fn app_css() -> Response {
+    asset("text/css; charset=utf-8", APP_CSS)
 }
 
 fn page(title: &str, body: &str) -> String {
@@ -803,17 +494,26 @@ fn statement(sql: &str) -> String {
         .unwrap_or_else(|_| sql.to_owned())
 }
 
-/// Escapes text for HTML content and double-quoted attributes. Hidden
-/// characters (see [`rowbit_core::text::is_hidden`]) other than newlines
-/// are shown as `\u{..}`, so agent text can't hide, reorder or smuggle
-/// anything past a reviewer.
-fn esc(text: &str) -> String {
+/// Text with hidden characters (see [`rowbit_core::text::is_hidden`])
+/// other than newlines shown as `\u{..}`, so agent text can't hide,
+/// reorder or smuggle anything past a reviewer.
+pub(crate) fn visible(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
         if rowbit_core::text::is_hidden(c) && c != '\n' {
             out.push_str(&format!("\\u{{{:x}}}", c as u32));
-            continue;
+        } else {
+            out.push(c);
         }
+    }
+    out
+}
+
+/// Escapes text for HTML content and double-quoted attributes, after
+/// making hidden characters [`visible`].
+fn esc(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in visible(text).chars() {
         match c {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
@@ -854,27 +554,6 @@ mod tests {
         assert_eq!(
             statement("UPDATE t SET a = 1 /* reviewed, safe */ WHERE id = 2"),
             "UPDATE t SET a = 1 WHERE id = 2"
-        );
-    }
-
-    // Found in review 4: the text 'NULL' looked like NULL, '' like nothing.
-    #[test]
-    fn values_cannot_pass_for_other_values() {
-        let text = |s: &str| Some(s.as_bytes().to_vec());
-        assert_eq!(cell_html(&None), "<i class=null>NULL</i>");
-        assert_eq!(
-            cell_html(&text("NULL")),
-            "<span class=text>&quot;NULL&quot;</span>"
-        );
-        assert_eq!(cell_html(&text("")), "<span class=text>&quot;&quot;</span>");
-        assert_eq!(
-            cell_html(&text(" x ")),
-            "<span class=text>&quot; x &quot;</span>"
-        );
-        assert_eq!(cell_html(&text("12.50")), "12.50");
-        assert_eq!(
-            cell_html(&Some(vec![0xff])),
-            "<span class=bytes>0xff</span>"
         );
     }
 
