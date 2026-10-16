@@ -13,7 +13,12 @@ use rowbit_store::Store;
 use tower::ServiceExt;
 
 const HOST: &str = "127.0.0.1:8080";
-const PASSWORD: &str = "correct horse battery staple";
+
+/// The page's password for these tests, made up at run time.
+fn password() -> &'static str {
+    static PASSWORD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PASSWORD.get_or_init(rowbit_web::new_password)
+}
 const POLICY: &str = "version: 0\nagents:\n  refund-bot:\n    default: hold\n";
 
 fn url(var: &str) -> Option<String> {
@@ -38,7 +43,7 @@ struct Page {
 
 impl Page {
     fn new(engine: Arc<Engine>) -> Page {
-        let hash = rowbit_web::hash_password(PASSWORD);
+        let hash = rowbit_web::hash_password(password());
         Page {
             router: rowbit_web::router(engine.clone(), hash, vec![HOST.to_owned()]),
             engine,
@@ -128,7 +133,7 @@ async fn setup(var: &str, table: &str) -> Option<(Page, String, String)> {
     ));
     let mut page = Page::new(engine);
     assert_eq!(
-        page.sign_in("philip", PASSWORD).await,
+        page.sign_in("philip", password()).await,
         StatusCode::SEE_OTHER
     );
     Some((page, url, table.to_owned()))
@@ -299,7 +304,7 @@ async fn other_hosts_are_refused() {
     assert_eq!(status, StatusCode::OK);
     assert!(html.contains("type=password"), "{html}");
     assert_eq!(
-        page.sign_in("philip", PASSWORD).await,
+        page.sign_in("philip", password()).await,
         StatusCode::SEE_OTHER
     );
     let (status, html) = page.get(HOST).await;
@@ -351,14 +356,14 @@ async fn reaching_the_port_is_not_enough_to_approve(var: &str, table: &str) {
     attacker.cookie = None;
     let started = std::time::Instant::now();
     assert_eq!(
-        attacker.sign_in("evil", "hunter2").await,
+        attacker.sign_in("evil", &rowbit_web::new_password()).await,
         StatusCode::FORBIDDEN
     );
     assert!(started.elapsed() >= std::time::Duration::from_secs(1));
     assert!(attacker.cookie.is_none());
     // Another session's token doesn't work with your own cookie.
     assert_eq!(
-        attacker.sign_in("other", PASSWORD).await,
+        attacker.sign_in("other", password()).await,
         StatusCode::SEE_OTHER
     );
     let (status, _) = attacker
@@ -432,7 +437,7 @@ async fn wrong_passwords_are_checked_one_at_a_time() {
             engine: p.engine.clone(),
             cookie: None,
         };
-        async move { p.sign_in("evil", "guess").await }
+        async move { p.sign_in("evil", &rowbit_web::new_password()).await }
     };
     let (a, b) = tokio::join!(guess(&page), guess(&page));
     assert_eq!((a, b), (StatusCode::FORBIDDEN, StatusCode::FORBIDDEN));

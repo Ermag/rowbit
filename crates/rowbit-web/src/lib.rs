@@ -754,13 +754,13 @@ mod tests {
     #[test]
     fn passwords_are_random_and_only_their_hash_matches() {
         let p = new_password();
-        assert_eq!(p.len(), 24 + 3, "{p}");
+        assert_eq!(p.len(), 24 + 3);
         assert_ne!(p, new_password());
         let hash = hash_password(&p);
         assert!(hash.starts_with("$argon2id$"), "{hash}");
         assert!(!hash.contains(&p));
         assert!(password_matches(&hash, &p));
-        assert!(!password_matches(&hash, "wrong"));
+        assert!(!password_matches(&hash, &new_password()));
         assert!(!password_matches("not a hash", &p));
     }
 
