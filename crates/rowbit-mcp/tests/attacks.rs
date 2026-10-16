@@ -278,6 +278,9 @@ async fn sneaking_ddl(var: &str, table: &str) {
         "CALL mysql.rds_drop_everything()".to_owned(),
         "PREPARE s FROM 'DROP TABLE x'".to_owned(),
         "DROP DATABASE rowbit_test".to_owned(),
+        // Found in review 4: held instead of refused.
+        "DROP TABLE mysql.user".to_owned(),
+        format!("RENAME TABLE {t} TO sys.{t}"),
         "GRANT ALL ON *.* TO 'refund-bot'".to_owned(),
     ] {
         let s = propose(&agent, &sql).await;
