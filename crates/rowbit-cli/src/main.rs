@@ -1,3 +1,4 @@
+mod grants;
 mod review;
 
 use std::path::PathBuf;
@@ -124,6 +125,15 @@ enum Command {
     Verify {
         #[command(flatten)]
         store: StoreArgs,
+    },
+    /// Database users for scoped agents: diff, apply
+    ///
+    /// Each agent with scopes in rowbit.yml gets a database user of its
+    /// own, rowbit_<agent>, with grants compiled from its scopes. These
+    /// commands connect as an administrator, for this run only.
+    Grants {
+        #[command(subcommand)]
+        command: GrantsCommand,
     },
     /// Check that Rowbit can reach a database
     Ping {
@@ -256,6 +266,14 @@ impl Setup {
         let src = std::fs::read_to_string(&self.policy)
             .with_context(|| format!("reading {}", self.policy.display()))?;
         let policy = PolicyFile::from_yaml(&src)?;
+        // Fail closed until enforcement lands: nobody should believe a
+        // scope is enforced when it is not.
+        anyhow::ensure!(
+            !policy.has_scopes(),
+            "{} has scopes, which `rowbit grants` compiles but this build doesn't enforce yet; \
+             remove them to run",
+            self.policy.display()
+        );
         let database = mysql_database(&self.url)?;
         let adapter = rowbit_mysql::MySqlAdapter::new(&self.url)?;
         let store = Store::open(&self.store)
@@ -277,6 +295,22 @@ fn mysql_database(url: &str) -> anyhow::Result<String> {
         "the database URL must name a database, as in mysql://user@host:3306/app"
     );
     Ok(path.to_owned())
+}
+
+#[derive(Subcommand)]
+enum GrantsCommand {
+    /// Print what would change for each agent's user; changes nothing
+    Diff {
+        #[command(flatten)]
+        admin: grants::Admin,
+    },
+    /// Create agents' users and bring their grants in line with rowbit.yml
+    Apply {
+        #[command(flatten)]
+        admin: grants::Admin,
+        #[command(flatten)]
+        args: grants::ApplyArgs,
+    },
 }
 
 #[derive(Subcommand)]
@@ -303,6 +337,9 @@ async fn main() -> anyhow::Result<()> {
                 path.display(),
                 policy.agents.len()
             );
+            for warning in policy.warnings() {
+                println!("warning: {warning}");
+            }
         }
         Command::Mcp { agent, setup } => {
             let (engine, database) = setup.engine()?;
@@ -408,6 +445,12 @@ async fn main() -> anyhow::Result<()> {
                 Err(problem) => anyhow::bail!("audit log tampered: {problem}"),
             }
         }
+        Command::Grants {
+            command: GrantsCommand::Diff { admin },
+        } => grants::diff(admin).await?,
+        Command::Grants {
+            command: GrantsCommand::Apply { admin, args },
+        } => grants::apply(admin, args).await?,
         Command::Ping { url } => {
             let adapter = rowbit_mysql::MySqlAdapter::new(&url)?;
             let info = adapter.server_info().await?;
