@@ -2,7 +2,13 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
-## Unreleased
+## 0.2.0 (2026-10-30)
+
+Scopes the database enforces, shadow mode, a built-in review UI with sign-in through your identity provider, notifications for held changes, and MCP over HTTP.
+
+### Upgrading from 0.1
+
+Back up `rowbit.db`, stop every Rowbit process, and replace the binary. The state file is upgraded in place on start; see [Running Rowbit](docs/operating.md#upgrading). One change is breaking: without an identity provider, `rowbit serve` listens on loopback only. Building from source needs Rust 1.88 or later (it was 1.85).
 
 ### Scopes
 
@@ -11,10 +17,6 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 - The database enforces them. A scoped agent's reads run on its own user, every write is checked with an `EXPLAIN` on that user before preview and again before apply, and approved schema changes run on it. A parser check in front gives the agent a clear reason (`shop.cards is outside coding-agent's read scope`). The databases don't check privileges on join columns, so the parser check covers `JOIN ... USING` columns too, and a scoped agent can't use `NATURAL JOIN`. Writes outside scopes are blocked by `policy:scope`.
 - Rowbit checks every scoped agent's user when it starts, and refuses an agent whose user holds more than its scopes.
 - A new MCP tool, `describe_schema`, lists the tables an agent may use, with their columns and what it may do with each, leaving out denied tables and columns.
-
-### Fixes
-
-- The review page's sign-in and buttons work in browsers. The page sent `Referrer-Policy: no-referrer`, which makes browsers send `Origin: null` on the page's own forms, and the origin check refused them. It now sends `same-origin`.
 
 ### Shadow mode
 
@@ -42,6 +44,12 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 - Reviewers sign in to the review page through an OpenID Connect provider (Google Workspace, Okta, Keycloak, Authentik, GitLab, ...), set in a new `rowbit-server.yml` with `public_url` and `reviewers`. Rowbit uses the code flow with PKCE, checks the ID token, requires a verified email, and lets in only the `emails`, `domains` or `groups` listed. The audit log records the reviewer's email.
 - Secrets in `rowbit-server.yml` are `${VARIABLE}` references to the environment; a literal secret is an error. `rowbit server check` validates the file.
 - Without a provider, the page password still works, but only on a loopback address: `rowbit serve` refuses to listen anywhere else, and with a provider it requires an `https://` `public_url`. (Breaking: v0.1 served the password page on any address with a warning.)
+
+## 0.1.1 (2026-10-29)
+
+### Fixes
+
+- The review page's sign-in and buttons work in browsers. The page sent `Referrer-Policy: no-referrer`, which makes browsers send `Origin: null` on the page's own forms, and the origin check refused them. It now sends `same-origin`.
 
 ## 0.1.0 (2026-10-16)
 

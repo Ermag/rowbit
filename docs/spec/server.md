@@ -65,7 +65,7 @@ Reviewers sign in to the web UI through an OpenID Connect provider: Google Works
 - `reviewers.allow` decides who may sign in: an exact `emails` entry, an email in one of the `domains`, or membership of one of the `groups` (the token's `groups` claim). Anyone else is refused, and an empty `allow` refuses everyone.
 - The audit log records the reviewer as `human:<email>`.
 
-Signing in gives the same session as v0.1: an `HttpOnly`, `SameSite=Strict` cookie (and `Secure` behind HTTPS), valid for 12 hours or until the process stops, and a per-session token every action must send. The short-lived cookie that brings the browser back to its login is `SameSite=Lax`, since the provider's redirect back is a cross-site navigation; it holds only a random id, while `state`, `nonce` and the PKCE verifier stay in Rowbit's memory, and each login can be finished once, within 10 minutes. After sign-in, the callback answers with a page that moves on to the queue itself, because browsers don't send a `SameSite=Strict` cookie on a redirect chain that started at another site.
+Sessions live in memory, so restarting `rowbit serve` signs everyone out. Signing in gives the same session as v0.1: an `HttpOnly`, `SameSite=Strict` cookie (and `Secure` behind HTTPS), valid for 12 hours or until the process stops, and a per-session token every action must send. The short-lived cookie that brings the browser back to its login is `SameSite=Lax`, since the provider's redirect back is a cross-site navigation; it holds only a random id, while `state`, `nonce` and the PKCE verifier stay in Rowbit's memory, and each login can be finished once, within 10 minutes. After sign-in, the callback answers with a page that moves on to the queue itself, because browsers don't send a `SameSite=Strict` cookie on a redirect chain that started at another site.
 
 **Without `reviewers.oidc`,** `rowbit serve` keeps v0.1's shared password and typed name, but only on a loopback address. It refuses to listen anywhere else, so the password never crosses a network. This is for trying Rowbit on one machine.
 
@@ -83,7 +83,7 @@ When a change is held, Rowbit tells each matching `notify` target. A notificatio
 | `secret` | For `webhook`: the signing key. Required. |
 | `agents` | Optional: only changes from these agents. |
 
-What a notification carries is the change's id, agent, database, table, statement kind, row count, the rule that held it with its reason, the time, and a link to the change in the web UI. Never row values and never the statement's text, which can hold values, since chat channels are read more widely than the review page. Text the agent or the database controls (table names) is shown with control and invisible characters made visible, and escaped for Slack.
+What a notification carries is the change's id, agent, database, table, statement kind, row count, the rule that held it with its reason, the time, and a link to the change in the web UI (`null` without `public_url`). Never row values and never the statement's text, which can hold values, since chat channels are read more widely than the review page. Text the agent or the database controls (table names) is shown with control and invisible characters made visible, and escaped for Slack.
 
 **Slack.** A message naming the agent, the table, the row count and the reason, with a "Review" button that opens the change. Approving and rejecting happen in the web UI, behind sign-in, where the reviewer sees the rows. Approving from Slack itself would need Slack identities mapped to reviewers and Rowbit reachable from Slack; it isn't in v0.2.
 
@@ -119,7 +119,7 @@ Each agent signs in with a token of its own, sent as `Authorization: Bearer <tok
 - The agent's identity is the token's agent, never anything in the request. A missing, unknown or revoked token, or a token for an agent no longer in `rowbit.yml`, gets `401` and nothing else. Failed sign-ins are slowed down as on the review page.
 - `/mcp` answers only requests addressed to the configured host, and refuses any request with an `Origin` header that isn't `public_url`, so a web page can't reach it from someone's browser.
 
-Signing agents in with OAuth, as the MCP specification describes, may come later.
+Tokens don't expire; make a new one to rotate, which revokes the old. `/mcp` listens wherever `rowbit serve` does, so an agent on another machine needs a non-loopback `listen`, which in turn needs `reviewers.oidc` and an `https://` `public_url` behind a TLS proxy (see [Signing in](#signing-in)). Signing agents in with OAuth, as the MCP specification describes, may come later.
 
 ## Database users for agents
 

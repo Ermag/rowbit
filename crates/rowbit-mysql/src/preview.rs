@@ -168,21 +168,21 @@ async fn run(
             })
             .collect::<Result<_, _>>()?,
     };
-    if kind != WriteKind::Delete {
-        if let Some(&g) = written.iter().find(|&&w| table.columns[w].generated) {
-            return refuse(format!(
-                "{} is a generated column and cannot be written",
-                table.columns[g].name
-            ));
-        }
+    if kind != WriteKind::Delete
+        && let Some(&g) = written.iter().find(|&&w| table.columns[w].generated)
+    {
+        return refuse(format!(
+            "{} is a generated column and cannot be written",
+            table.columns[g].name
+        ));
     }
-    if kind == WriteKind::Update {
-        if let Some(&k) = written.iter().find(|w| table.primary_key.contains(w)) {
-            return refuse(format!(
-                "{} is part of the primary key; v0.1 does not change keys",
-                table.columns[k].name
-            ));
-        }
+    if kind == WriteKind::Update
+        && let Some(&k) = written.iter().find(|w| table.primary_key.contains(w))
+    {
+        return refuse(format!(
+            "{} is part of the primary key; v0.1 does not change keys",
+            table.columns[k].name
+        ));
     }
     if kind == WriteKind::Insert {
         let key_given = table.primary_key.iter().all(|k| written.contains(k));

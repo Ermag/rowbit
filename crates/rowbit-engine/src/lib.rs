@@ -184,9 +184,12 @@ impl Engine {
         let diff = Diff::between(&compiled.grants, &current.grants);
         if let Some(extra) = diff.extra.iter().next() {
             return Err(format!(
-                "its database user holds more than rowbit.yml gives it ({extra}, and {} more); \
+                "its database user holds more than rowbit.yml gives it ({extra}{}); \
                  run `rowbit grants apply`",
-                diff.extra.len() - 1
+                match diff.extra.len() - 1 {
+                    0 => String::new(),
+                    n => format!(", and {n} more"),
+                }
             ));
         }
         Ok(diff.missing.len())
@@ -260,10 +263,10 @@ impl Engine {
             Ok(c) => c,
             Err(refusal) => return self.block(id, agent, &refusal.to_string(), None),
         };
-        if self.scopes(agent).is_some() {
-            if let Err(reason) = self.check_write_scope(agent, database, &classified).await {
-                return self.block_by("scope", id, agent, &reason, None);
-            }
+        if self.scopes(agent).is_some()
+            && let Err(reason) = self.check_write_scope(agent, database, &classified).await
+        {
+            return self.block_by("scope", id, agent, &reason, None);
         }
 
         let (review, facts) = if classified.kind == Kind::Ddl {

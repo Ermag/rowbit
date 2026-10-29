@@ -60,7 +60,7 @@ stateDiagram-v2
 Every other pair is an error. Notable consequences:
 
 - `Approve` is only accepted from `held`, and only from a person. A person cannot approve a change that has no preview yet, and a policy rule cannot approve a held change.
-- `Expire` rejects. A timeout never approves.
+- `Expire` rejects. A timeout never approves. Nothing sends `Expire` yet: held changes wait until a person decides or the agent withdraws.
 - An `approved` change cannot be rejected: it is applied as soon as it is approved, and a reject would race the write. A cool-down window, if one comes, will add its own state.
 - Undo is requested by a person. The system performs it and records `UndoSucceeded`. If undo is refused (see below) the change stays `applied` and the refusal is logged.
 
@@ -202,7 +202,7 @@ No statement, read or write, may name the server's own schemas (`information_sch
 - **Shadow**: changes from agents in shadow mode that the rules would have held or blocked, grouped by rule.
 - **Deliveries**: notifications sent and whether they arrived.
 
-The UI is a Svelte app the binary serves from memory, talking to a JSON API under `/api` behind the same session. Every request that changes something needs the session cookie and the session's token in a header, so being able to reach the port, as any local user or agent can, is not enough. The server answers only requests addressed to its host (against DNS rebinding) and refuses requests from another origin. The content security policy allows scripts and styles from Rowbit's own origin only, with no inline scripts and no `eval`.
+The UI is a Svelte app the binary serves from memory, talking to a JSON API under `/api` behind the same session. The sign-in pages stay plain HTML with no scripts; their policy allows inline styles only. Every request that changes something needs the session cookie and the session's token in a header, so being able to reach the port, as any local user or agent can, is not enough. The server answers only requests addressed to its host (against DNS rebinding) and refuses requests from another origin. The content security policy allows scripts and styles from Rowbit's own origin only, with no inline scripts and no `eval`.
 
 Values are shown so one can't pass for another: text in quotes, numbers plain, SQL `NULL` marked apart from the text `'NULL'`, binary as hex. Control characters and invisible or direction-changing Unicode in anything the agent or the database controls are made visible. The API sends values typed and the UI only ever inserts them as text, never as HTML.
 
@@ -218,4 +218,4 @@ Verifying the log checks every event's hash and link, that every event belongs t
 
 ## Not in v0.2
 
-Approving from Slack or another chat tool (the web UI does it, behind sign-in), signing agents in with OAuth, identity providers that don't send `email_verified`, multi-statement transactions as one change (v0.3), budgets across changes (v0.3: until then a size rule such as `rows: { max: 50 }` can be met by splitting a write into smaller changes, each previewed, checked and logged on its own), tables without a primary key, tables that are not InnoDB, tables with triggers or cascading foreign keys, updates to primary key columns, DDL previews and undo of DDL (DDL is always held and shown as SQL), undo of an undo.
+Held changes expiring on their own (`Expire` exists, nothing sends it), approving from Slack or another chat tool (the web UI does it, behind sign-in), signing agents in with OAuth, identity providers that don't send `email_verified`, multi-statement transactions as one change (v0.3), budgets across changes (v0.3: until then a size rule such as `rows: { max: 50 }` can be met by splitting a write into smaller changes, each previewed, checked and logged on its own), tables without a primary key, tables that are not InnoDB, tables with triggers or cascading foreign keys, updates to primary key columns, DDL previews and undo of DDL (DDL is always held and shown as SQL), undo of an undo.
