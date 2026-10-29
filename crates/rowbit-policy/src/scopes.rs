@@ -87,23 +87,47 @@ impl Scopes {
     /// Whether the scopes let the agent do `op` on `database.table`. For
     /// `Read`, a denied table is never readable; denied columns are
     /// [`Scopes::column_denied`]'s business.
+    ///
+    /// Names compare without case here and below. On a server whose table
+    /// names ignore case (`lower_case_table_names` 1 or 2, the defaults on
+    /// Windows and macOS), `ORDERS` is `orders`, and a case-sensitive
+    /// comparison would find no deny for it. On other servers this can
+    /// only refuse more, and the database decides the rest.
     pub fn allows(&self, op: Operation, table: &str) -> bool {
-        let listed = self.patterns(op).iter().any(|p| glob(p, table));
-        listed && !(op == Operation::Read && self.table_denied(table))
+        let table = table.to_lowercase();
+        let listed = self
+            .patterns(op)
+            .iter()
+            .any(|p| glob(&p.to_lowercase(), &table));
+        listed && !(op == Operation::Read && self.table_denied(&table))
     }
 
     pub fn table_denied(&self, table: &str) -> bool {
-        self.deny_read.tables.iter().any(|p| glob(p, table))
+        let table = table.to_lowercase();
+        self.deny_read
+            .tables
+            .iter()
+            .any(|p| glob(&p.to_lowercase(), &table))
     }
 
-    /// Whether `column` of `database.table` may not be read. Column names
-    /// compare without case, as MariaDB and MySQL compare them.
+    /// The denied columns of `database.table`, as `deny_read` writes them.
+    pub fn denied_columns(&self, table: &str) -> Vec<&str> {
+        let table = table.to_lowercase();
+        self.deny_read
+            .columns
+            .iter()
+            .filter_map(|c| {
+                let (t, column) = c.rsplit_once('.')?;
+                (t.to_lowercase() == table).then_some(column)
+            })
+            .collect()
+    }
+
+    /// Whether `column` of `database.table` may not be read.
     pub fn column_denied(&self, table: &str, column: &str) -> bool {
-        self.deny_read.columns.iter().any(|c| {
-            c.strip_prefix(table)
-                .and_then(|r| r.strip_prefix('.'))
-                .is_some_and(|c| c.eq_ignore_ascii_case(column))
-        })
+        self.denied_columns(table)
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(column))
     }
 
     /// Whether any table or column in `database` is denied for reading, so
@@ -201,6 +225,12 @@ mod tests {
             "column names ignore case"
         );
         assert!(!s.column_denied("billing.customers", "name"));
+        // Found in second review: on servers whose table names ignore case,
+        // BILLING.CUSTOMERS is billing.customers.
+        assert!(s.column_denied("BILLING.Customers", "email"));
+        assert_eq!(s.denied_columns("billing.CUSTOMERS"), ["email"]);
+        assert!(!s.allows(Operation::Read, "billing.CARDS"));
+        assert!(s.allows(Operation::Update, "billing.REFUNDS"));
         assert!(!s.column_denied("billing.customer", "s.email"));
         assert!(s.denies_in("billing"));
         assert!(!s.denies_in("crm"));
