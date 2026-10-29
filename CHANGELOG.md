@@ -10,6 +10,10 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 - `rowbit grants diff` and `rowbit grants apply` give each scoped agent a database user of its own, `rowbit_<agent>`, with grants compiled from its scopes, using an administrator's URL for that run only. Privileges added by hand are revoked; roles and proxy grants are listed for a person to remove. Grants are made table by table, views running with their definer's rights only when named exactly, and a `deny_read` entry that matches nothing is an error.
 - Scopes are not enforced yet, so `rowbit mcp`, `serve` and `propose` refuse a `rowbit.yml` that has them.
 
+### Fixes
+
+- The review page's sign-in and buttons work in browsers. The page sent `Referrer-Policy: no-referrer`, which makes browsers send `Origin: null` on the page's own forms, and the origin check refused them. It now sends `same-origin`.
+
 ## 0.1.0 (2026-10-16)
 
 The first working version: an MCP server that previews, checks, holds, applies and undoes writes from AI agents to MariaDB and MySQL.
