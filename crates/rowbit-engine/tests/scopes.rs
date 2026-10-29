@@ -39,8 +39,9 @@ macro_rules! on_both {
     };
 }
 
-/// A per-run password for the agents' users, not written in the code.
-fn password() -> String {
+/// What the agents' users log in with: made up per run, not written in
+/// the code.
+fn login_word() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -156,8 +157,8 @@ agents:
         host: "%".into(),
     };
     grants::drop_user(&mut admin, &account).await.unwrap();
-    let password = password();
-    grants::create_user(&mut admin, &account, &password)
+    let word = login_word();
+    grants::create_user(&mut admin, &account, &word)
         .await
         .unwrap();
     let scopes = policy.agents[&agent].scopes.clone().unwrap();
@@ -171,7 +172,7 @@ agents:
 
     let mut store = Store::open_in_memory().unwrap();
     store
-        .set_setting(&format!("agent.{agent}.password"), &password)
+        .set_setting(&format!("agent.{agent}.password"), &word)
         .unwrap();
     let engine = Engine::new(MySqlAdapter::new(&url).unwrap(), policy, store);
     Some(Setup {
@@ -446,8 +447,8 @@ async fn patterns_dont_reach_through_definer_views(var: &str, prefix: &str) {
         host: "%".into(),
     };
     grants::drop_user(&mut admin, &account).await.unwrap();
-    let password = password();
-    grants::create_user(&mut admin, &account, &password)
+    let word = login_word();
+    grants::create_user(&mut admin, &account, &word)
         .await
         .unwrap();
     let scopes = policy.agents[&agent].scopes.clone().unwrap();
@@ -461,7 +462,7 @@ async fn patterns_dont_reach_through_definer_views(var: &str, prefix: &str) {
     let engine = |policy: PolicyFile| {
         let mut store = Store::open_in_memory().unwrap();
         store
-            .set_setting(&format!("agent.{agent}.password"), &password)
+            .set_setting(&format!("agent.{agent}.password"), &word)
             .unwrap();
         Engine::new(MySqlAdapter::new(&url).unwrap(), policy, store)
     };
