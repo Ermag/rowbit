@@ -1,0 +1,14 @@
+# Groups generated release notes by label. Every pull request carries
+# exactly one of breaking, feature, fix, docs or internal (CI checks it).
+changelog:
+  exclude:
+    labels: [internal]
+  categories:
+    - title: Breaking changes
+      labels: [breaking]
+    - title: New
+      labels: [feature]
+    - title: Fixes
+      labels: [fix]
+    - title: Docs
+      labels: [docs]
