@@ -747,7 +747,7 @@ impl Engine {
             .filter_map(|mut table| {
                 let name = format!("{}.{}", table.database, table.name);
                 // As compiled: a definer view only when named exactly.
-                let named = |op: Operation| scopes.patterns(op).iter().any(|p| *p == name);
+                let named = |op: Operation| scopes.patterns(op).contains(&name);
                 let operations: Vec<Operation> = Operation::ALL
                     .into_iter()
                     .filter(|op| scopes.allows(*op, &name) && (!table.definer_view || named(*op)))
