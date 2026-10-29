@@ -114,7 +114,7 @@ The agent's database user is `rowbit_<agent id>` (so scoped agent ids are at mos
 | Scope | Grant |
 |---|---|
 | `read` | `SELECT` on each matching table, and on each matching view that runs with the reader's rights (`SQL SECURITY INVOKER`). |
-| `deny_read.tables` | The table gets no `SELECT`, which turns a database-wide `SELECT` into per-table grants. |
+| `deny_read.tables` | The table gets no grant. |
 | `deny_read.columns` | The table gets column-level `SELECT` on every other column. `SELECT *` on it then fails in the database. |
 | `insert`, `update`, `delete` | `INSERT`, `UPDATE`, `DELETE` on each matching table and invoker view. |
 | `ddl` | `CREATE`, `ALTER`, `DROP` and `INDEX` on the database or on each matching table. |
@@ -123,7 +123,7 @@ Patterns are expanded against the tables that exist when the grants are compiled
 
 A view runs with its definer's rights unless it was created `SQL SECURITY INVOKER` (the default is `DEFINER`), and then the database checks only the agent's privilege on the view, not on what it reads. So a pattern never covers a definer view: it is granted only when a scope names it exactly, and `rowbit grants diff` notes that the agent reads through it whatever its definer can, `deny_read` included.
 
-Column names compare without case, as the databases compare them. A `deny_read` entry that matches no column, or a `deny_read.tables` name without `*` that matches no table, is an error in `rowbit grants` and at the startup check, which then refuses the agent: a typo must not deny nothing. The agent user never gets `GRANT OPTION`, global privileges or anything on the server's own schemas.
+Column names compare without case, as the databases compare them. So do table and database names in the scope checks, since a server with `lower_case_table_names` 1 or 2 (the default on Windows and macOS) reads `ORDERS` as `orders`; on other servers this only refuses more. A `deny_read` entry that matches no column, or a `deny_read.tables` name without `*` that matches no table, is an error in `rowbit grants` and at the startup check, which then refuses the agent: a typo must not deny nothing. The agent user never gets `GRANT OPTION`, global privileges or anything on the server's own schemas.
 
 ### How scopes are checked
 
