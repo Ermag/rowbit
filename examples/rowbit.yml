@@ -4,6 +4,13 @@ version: 0
 agents:
   refund-bot:
     description: Marks approved refund requests as refunded in the billing database.
+    # What it may touch at all, enforced by the database on a user of its
+    # own (see `rowbit grants`). Rules below decide within this.
+    scopes:
+      read: [billing.refunds, billing.customers]
+      update: [billing.refunds]
+      deny_read:
+        columns: [billing.customers.email]
     # When no rule matches. hold or block, never allow.
     default: block
     rules:

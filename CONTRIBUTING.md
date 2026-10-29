@@ -38,6 +38,20 @@ git rebase --signoff origin/main
 git push --force-with-lease
 ```
 
+## Labels
+
+Every pull request carries exactly one of these, which groups it in the release notes. A maintainer can set it if you can't.
+
+| Label | For |
+|---|---|
+| `breaking` | Anything that makes an existing `rowbit.yml`, command, tool or deployment stop working or change meaning |
+| `feature` | New behaviour |
+| `fix` | A bug fix |
+| `docs` | Documentation only |
+| `internal` | CI, refactoring, dependencies; left out of the release notes |
+
+Issues labelled `good first issue` are small and self-contained; `help wanted` marks ones we'd welcome help on.
+
 ## The review UI
 
 The UI is a Svelte app in `web/`. Its build is committed in `crates/rowbit-web/dist`, which the binary embeds, so building Rowbit needs no Node. After changing anything in `web/`, rebuild and commit the result; CI fails if `dist` isn't a build of the source.

@@ -424,6 +424,21 @@ impl Store {
         Ok(())
     }
 
+    /// Every setting whose key starts with `prefix`, by key.
+    pub fn settings_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM settings WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key",
+        )?;
+        let rows = stmt.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn delete_setting(&mut self, key: &str) -> Result<(), StoreError> {
+        self.conn
+            .execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     pub fn get(&self, id: ChangeId) -> Result<Change, StoreError> {
         let row = self
             .conn

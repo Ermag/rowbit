@@ -103,6 +103,143 @@ pub fn classify_read(sql: &str) -> Result<String, Refusal> {
     }
 }
 
+/// What a statement names: for the scope check, which compares them with
+/// an agent's scopes before the database checks the real thing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct References {
+    /// Every table or view the statement names, the written one included,
+    /// without the statement's own `WITH` names.
+    pub tables: Vec<TableName>,
+    /// Every column name used in an expression, lowercased. Unresolved:
+    /// `o.email` and `email` are both `email`.
+    pub columns: std::collections::BTreeSet<String>,
+    /// A `*` or `t.*` in a select list.
+    pub wildcard: bool,
+    /// A `NATURAL` join, whose matched columns appear nowhere in the text.
+    pub natural_join: bool,
+}
+
+/// The tables and columns `sql` names. Call after [`classify`] or
+/// [`classify_read`] accepted it.
+pub fn references(sql: &str) -> Result<References, Refusal> {
+    let statement = parse_one(sql)?;
+    let mut names = Names::default();
+    let _ = statement.visit(&mut names);
+    let mut out = names.found;
+    out.tables
+        .retain(|t| t.database.is_some() || !names.ctes.contains(&t.table));
+    out.tables.dedup();
+    Ok(out)
+}
+
+#[derive(Default)]
+struct Names {
+    found: References,
+    ctes: Vec<String>,
+}
+
+impl Names {
+    /// `USING` columns and `NATURAL` joins: neither is an expression, and
+    /// the database doesn't check column privileges on them.
+    fn joins(&mut self, twj: &TableWithJoins) {
+        use sqlparser::ast::{JoinConstraint, JoinOperator as J};
+        for join in &twj.joins {
+            let constraint = match &join.join_operator {
+                J::Join(c)
+                | J::Inner(c)
+                | J::Left(c)
+                | J::LeftOuter(c)
+                | J::Right(c)
+                | J::RightOuter(c)
+                | J::FullOuter(c)
+                | J::CrossJoin(c)
+                | J::Semi(c)
+                | J::LeftSemi(c)
+                | J::RightSemi(c)
+                | J::Anti(c)
+                | J::LeftAnti(c)
+                | J::RightAnti(c)
+                | J::StraightJoin(c)
+                | J::AsOf { constraint: c, .. } => Some(c),
+                // Not MySQL; counted as natural, so a scoped agent is refused.
+                J::CrossApply
+                | J::OuterApply
+                | J::ArrayJoin
+                | J::LeftArrayJoin
+                | J::InnerArrayJoin => None,
+            };
+            match constraint {
+                Some(JoinConstraint::Using(columns)) => {
+                    for c in columns {
+                        if let Some(ObjectNamePart::Identifier(id)) = c.0.last() {
+                            self.found.columns.insert(id.value.to_lowercase());
+                        }
+                    }
+                }
+                Some(JoinConstraint::Natural) | None => self.found.natural_join = true,
+                Some(JoinConstraint::On(_) | JoinConstraint::None) => {}
+            }
+        }
+    }
+}
+
+impl Visitor for Names {
+    type Break = ();
+
+    fn pre_visit_query(&mut self, q: &Query) -> ControlFlow<()> {
+        if let Some(with) = &q.with {
+            self.ctes
+                .extend(with.cte_tables.iter().map(|c| c.alias.name.value.clone()));
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_select(&mut self, s: &Select) -> ControlFlow<()> {
+        use sqlparser::ast::SelectItem;
+        for twj in &s.from {
+            self.joins(twj);
+        }
+        if s.projection.iter().any(|item| {
+            matches!(
+                item,
+                SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(..)
+            )
+        }) {
+            self.found.wildcard = true;
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_table_factor(&mut self, t: &TableFactor) -> ControlFlow<()> {
+        if let TableFactor::NestedJoin {
+            table_with_joins, ..
+        } = t
+        {
+            self.joins(table_with_joins);
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_relation(&mut self, name: &ObjectName) -> ControlFlow<()> {
+        if let Ok(table) = table_name(name) {
+            self.found.tables.push(table);
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_expr(&mut self, e: &Expr) -> ControlFlow<()> {
+        let column = match e {
+            Expr::Identifier(id) => Some(id),
+            Expr::CompoundIdentifier(ids) => ids.last(),
+            _ => None,
+        };
+        if let Some(id) = column {
+            self.found.columns.insert(id.value.to_lowercase());
+        }
+        ControlFlow::Continue(())
+    }
+}
+
 /// Parses exactly one statement and runs the guard over all of it.
 fn parse_one(sql: &str) -> Result<Statement, Refusal> {
     let dialect = MySqlDialect {};
@@ -976,6 +1113,51 @@ mod tests {
         assert!(classify_read("SELECT * FROM t INTO OUTFILE '/tmp/x'").is_err());
         assert!(classify_read("SELECT @@version").is_err());
         assert!(classify_read("SELECT 1; SELECT 2").is_err());
+    }
+
+    #[test]
+    fn references_name_tables_and_columns() {
+        let r = references(
+            "UPDATE shop.orders o SET note = (SELECT number FROM cards c WHERE c.id = o.card_id) WHERE o.Status = 'open'",
+        )
+        .unwrap();
+        let tables: Vec<String> = r
+            .tables
+            .iter()
+            .map(|t| format!("{:?}.{}", t.database, t.table))
+            .collect();
+        assert_eq!(tables, ["Some(\"shop\").orders", "None.cards"]);
+        assert!(r.columns.contains("status") && r.columns.contains("card_id"));
+        assert!(
+            !r.columns.contains("note"),
+            "an assignment target isn't read"
+        );
+        assert!(!r.wildcard);
+
+        let r = references("WITH x AS (SELECT * FROM t) SELECT COUNT(*) FROM x").unwrap();
+        assert_eq!(r.tables.len(), 1);
+        assert_eq!(r.tables[0].table, "t");
+        assert!(r.wildcard);
+        assert!(!references("SELECT COUNT(*) FROM t").unwrap().wildcard);
+        assert!(references("SELECT o.* FROM t o").unwrap().wildcard);
+
+        // Found in review: join columns aren't expressions, and the database
+        // doesn't check their privileges.
+        let r =
+            references("SELECT c.name FROM customers c JOIN (SELECT 'x' AS Email) x USING (Email)")
+                .unwrap();
+        assert!(r.columns.contains("email"), "{r:?}");
+        assert!(!r.natural_join);
+        let r =
+            references("SELECT name FROM customers NATURAL JOIN (SELECT 'x' AS email) x").unwrap();
+        assert!(r.natural_join);
+        let r =
+            references("SELECT a.id FROM a JOIN (b JOIN c USING (secret)) ON a.id = b.id").unwrap();
+        assert!(r.columns.contains("secret"), "nested joins too: {r:?}");
+
+        let r = references("INSERT INTO a (id, email) SELECT id, mail FROM b").unwrap();
+        assert_eq!(r.tables.len(), 2);
+        assert!(!r.columns.contains("email") && r.columns.contains("mail"));
     }
 
     #[test]

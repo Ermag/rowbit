@@ -1,6 +1,6 @@
 # Change lifecycle
 
-Status: draft for v0.1. Implemented by `rowbit_core::change::transition`.
+Status: draft for v0.2. Implemented by `rowbit_core::change::transition`.
 
 A **change** is one write an agent asked Rowbit to make. Every surface (MCP, CLI, web UI, Slack) is a thin client over the state machine below. No surface may move a change any other way.
 
@@ -29,7 +29,7 @@ A rejected or failed change is never retried in place. The agent proposes again,
 ```mermaid
 stateDiagram-v2
     [*] --> proposed
-    proposed --> approved: PolicyAllowed
+    proposed --> approved: PolicyAllowed / PolicyShadowed
     proposed --> held: PolicyHeld
     proposed --> rejected: PolicyBlocked / Withdraw
     held --> approved: Approve (person)
@@ -45,6 +45,7 @@ stateDiagram-v2
 | From | Event | To | Who may send it |
 |---|---|---|---|
 | `proposed` | `PolicyAllowed` | `approved` | policy |
+| `proposed` | `PolicyShadowed` | `approved` | policy, for an agent in shadow mode |
 | `proposed` | `PolicyHeld` | `held` | policy |
 | `proposed` | `PolicyBlocked` | `rejected` | policy |
 | `proposed` | `Withdraw` | `rejected` | the proposing agent |
@@ -67,16 +68,16 @@ Every other pair is an error. Notable consequences:
 
 Actors come from the transport's authentication, never from arguments an agent passes:
 
-- `agent:<id>`: the MCP connection's or proxy user's configured agent id. Must match a key in `rowbit.yml`.
-- `human:<id>`: a reviewer. The review page records the name given at sign-in, behind the page's password. The CLI records `--as <name>`, or the login name, without checking it: anyone who can run `rowbit` against the store file can act as a person, so keep that file and the database credentials to reviewers. Signing in with an identity provider (OIDC) comes in v0.2.
-- `policy:<rule>`: the policy engine, naming the deciding rule, or `default` or a floor.
+- `agent:<id>`: the agent id from `rowbit mcp --agent`, or the agent whose token signed in over HTTP. Must match a key in `rowbit.yml`.
+- `human:<id>`: a reviewer. The web UI records the verified email the identity provider (OIDC) gave at sign-in (see [server.md](server.md#signing-in)); without a provider, on a loopback address only, the name typed at sign-in behind the page's password. The CLI records `--as <name>`, or the login name, without checking it: anyone who can run `rowbit` against the store file can act as a person, so keep that file and the database credentials to reviewers.
+- `policy:<rule>`: the policy engine, naming the deciding rule, or `default`, `scope` or a floor.
 - `system`: Rowbit's executor and timers.
 
 ## What happens in each step
 
 ### Propose
 
-The agent sends one SQL statement and a target database. Rowbit parses it with `sqlparser-rs` (MySQL dialect). v0.1 accepts only these shapes:
+The agent sends one SQL statement and a target database. Rowbit parses it with `sqlparser-rs` (MySQL dialect). Rowbit accepts only these shapes:
 
 - `UPDATE t SET ... [WHERE ...] [ORDER BY ...] [LIMIT n]` on one table,
 - `DELETE FROM t [WHERE ...] [ORDER BY ...] [LIMIT n]` on one table,
@@ -88,6 +89,10 @@ Anything else is recorded and immediately `PolicyBlocked` with the reason, inclu
 Rowbit never runs the agent's text. It runs SQL printed from the parsed statement, so the statement must print back exactly as MySQL reads it: any backslash is refused (the parser and MySQL disagree on escapes such as `\%`, and printing does not escape a backslash again), and so are literals other than plain numbers, strings, hex strings, booleans and `NULL`. Every session Rowbit opens uses `NO_BACKSLASH_ESCAPES` and strict mode.
 
 `RAND()` and `UUID()` may not appear in `WHERE` or `ORDER BY`, and `LIMIT` needs an `ORDER BY`: apply reads the filter again, and it must pick the same rows. (An `ORDER BY` with ties can still pick differently; apply then fails as drift.)
+
+### Scope check
+
+For an agent with `scopes` in `rowbit.yml`, before the preview: Rowbit compares every table and column the statement reads or writes with the scopes, then runs `EXPLAIN` of the canonical statement on the agent's own database user, so the database itself confirms every privilege the statement needs and runs nothing. Either refusal is `PolicyBlocked` by `policy:scope`, with the table or column (from the parser check) or the server's error code (from `EXPLAIN`). Schema changes get the parser check only, since `EXPLAIN` doesn't take them, and run on the agent's user once approved. See [Scopes](policy.md#scopes).
 
 ### Preview
 
@@ -123,13 +128,21 @@ Rowbit's database user therefore needs `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `
 
 The preview records the target table with its columns (name, type, generated, auto-increment) and primary key, the columns the statement names, each row's before and after images, and the preview's time. It is stored with the change, and its hash is what the reviewer approves.
 
-The preview runs with Rowbit's privileges, so it can show values from any table Rowbit's user can read (a subquery in `SET`, for example). Reviewers see those values. The agent never does: it is told a change's state, table, row count and reason, never preview values. Reasons the agent sees are written by Rowbit: a database error is reduced to its code (`preview failed: database error 1366`), because server messages quote values, and the full message is logged for people as an `ErrorDetail` event. A statement can still learn about a table through how many rows it matches. Agents that should not read a table should not be given a Rowbit user that can; v0.2 adds per-agent scopes.
+The preview runs with Rowbit's privileges, so it can show values from any table Rowbit's user can read (a subquery in `SET`, for example). Reviewers see those values. The agent never does: it is told a change's state, table, row count and reason, never preview values. Reasons the agent sees are written by Rowbit: a database error is reduced to its code (`preview failed: database error 1366`), because server messages quote values, and the full message is logged for people as an `ErrorDetail` event. A statement can still learn about a table through how many rows it matches; for a scoped agent, the scope check has already refused any table it may not read.
 
 ### Decide
 
 `rowbit.yml` is evaluated against the preview facts. See [policy.md](policy.md). `allow` sends `PolicyAllowed`, `hold` sends `PolicyHeld`, `block` sends `PolicyBlocked`. The event's actor is `policy:<rule>` for the deciding rule, or `policy:default` when no rule matched. `PolicyHeld` and `PolicyBlocked` carry the rule's `reason` (or which rule decided, if it has none), which the agent is shown.
 
-A change that fails before policy can decide is `PolicyBlocked` by `policy:floor` with the reason: an agent not listed in `rowbit.yml` (its statement is not even previewed), a statement Rowbit refuses, a preview that fails or is refused, or a write that matches no rows. What was reviewed is stored for blocked changes too, so the log shows what was refused.
+When a change is held, Rowbit queues a notification for each matching target in `rowbit-server.yml` (see [Notifications](server.md#notifications)). Delivering it never changes the change.
+
+A change outside the agent's scopes is `PolicyBlocked` by `policy:scope`. A change that fails before policy can decide is `PolicyBlocked` by `policy:floor` with the reason: an agent not listed in `rowbit.yml` (its statement is not even previewed), a statement Rowbit refuses, a preview that fails or is refused, or a write that matches no rows. What was reviewed is stored for blocked changes too, so the log shows what was refused.
+
+### Shadow mode
+
+For an agent with `mode: shadow`, a decision of `hold` or `block` from a rule or the agent's default is recorded instead of enforced: Rowbit sends `PolicyShadowed`, whose detail names the decision it replaced and the rule's reason (`would hold: Large or unusual refund batches are reviewed by billing.`), and whose actor is `policy:<rule>` as usual. It moves the change to `approved` and carries the review hash like `PolicyAllowed`, and the change is applied right away. The agent is told `applied`, with no reason.
+
+Only rule decisions about row writes are shadowed. `policy:floor` and `policy:scope` still block, and schema changes are never shadowed: their rules are enforced and they are at least held, since none of those can be applied safely or undone. A shadowed change can be undone like any other.
 
 ### Apply
 
@@ -144,15 +157,17 @@ Apply does not run the agent's statement either. It writes the stored after imag
 
 A server error at any point rolls back and sends `ApplyFailed`.
 
+For a scoped agent, before step 1, apply runs the scope check's `EXPLAIN` again on the agent's user. If the database now refuses it, apply sends `ApplyFailed` (reason: outside the agent's scope) and writes nothing.
+
 A change approved by policy is applied right away; a change a person approves is applied when they approve it. Only one apply or undo runs for a change at a time. The `ApplyFailed` reason the agent sees names the kind of failure without row keys or values (`drift since preview: a previewed row changed`); the full message is logged for people as an `ErrorDetail` event.
 
 Before writing, Rowbit logs an `ApplyStarted` event that leaves the state unchanged. If Rowbit stops between the database's commit and recording the outcome, or the outcome is unknown (the commit failed, or apply ran past its time limit of one minute), the change stays `approved` with `ApplyStarted` as its last event. Rowbit lists such changes on startup for a person to compare with the preview; it never retries them on its own. Undo works the same way with `UndoStarted`.
 
-DDL runs with a short metadata lock wait, so a schema change stuck behind a long transaction fails instead of queueing every query on the table behind it. A failed DDL statement is treated as an unknown outcome, since some DDL changes the schema before failing.
+DDL runs with a short metadata lock wait, so a schema change stuck behind a long transaction fails instead of queueing every query on the table behind it. A failed DDL statement is treated as an unknown outcome, since some DDL changes the schema before failing, except a missing privilege, which the server checks before it starts: that is a plain `ApplyFailed`.
 
 Locks are held only during apply, only on the previewed rows, and only for as long as it takes to write them.
 
-DDL is run as the reviewed statement, after approval, and is not checked or undone.
+DDL is run as the reviewed statement, after approval, and is not checked or undone. For a scoped agent it runs on the agent's database user, so the database enforces `scopes.ddl`.
 
 ### Undo
 
@@ -160,29 +175,36 @@ In one transaction: lock the rows by primary key and check each still equals its
 
 ## Agent tools (MCP)
 
-`rowbit mcp --agent <id>` serves one agent over MCP on stdin and stdout. The agent id comes from that flag, set by whoever configures the MCP client, never from tool arguments. An agent gets three tools and nothing else:
+`rowbit mcp --agent <id>` serves one agent over MCP on stdin and stdout; the agent id comes from that flag, set by whoever configures the MCP client. `rowbit serve` can also serve agents over HTTP at `/mcp`, each signing in with its own token (see [MCP over HTTP](server.md#mcp-over-http)); the agent id comes from the token. Never from tool arguments. An agent gets four tools and nothing else:
 
 | Tool | Does | Returns |
 |---|---|---|
-| `query` | Runs one `SELECT` that passes the same checks as a write, in a read-only transaction, with a time limit and at most 1,000 rows. Only agents listed in `rowbit.yml` may read. Not logged as a change. | Columns, rows, and whether rows were cut off. A refused read gets Rowbit's reason; a failed one gets the server's message (`database error: ERROR 1146 ...`), which is about the agent's own read. |
-| `propose_write` | Proposes one statement: propose, preview, decide, and apply if allowed. | The change's id, state, table, row count and reason. |
+| `query` | Runs one `SELECT` that passes the same checks as a write, in a read-only transaction, with a time limit and at most 1,000 rows. Only agents listed in `rowbit.yml` may read. A scoped agent's read is checked against its scopes and runs on its own database user. Not logged as a change. | Columns, rows, and whether rows were cut off. A refused read gets Rowbit's reason; a failed one gets the server's message (`database error: ERROR 1146 ...`), which is about the agent's own read. |
+| `describe_schema` | Lists the tables the agent may use, from Rowbit's own reading of the schema. For a scoped agent, only tables in its scopes, without denied tables and columns; for an agent without scopes, the tables in its default database. | Per table: its columns (name, type, nullable, part of the primary key) and what the agent may do with it (`read`, `insert`, `update`, `delete`, `ddl`). |
+| `propose_write` | Proposes one statement: propose, scope check, preview, decide, and apply if allowed. | The change's id, state, table, row count and reason. |
 | `change_status` | Looks up one of the agent's own changes. Another agent's change is reported as not found. | The same as `propose_write`. |
 
-No statement, read or write, may name the server's own schemas (`information_schema`, `performance_schema`, `mysql`, `sys`), and none of them may be the default database: with the `PROCESS` grant Rowbit needs, they show every session's running SQL on the server. There is no tool to approve, reject, apply or undo. Nothing a tool returns about a change includes preview values (see Preview). A read runs with Rowbit's database privileges, so an agent can read whatever Rowbit's user can; scope that user accordingly until per-agent grants arrive in v0.2.
+No statement, read or write, may name the server's own schemas (`information_schema`, `performance_schema`, `mysql`, `sys`), and none of them may be the default database: with the `PROCESS` grant Rowbit needs, they show every session's running SQL on the server. There is no tool to approve, reject, apply or undo. Nothing a tool returns about a change includes preview values (see Preview). An agent without `scopes` reads with Rowbit's database privileges, as in v0.1, so it can read whatever Rowbit's user can.
 
 ## Reviewing (CLI)
 
-`rowbit changes [--state held]` lists changes. `rowbit show <id>` prints the statement as Rowbit understood it (comments dropped), every row's changed columns before and after (the first 50 rows, or all with `--all`), the history and the review hash. Everything the agent or the database controls is printed with control characters and invisible or direction-changing Unicode shown as `\u{..}`, so an agent can't recolour, hide or move text in the reviewer's terminal.
+`rowbit changes [--state held] [--shadowed]` lists changes. `rowbit show <id>` prints the statement as Rowbit understood it (comments dropped), every row's changed columns before and after (the first 50 rows, or all with `--all`), the history and the review hash. Everything the agent or the database controls is printed with control characters and invisible or direction-changing Unicode shown as `\u{..}`, so an agent can't recolour, hide or move text in the reviewer's terminal.
 
 `rowbit approve <id> --review <hash>` needs at least the first 12 characters of that hash, so a person approves what they looked at; the change is then applied. A change of more than 50 rows also needs `--rows <count>` with its exact row count, so an approval never covers rows the person didn't know about. `rowbit reject <id> --reason <text>`, `rowbit undo <id>` and `rowbit verify` (the audit log check) complete the set.
 
-## Reviewing (web page)
+## Reviewing (web UI)
 
-`rowbit serve` serves one plain page on `127.0.0.1:8080`: the held changes with each row's changed columns before and after (the first 50 rows, with a link to a page listing all of them), approve and reject buttons, and the recent changes with an undo button for applied ones. The approve button names how many rows it applies ("Approve and apply all 1,284 rows") and sends the review hash shown on the page. The statement shown is the canonical one, without the agent's comments, and control characters and invisible or direction-changing Unicode in anything shown are made visible.
+`rowbit serve` serves the web UI, bundled in the binary, on `127.0.0.1:8080` by default. Reviewers sign in as [server.md](server.md#signing-in) describes. It has:
 
-Reviewers sign in with the page's password and their name. The first time `rowbit serve` runs, it makes up a random password, prints it once to the operator's terminal and keeps only an Argon2id hash in the state file; `rowbit serve --set-password` sets one instead. Sign-in gives an `HttpOnly`, `SameSite=Strict` session cookie, valid for 12 hours or until the process stops, that carries the reviewer's name, which the audit log records as `human:<name>`. Every action needs that cookie and the session's own form token, so being able to reach the port, as any local user or agent can, is not enough. Sign-ins are checked one at a time, and each wrong password in a row waits longer before the next is checked, up to 8 seconds, so guessing is capped at a few tries a minute. Values on the page are shown so one can't pass for another: text in quotes, numbers plain, SQL `NULL` marked apart from the text `'NULL'`. The page also answers only requests addressed to the host it listens on (against DNS rebinding), refuses forms from another origin, and sends a content security policy that allows no scripts. It is plain HTTP: listening on anything but localhost prints a warning to put it behind HTTPS.
+- **Held**: the queue, oldest first, each with its agent, table, row count, the rule that held it and how long it has waited.
+- **Change**: the statement as Rowbit will treat it, without the agent's comments; every row's changed columns before and after, paged, with unchanged columns on request; the history; and approve, reject (with a reason) and undo. The approve button names how many rows it applies ("Approve and apply all 1,284 rows") and sends the review hash of what is on screen. Above 50 rows the reviewer also types the row count, as on the CLI.
+- **Log**: every change, filtered by state, agent, table or rule, with the audit log's verification status.
+- **Shadow**: changes from agents in shadow mode that the rules would have held or blocked, grouped by rule.
+- **Deliveries**: notifications sent and whether they arrived.
 
-A shared password with a typed name is the v0.1 stand-in for signing in with an identity provider (OIDC), planned for v0.2.
+The UI is a Svelte app the binary serves from memory, talking to a JSON API under `/api` behind the same session. Every request that changes something needs the session cookie and the session's token in a header, so being able to reach the port, as any local user or agent can, is not enough. The server answers only requests addressed to its host (against DNS rebinding) and refuses requests from another origin. The content security policy allows scripts and styles from Rowbit's own origin only, with no inline scripts and no `eval`.
+
+Values are shown so one can't pass for another: text in quotes, numbers plain, SQL `NULL` marked apart from the text `'NULL'`, binary as hex. Control characters and invisible or direction-changing Unicode in anything the agent or the database controls are made visible. The API sends values typed and the UI only ever inserts them as text, never as HTML.
 
 ## Audit log
 
@@ -192,8 +214,8 @@ The state change and its event are written in one SQLite transaction, so the sta
 
 What a person reviews is stored once, as canonical JSON, and never replaced: the preview for an `INSERT`, `UPDATE` or `DELETE`, and for DDL the statement as Rowbit will run it. Its hash (SHA-256 of that JSON) is part of the `PolicyAllowed`, `PolicyHeld` and `Approve` events, so the log shows exactly what was approved. `Approve` must carry the hash the person reviewed, and is refused if it differs from the stored one. `PolicyAllowed` and `PolicyHeld` are refused for a change with nothing to review.
 
-Verifying the log checks every event's hash and link, that every event belongs to a change, every stored review against its hash and against the hashes its events name, every change's agent, database and statement against its `Proposed` event, every apply record against the hash its `ApplySucceeded` event names, and every change's state against its last event. A chain kept in the same file cannot show that its newest events were cut off along with the matching states; that needs the latest hash kept somewhere outside Rowbit, which v0.1 does not do.
+Verifying the log checks every event's hash and link, that every event belongs to a change, every stored review against its hash and against the hashes its events name, every change's agent, database and statement against its `Proposed` event, every apply record against the hash its `ApplySucceeded` event names, and every change's state against its last event. A chain kept in the same file cannot show that its newest events were cut off along with the matching states; that needs the latest hash kept somewhere outside Rowbit, which Rowbit does not do yet.
 
-## Not in v0.1
+## Not in v0.2
 
-Sign-in for reviewers with an identity provider (v0.2; until then the review page has one shared password and records the name given at sign-in, and the CLI records whatever name `--as` gives), Multi-statement transactions as one change (v0.3), budgets across changes (v0.3: until then a size rule such as `rows: { max: 50 }` can be met by splitting a write into smaller changes, each previewed, checked and logged on its own), tables without a primary key, tables that are not InnoDB, tables with triggers or cascading foreign keys, updates to primary key columns, DDL previews and undo of DDL (DDL is always held and shown as SQL), undo of an undo.
+Approving from Slack or another chat tool (the web UI does it, behind sign-in), signing agents in with OAuth, identity providers that don't send `email_verified`, multi-statement transactions as one change (v0.3), budgets across changes (v0.3: until then a size rule such as `rows: { max: 50 }` can be met by splitting a write into smaller changes, each previewed, checked and logged on its own), tables without a primary key, tables that are not InnoDB, tables with triggers or cascading foreign keys, updates to primary key columns, DDL previews and undo of DDL (DDL is always held and shown as SQL), undo of an undo.
