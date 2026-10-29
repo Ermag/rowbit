@@ -127,7 +127,7 @@ async fn setup(var: &str, table: &str) -> Option<(Arc<Engine>, String)> {
 }
 
 #[tokio::test]
-async fn agents_get_three_tools_and_none_approves() {
+async fn agents_get_four_tools_and_none_approves() {
     // Needs no database: listing tools never reaches it.
     let engine = Arc::new(Engine::new(
         MySqlAdapter::new("mysql://nobody@127.0.0.1:1/none").unwrap(),
@@ -143,7 +143,10 @@ async fn agents_get_three_tools_and_none_approves() {
         .map(|t| t.name.into_owned())
         .collect();
     names.sort();
-    assert_eq!(names, ["change_status", "propose_write", "query"]);
+    assert_eq!(
+        names,
+        ["change_status", "describe_schema", "propose_write", "query"]
+    );
     client.cancel().await.unwrap();
 }
 
@@ -240,6 +243,40 @@ async fn agents_see_only_their_own_changes(var: &str, table: &str) {
     refund.cancel().await.unwrap();
     support.cancel().await.unwrap();
     stranger.cancel().await.unwrap();
+}
+
+on_both!(describe_lists_tables_and_columns);
+async fn describe_lists_tables_and_columns(var: &str, table: &str) {
+    let Some((engine, t)) = setup(var, &format!("{table}_d")).await else {
+        return;
+    };
+    let client = connect(&engine, "refund-bot").await;
+    let (failed, text) = call(&client, "describe_schema", json!({})).await;
+    assert!(!failed, "{text}");
+    let schema: Value = serde_json::from_str(&text).unwrap();
+    let ours = schema["tables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["table"] == t.as_str())
+        .unwrap_or_else(|| panic!("{t} missing from {text}"));
+    assert_eq!(ours["database"], "rowbit_test");
+    assert_eq!(
+        ours["may"],
+        json!(["read", "insert", "update", "delete", "ddl"])
+    );
+    // MariaDB writes `int(11)`, MySQL `int`.
+    let id = &ours["columns"][0];
+    assert_eq!(id["name"], "id");
+    assert!(id["type"].as_str().unwrap().starts_with("int"), "{id}");
+    assert_eq!(
+        (&id["nullable"], &id["primary_key"]),
+        (&json!(false), &json!(true))
+    );
+    assert!(!text.contains(SECRET), "describe never reads rows");
+    let (failed, text) = call(&client, "describe_schema", json!({ "database": "mysql" })).await;
+    assert!(failed && text.contains("system schema"), "{text}");
+    client.cancel().await.unwrap();
 }
 
 on_both!(query_reads_and_refuses_writes);

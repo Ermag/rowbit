@@ -266,19 +266,19 @@ impl Setup {
         let src = std::fs::read_to_string(&self.policy)
             .with_context(|| format!("reading {}", self.policy.display()))?;
         let policy = PolicyFile::from_yaml(&src)?;
-        // Fail closed until enforcement lands: nobody should believe a
-        // scope is enforced when it is not.
-        anyhow::ensure!(
-            !policy.has_scopes(),
-            "{} has scopes, which `rowbit grants` compiles but this build doesn't enforce yet; \
-             remove them to run",
-            self.policy.display()
-        );
         let database = mysql_database(&self.url)?;
         let adapter = rowbit_mysql::MySqlAdapter::new(&self.url)?;
         let store = Store::open(&self.store)
             .with_context(|| format!("opening {}", self.store.display()))?;
         Ok((RowbitEngine::new(adapter, policy, store), database))
+    }
+}
+
+/// Checks scoped agents' database users, and tells the operator what is
+/// wrong. Agents that fail are refused, not the whole server.
+async fn check_scopes(engine: &RowbitEngine) {
+    for note in engine.check_scopes().await {
+        eprintln!("rowbit: {note}");
     }
 }
 
@@ -348,6 +348,7 @@ async fn main() -> anyhow::Result<()> {
                 "--agent must name an agent from rowbit.yml"
             );
             // stdout carries MCP; everything for people goes to stderr.
+            check_scopes(&engine).await;
             let interrupted = engine.interrupted()?;
             if !interrupted.is_empty() {
                 eprintln!(
@@ -362,6 +363,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Propose { agent, sql, setup } => {
             let (engine, database) = setup.engine()?;
+            check_scopes(&engine).await;
             let status = engine.propose(&agent, &database, &sql).await?;
             println!("{}", rowbit_mcp::status_json(&status));
         }
@@ -425,6 +427,7 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let hash = page_password(&setup.store, set_password)?;
             let (engine, _) = setup.engine()?;
+            check_scopes(&engine).await;
             if !listen.ip().is_loopback() {
                 eprintln!(
                     "rowbit: the page is served over plain HTTP on {listen}; \

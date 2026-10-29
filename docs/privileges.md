@@ -26,17 +26,27 @@ What these grants also allow, so you can weigh them:
 
 - `PROCESS` lets the user see every session's running statement (`SHOW PROCESSLIST`, `information_schema.PROCESSLIST`, `INNODB_TRX`) and InnoDB's status, across the whole server. Agents read with Rowbit's privileges, so Rowbit refuses any statement that names `information_schema`, `performance_schema`, `mysql` or `sys`, and any of them as the default database.
 - `TRIGGER` lets the user create and drop triggers. Rowbit never does.
-- Previews run with Rowbit's privileges, so reviewers can see values from any table Rowbit's user can read. Agents never see preview values, though a statement can still learn about tables Rowbit can read through how many rows it matches. Scope Rowbit's `SELECT` grants to the tables agents need; per-agent grants arrive in v0.2.
+- Previews run with Rowbit's privileges, so reviewers can see values from any table Rowbit's user can read. Agents never see preview values. An agent without scopes reads with Rowbit's privileges, and a statement can learn about any table Rowbit can read through how many rows it matches. Give agents scopes (below) so the database itself limits what each one reads.
 
-Don't grant anything else: no `ALL`, no `GRANT OPTION`, nothing on `mysql.*`. Approved DDL is run as the reviewed statement by Rowbit's user, so it fails without `CREATE`, `ALTER`, `DROP` or `INDEX`. Leaving those out is a reasonable choice if schema changes go through your migration tool.
+Don't grant anything else: no `ALL`, no `GRANT OPTION`, nothing on `mysql.*`. Approved DDL from an agent without scopes is run as the reviewed statement by Rowbit's user, so it fails without `CREATE`, `ALTER`, `DROP` or `INDEX`; a scoped agent's runs on the agent's own user instead. Leaving those out is a reasonable choice if schema changes go through your migration tool.
 
 ## Agents' database users
 
-An agent with `scopes` in `rowbit.yml` gets a database user of its own, `rowbit_<agent>`, holding only what its scopes compile to. `rowbit grants apply` creates these users and keeps their grants in line, and needs an administrator who can create users and grant privileges with `GRANT OPTION`. Pass that administrator's URL for the one run, in `ROWBIT_ADMIN_DATABASE_URL` or `--admin-url`; Rowbit never stores it, and Rowbit's own user never needs those privileges. `rowbit grants diff` shows what `apply` would do.
+An agent with `scopes` in `rowbit.yml` gets a database user of its own, `rowbit_<agent>`, holding only what its scopes compile to (see [Scopes](spec/policy.md#scopes)). Rowbit uses it for what the database should check against the agent's own rights: the agent's reads, an `EXPLAIN` of each write before it is previewed and again before it is applied, and approved schema changes. Preview, apply and undo stay on Rowbit's user, which needs every column of the rows and the table's triggers and foreign keys; the agent never sees what they read.
 
-Views run with their definer's rights unless created `SQL SECURITY INVOKER`, so reading one reads whatever its definer can. A scope pattern like `billing.*` therefore covers only invoker views; a definer view is granted only when a scope names it exactly, and `grants diff` says so. A `deny_read` entry that matches no table or column is an error, so a typo can't quietly deny nothing.
+```sh
+export ROWBIT_ADMIN_DATABASE_URL=mysql://admin:...@db.internal:3306/
+rowbit grants diff     # what would change, per agent
+rowbit grants apply    # create the users and run it, after asking
+```
 
-Rowbit keeps the agents' users' passwords in its state file, to connect as them. Each of those users can do no more than its agent's scopes allow, which is less than Rowbit's own user.
+`rowbit grants apply` needs an administrator who can create users and grant privileges with `GRANT OPTION`. Pass that administrator's URL for the one run, in `ROWBIT_ADMIN_DATABASE_URL` or `--admin-url`; Rowbit never stores it, and Rowbit's own user never needs those privileges. Each agent's user gets the host part of Rowbit's own user, so it can connect from wherever Rowbit runs; `--agent-host` sets another. Run it again whenever `rowbit.yml`'s scopes change, or when tables are added that a pattern like `billing.ref*` should cover.
+
+Views run with their definer's rights unless created `SQL SECURITY INVOKER`, so reading one reads whatever its definer can. A scope pattern like `billing.*` therefore covers only invoker views; a definer view is granted only when a scope names it exactly, and `grants diff` says so. A `deny_read` entry that matches no table or column is an error, so a typo can't quietly deny nothing, and Rowbit refuses to serve an agent whose scopes have one.
+
+When it starts serving agents, Rowbit compares each agent's user with what `rowbit.yml` compiles to. A user that holds more, or that has a role or a proxy grant, is refused until `rowbit grants apply` runs, and Rowbit says so on its terminal. A user that holds less is served, and the database refuses what is missing.
+
+Rowbit keeps the agents' users' passwords in its state file, to connect as them. Each of those users can do no more than its agent's scopes allow, which is less than Rowbit's own user. Rowbit's own user should be able to see every table agents' scopes name (it needs `SELECT` on them for previews anyway); a table it can't see makes the agent's grants look larger than `rowbit.yml` says, and the agent is refused.
 
 ## The agent's credentials
 

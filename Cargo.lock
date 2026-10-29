@@ -1345,6 +1345,7 @@ dependencies = [
  "rowbit-mysql",
  "rowbit-policy",
  "rowbit-store",
+ "serde_norway",
  "thiserror",
  "tokio",
 ]

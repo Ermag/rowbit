@@ -145,14 +145,18 @@ async fn operator_runs_grants(var: &str) {
     assert!(ok && out.contains("new password"), "{out}");
     assert_ne!(s.password("cli-grants").unwrap(), first);
 
-    // Running Rowbit for agents refuses scopes until they are enforced.
+    // Serving agents checks each scoped agent's user first. Rowbit's own
+    // user can't see rg_cli, so the grants look like more than rowbit.yml
+    // gives: the operator is told, and the agent is refused.
     let (ok, out) = s.rowbit(&[
         "propose",
         "--agent",
-        "plain",
-        "DELETE FROM orders WHERE id = 1",
+        "cli-grants",
+        "UPDATE rg_cli.orders SET status = 'x' WHERE id = 1",
     ]);
-    assert!(!ok && out.contains("doesn't enforce yet"), "{out}");
+    assert!(ok, "{out}");
+    assert!(out.contains("agent cli-grants is refused"), "{out}");
+    assert!(out.contains(r#""state":"rejected""#), "{out}");
 
     // An agent that loses its scopes keeps its user until asked.
     s.policy("version: 0\nagents:\n  plain: {}\n");

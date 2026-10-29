@@ -1,10 +1,12 @@
 //! Rowbit adapter for MariaDB and MySQL. Both speak the same wire protocol,
 //! so one adapter serves both and tells them apart by the server version.
 
+pub mod agent;
 mod apply;
 pub mod grants;
 mod preview;
 mod query;
+pub mod schema;
 pub mod statement;
 
 pub use apply::ApplyError;
