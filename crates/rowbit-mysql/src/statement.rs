@@ -115,6 +115,8 @@ pub struct References {
     pub columns: std::collections::BTreeSet<String>,
     /// A `*` or `t.*` in a select list.
     pub wildcard: bool,
+    /// A `NATURAL` join, whose matched columns appear nowhere in the text.
+    pub natural_join: bool,
 }
 
 /// The tables and columns `sql` names. Call after [`classify`] or
@@ -136,6 +138,51 @@ struct Names {
     ctes: Vec<String>,
 }
 
+impl Names {
+    /// `USING` columns and `NATURAL` joins: neither is an expression, and
+    /// the database doesn't check column privileges on them.
+    fn joins(&mut self, twj: &TableWithJoins) {
+        use sqlparser::ast::{JoinConstraint, JoinOperator as J};
+        for join in &twj.joins {
+            let constraint = match &join.join_operator {
+                J::Join(c)
+                | J::Inner(c)
+                | J::Left(c)
+                | J::LeftOuter(c)
+                | J::Right(c)
+                | J::RightOuter(c)
+                | J::FullOuter(c)
+                | J::CrossJoin(c)
+                | J::Semi(c)
+                | J::LeftSemi(c)
+                | J::RightSemi(c)
+                | J::Anti(c)
+                | J::LeftAnti(c)
+                | J::RightAnti(c)
+                | J::StraightJoin(c)
+                | J::AsOf { constraint: c, .. } => Some(c),
+                // Not MySQL; counted as natural, so a scoped agent is refused.
+                J::CrossApply
+                | J::OuterApply
+                | J::ArrayJoin
+                | J::LeftArrayJoin
+                | J::InnerArrayJoin => None,
+            };
+            match constraint {
+                Some(JoinConstraint::Using(columns)) => {
+                    for c in columns {
+                        if let Some(ObjectNamePart::Identifier(id)) = c.0.last() {
+                            self.found.columns.insert(id.value.to_lowercase());
+                        }
+                    }
+                }
+                Some(JoinConstraint::Natural) | None => self.found.natural_join = true,
+                Some(JoinConstraint::On(_) | JoinConstraint::None) => {}
+            }
+        }
+    }
+}
+
 impl Visitor for Names {
     type Break = ();
 
@@ -149,6 +196,9 @@ impl Visitor for Names {
 
     fn pre_visit_select(&mut self, s: &Select) -> ControlFlow<()> {
         use sqlparser::ast::SelectItem;
+        for twj in &s.from {
+            self.joins(twj);
+        }
         if s.projection.iter().any(|item| {
             matches!(
                 item,
@@ -156,6 +206,16 @@ impl Visitor for Names {
             )
         }) {
             self.found.wildcard = true;
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_table_factor(&mut self, t: &TableFactor) -> ControlFlow<()> {
+        if let TableFactor::NestedJoin {
+            table_with_joins, ..
+        } = t
+        {
+            self.joins(table_with_joins);
         }
         ControlFlow::Continue(())
     }
@@ -1080,6 +1140,20 @@ mod tests {
         assert!(r.wildcard);
         assert!(!references("SELECT COUNT(*) FROM t").unwrap().wildcard);
         assert!(references("SELECT o.* FROM t o").unwrap().wildcard);
+
+        // Found in review: join columns aren't expressions, and the database
+        // doesn't check their privileges.
+        let r =
+            references("SELECT c.name FROM customers c JOIN (SELECT 'x' AS Email) x USING (Email)")
+                .unwrap();
+        assert!(r.columns.contains("email"), "{r:?}");
+        assert!(!r.natural_join);
+        let r =
+            references("SELECT name FROM customers NATURAL JOIN (SELECT 'x' AS email) x").unwrap();
+        assert!(r.natural_join);
+        let r =
+            references("SELECT a.id FROM a JOIN (b JOIN c USING (secret)) ON a.id = b.id").unwrap();
+        assert!(r.columns.contains("secret"), "nested joins too: {r:?}");
 
         let r = references("INSERT INTO a (id, email) SELECT id, mail FROM b").unwrap();
         assert_eq!(r.tables.len(), 2);
