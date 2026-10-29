@@ -1,3 +1,4 @@
+mod grants;
 mod review;
 
 use std::path::PathBuf;
@@ -135,6 +136,15 @@ enum Command {
     Verify {
         #[command(flatten)]
         store: StoreArgs,
+    },
+    /// Database users for scoped agents: diff, apply
+    ///
+    /// Each agent with scopes in rowbit.yml gets a database user of its
+    /// own, rowbit_<agent>, with grants compiled from its scopes. These
+    /// commands connect as an administrator, for this run only.
+    Grants {
+        #[command(subcommand)]
+        command: GrantsCommand,
     },
     /// Check that Rowbit can reach a database
     Ping {
@@ -275,6 +285,14 @@ impl Setup {
     }
 }
 
+/// Checks scoped agents' database users, and tells the operator what is
+/// wrong. Agents that fail are refused, not the whole server.
+async fn check_scopes(engine: &RowbitEngine) {
+    for note in engine.check_scopes().await {
+        eprintln!("rowbit: {note}");
+    }
+}
+
 /// The database a `mysql://` URL names; Rowbit needs one as the default.
 fn mysql_database(url: &str) -> anyhow::Result<String> {
     let path = url
@@ -330,6 +348,22 @@ impl ServerArgs {
 }
 
 #[derive(Subcommand)]
+enum GrantsCommand {
+    /// Print what would change for each agent's user; changes nothing
+    Diff {
+        #[command(flatten)]
+        admin: grants::Admin,
+    },
+    /// Create agents' users and bring their grants in line with rowbit.yml
+    Apply {
+        #[command(flatten)]
+        admin: grants::Admin,
+        #[command(flatten)]
+        args: grants::ApplyArgs,
+    },
+}
+
+#[derive(Subcommand)]
 enum PolicyCommand {
     /// Parse and validate a policy file
     Check {
@@ -353,6 +387,9 @@ async fn main() -> anyhow::Result<()> {
                 path.display(),
                 policy.agents.len()
             );
+            for warning in policy.warnings() {
+                println!("warning: {warning}");
+            }
         }
         Command::Mcp { agent, setup } => {
             let (engine, database) = setup.engine()?;
@@ -361,6 +398,7 @@ async fn main() -> anyhow::Result<()> {
                 "--agent must name an agent from rowbit.yml"
             );
             // stdout carries MCP; everything for people goes to stderr.
+            check_scopes(&engine).await;
             let interrupted = engine.interrupted()?;
             if !interrupted.is_empty() {
                 eprintln!(
@@ -375,6 +413,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Propose { agent, sql, setup } => {
             let (engine, database) = setup.engine()?;
+            check_scopes(&engine).await;
             let status = engine.propose(&agent, &database, &sql).await?;
             println!("{}", rowbit_mcp::status_json(&status));
         }
@@ -457,6 +496,7 @@ async fn main() -> anyhow::Result<()> {
                 },
             };
             let (engine, _) = setup.engine()?;
+            check_scopes(&engine).await;
             let web = rowbit_web::Web {
                 sign_in,
                 hosts: config.public_host().into_iter().collect(),
@@ -499,6 +539,12 @@ async fn main() -> anyhow::Result<()> {
                 Err(problem) => anyhow::bail!("audit log tampered: {problem}"),
             }
         }
+        Command::Grants {
+            command: GrantsCommand::Diff { admin },
+        } => grants::diff(admin).await?,
+        Command::Grants {
+            command: GrantsCommand::Apply { admin, args },
+        } => grants::apply(admin, args).await?,
         Command::Ping { url } => {
             let adapter = rowbit_mysql::MySqlAdapter::new(&url)?;
             let info = adapter.server_info().await?;

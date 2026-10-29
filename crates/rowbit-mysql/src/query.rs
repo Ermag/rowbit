@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, OptsBuilder, Value};
+use mysql_async::{Conn, Value};
 
 use crate::preview::{PreviewError, SQL_MODE};
 
@@ -40,8 +40,7 @@ pub(crate) async fn query(
     limits: QueryLimits,
 ) -> Result<QueryResult, PreviewError> {
     let work = async {
-        let opts = OptsBuilder::from_opts(opts.clone()).db_name(Some(database));
-        let mut conn = Conn::new(opts).await?;
+        let mut conn = crate::agent::connect_default(opts, database).await?;
         let result = run(&mut conn, sql, limits).await;
         let _ = conn.query_drop("ROLLBACK").await;
         let _ = conn.disconnect().await;

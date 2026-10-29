@@ -115,11 +115,17 @@ pub(crate) async fn run_ddl(
     bounded(async {
         let mut conn = connect(opts, database, "0").await?;
         // A DDL statement that fails partway can leave the schema changed,
-        // so any error is reported as an unknown outcome.
-        let result = conn
-            .query_drop(sql)
-            .await
-            .map_err(|e| ApplyError::Uncertain(e.to_string()));
+        // so any error is reported as an unknown outcome, except a missing
+        // privilege, which the server checks before it starts.
+        let result = conn.query_drop(sql).await.map_err(|e| match &e {
+            mysql_async::Error::Server(se) if crate::agent::DENIED.contains(&se.code) => {
+                ApplyError::Conflict {
+                    reason: format!("outside the agent's scope: database error {}", se.code),
+                    row: None,
+                }
+            }
+            _ => ApplyError::Uncertain(e.to_string()),
+        });
         finish(conn, result).await
     })
     .await
