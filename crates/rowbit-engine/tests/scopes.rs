@@ -316,7 +316,7 @@ async fn the_database_has_the_last_word(var: &str, prefix: &str) {
     };
     let orders = s.orders.clone();
     assert!(s.engine.check_scopes().await.is_empty());
-    let user = s.account.sql();
+    let user = format!("'rowbit_{}'@'%'", s.agent);
 
     // A two-row update is held. Its grant is revoked before a person
     // approves: apply asks the database again and writes nothing.
