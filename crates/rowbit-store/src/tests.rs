@@ -425,3 +425,24 @@ fn settings_are_kept_and_replaced() {
     store.set_setting("web.password", "b").unwrap();
     assert_eq!(store.setting("web.password").unwrap().as_deref(), Some("b"));
 }
+
+#[test]
+fn settings_are_listed_by_prefix_and_deleted() {
+    let mut store = Store::open_in_memory().unwrap();
+    store.set_setting("agent.b.password", "2").unwrap();
+    store.set_setting("agent.a.password", "1").unwrap();
+    store.set_setting("agentx", "no").unwrap();
+    store.set_setting("web.password", "no").unwrap();
+    let listed = store.settings_with_prefix("agent.").unwrap();
+    assert_eq!(
+        listed,
+        [
+            ("agent.a.password".to_owned(), "1".to_owned()),
+            ("agent.b.password".to_owned(), "2".to_owned())
+        ]
+    );
+    store.delete_setting("agent.a.password").unwrap();
+    assert_eq!(store.setting("agent.a.password").unwrap(), None);
+    // Characters LIKE would treat as wildcards are literal.
+    assert!(store.settings_with_prefix("agent_").unwrap().is_empty());
+}

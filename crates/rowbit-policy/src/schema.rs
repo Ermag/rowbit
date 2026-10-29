@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 use serde::Deserialize;
 
 use crate::PolicyError;
+use crate::scopes::{MAX_SCOPED_AGENT_ID, Scopes};
 
 pub const SCHEMA_VERSION: u32 = 0;
 
@@ -25,6 +26,10 @@ pub struct AgentPolicy {
     pub default: Decision,
     #[serde(default)]
     pub rules: Vec<Rule>,
+    /// What the agent may touch at all. `None` means Rowbit's own
+    /// privileges, as in v0.1.
+    #[serde(default)]
+    pub scopes: Option<Scopes>,
 }
 
 fn default_decision() -> Decision {
@@ -138,6 +143,14 @@ impl PolicyFile {
                     "agents.{agent}.default cannot be allow; use hold or block"
                 )));
             }
+            if let Some(scopes) = &policy.scopes {
+                if agent.len() > MAX_SCOPED_AGENT_ID {
+                    return Err(invalid(format!(
+                        "agent id {agent:?} has scopes, so it can be at most {MAX_SCOPED_AGENT_ID} characters (its database user's name is rowbit_{agent})"
+                    )));
+                }
+                scopes.validate(&format!("agents.{agent}"))?;
+            }
             let mut names = HashSet::new();
             for rule in &policy.rules {
                 let at = format!("agents.{agent}.rules.{}", rule.name);
@@ -162,6 +175,22 @@ impl PolicyFile {
             }
         }
         Ok(())
+    }
+}
+
+impl PolicyFile {
+    /// Things that are valid but probably not what the author meant.
+    pub fn warnings(&self) -> Vec<String> {
+        self.agents
+            .iter()
+            .filter_map(|(id, a)| a.scopes.as_ref().map(|s| s.warnings(id)))
+            .flatten()
+            .collect()
+    }
+
+    /// Whether any agent has scopes.
+    pub fn has_scopes(&self) -> bool {
+        self.agents.values().any(|a| a.scopes.is_some())
     }
 }
 

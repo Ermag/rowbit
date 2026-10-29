@@ -193,9 +193,11 @@ async fn guard(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
+    // Not `no-referrer`: with it, browsers send `Origin: null` on our own
+    // forms, and the origin check refuses every sign-in and button.
     headers.insert(
         header::REFERRER_POLICY,
-        HeaderValue::from_static("no-referrer"),
+        HeaderValue::from_static("same-origin"),
     );
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response

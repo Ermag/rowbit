@@ -4,6 +4,18 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 
 ## Unreleased
 
+### Scopes
+
+- `rowbit.yml` accepts `scopes` per agent: tables it may read, insert into, update, delete from or change, and tables and columns it may never read. `rowbit policy check` warns about a table an agent may update or delete from but not read.
+- `rowbit grants diff` and `rowbit grants apply` give each scoped agent a database user of its own, `rowbit_<agent>`, with grants compiled from its scopes, using an administrator's URL for that run only. Privileges added by hand are revoked; roles and proxy grants are listed for a person to remove. Grants are made table by table, views running with their definer's rights only when named exactly, and a `deny_read` entry that matches nothing is an error.
+- The database enforces them. A scoped agent's reads run on its own user, every write is checked with an `EXPLAIN` on that user before preview and again before apply, and approved schema changes run on it. A parser check in front gives the agent a clear reason (`shop.cards is outside coding-agent's read scope`). The databases don't check privileges on join columns, so the parser check covers `JOIN ... USING` columns too, and a scoped agent can't use `NATURAL JOIN`. Writes outside scopes are blocked by `policy:scope`.
+- Rowbit checks every scoped agent's user when it starts, and refuses an agent whose user holds more than its scopes.
+- A new MCP tool, `describe_schema`, lists the tables an agent may use, with their columns and what it may do with each, leaving out denied tables and columns.
+
+### Fixes
+
+- The review page's sign-in and buttons work in browsers. The page sent `Referrer-Policy: no-referrer`, which makes browsers send `Origin: null` on the page's own forms, and the origin check refused them. It now sends `same-origin`.
+
 ### Signing in
 
 - Reviewers sign in to the review page through an OpenID Connect provider (Google Workspace, Okta, Keycloak, Authentik, GitLab, ...), set in a new `rowbit-server.yml` with `public_url` and `reviewers`. Rowbit uses the code flow with PKCE, checks the ID token, requires a verified email, and lets in only the `emails`, `domains` or `groups` listed. The audit log records the reviewer's email.
