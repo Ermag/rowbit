@@ -178,6 +178,22 @@ For any client with a JSON config, such as Claude Desktop:
 
 The agent gets three tools: `query` to read, `propose_write` to ask for a write, and `change_status` to follow it. Ask it to fix something in the shop and watch `rowbit serve`.
 
+### Over HTTP
+
+Over stdio, the machine running the agent holds Rowbit's database URL and state file. Over HTTP, it holds only a token of its own. Turn it on in `rowbit-server.yml` next to `rowbit.yml`, make the agent a token, and start the server:
+
+```sh
+printf 'version: 0\nmcp:\n  http: true\n' > rowbit-server.yml
+rowbit agents token coding-agent
+rowbit serve
+```
+
+`rowbit agents token` prints the token once; making a new one replaces it, and `rowbit agents revoke coding-agent` removes it. Then point the agent at `/mcp` with the token as a bearer token, for Claude Code:
+
+```sh
+claude mcp add --transport http rowbit http://127.0.0.1:8080/mcp --header "Authorization: Bearer <token>"
+```
+
 ## Before you use it for real
 
 - **Keep the agent away from Rowbit's credentials, state and review page.** The setup above is for trying Rowbit only. An agent that can read the database URL can connect around Rowbit. An agent that can also read `rowbit.db` can run `rowbit approve` and approve its own change: the CLI records whatever name `--as` gives. The review page needs its password, so keep that from the agent too. So run Rowbit and its files as an operating system user the agent can't act as. With stdio, one way is to have the MCP client start Rowbit through `sudo`:

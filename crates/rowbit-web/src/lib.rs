@@ -65,6 +65,8 @@ pub struct Web {
     pub hosts: Vec<String>,
     /// Mark cookies `Secure`, behind HTTPS.
     pub secure: bool,
+    /// Serve agents over MCP at `/mcp`, with this default database.
+    pub mcp: Option<String>,
 }
 
 #[derive(Clone)]
@@ -91,6 +93,14 @@ struct Session {
 
 /// The review page as a router.
 pub fn router(engine: Arc<Engine>, web: Web) -> Router {
+    let mcp = web.mcp.clone().map(|database| {
+        let origins = web
+            .hosts
+            .iter()
+            .flat_map(|h| [format!("http://{h}"), format!("https://{h}")])
+            .collect();
+        rowbit_mcp::RowbitMcp::http_service(engine.clone(), database, web.hosts.clone(), origins)
+    });
     let app = App {
         engine,
         hosts: Arc::new(web.hosts),
@@ -115,6 +125,19 @@ pub fn router(engine: Arc<Engine>, web: Web) -> Router {
         .route("/api/changes/{id}/undo", post(api::undo))
         .route("/api/verify", get(api::verify))
         .route("/api/deliveries", get(api::deliveries))
+        .merge(match mcp {
+            // Every request signs in with its agent's token first.
+            Some(service) => Router::new().nest_service(
+                "/mcp",
+                tower::ServiceBuilder::new()
+                    .layer(axum::middleware::from_fn_with_state(
+                        app.clone(),
+                        mcp_sign_in,
+                    ))
+                    .service(service),
+            ),
+            None => Router::new(),
+        })
         .layer(axum::middleware::from_fn_with_state(app.clone(), guard))
         .with_state(app)
 }
@@ -212,6 +235,42 @@ async fn guard(
     );
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
+}
+
+/// Signs an MCP request in by its `Authorization: Bearer` token, as the
+/// agent the token belongs to. Anything else gets `401` and nothing more.
+async fn mcp_sign_in(
+    State(app): State<App>,
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let token = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim);
+    let agent = match token {
+        Some(t) if !t.is_empty() => app.engine.agent_for_token(t).ok().flatten(),
+        _ => None,
+    };
+    match agent {
+        Some(agent) => {
+            request
+                .extensions_mut()
+                .insert(rowbit_mcp::SignedInAgent(agent));
+            next.run(request).await
+        }
+        None => {
+            // Tokens can't be guessed; the wait just keeps a flood slow.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let mut r =
+                (StatusCode::UNAUTHORIZED, "sign in with your agent's token").into_response();
+            r.headers_mut()
+                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+            r
+        }
+    }
 }
 
 /// The signed-in session, from the cookie.

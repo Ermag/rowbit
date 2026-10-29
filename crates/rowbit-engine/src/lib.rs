@@ -535,6 +535,13 @@ impl Engine {
         Ok(self.store().deliveries(limit)?)
     }
 
+    /// The agent an MCP token signs in, if Rowbit issued it, it wasn't
+    /// revoked, and the agent is still in `rowbit.yml`.
+    pub fn agent_for_token(&self, token: &str) -> Result<Option<String>, EngineError> {
+        let agent = self.store().agent_for_token(token)?;
+        Ok(agent.filter(|a| self.policy.agents.contains_key(a)))
+    }
+
     /// Checks the whole audit log; see [`Store::verify`].
     pub fn verify(&self) -> Result<Result<(), rowbit_store::Tampered>, EngineError> {
         Ok(self.store().verify()?)
@@ -981,7 +988,8 @@ fn rfc3339_now() -> String {
     rfc3339(secs)
 }
 
-fn rfc3339(secs: i64) -> String {
+/// A Unix time in seconds as `2026-11-20T14:03:11Z`.
+pub fn rfc3339(secs: i64) -> String {
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // Days to a civil date (Howard Hinnant's algorithm).
     let z = days + 719_468;

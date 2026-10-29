@@ -5,7 +5,8 @@
 //! people, through the CLI and the web page.
 //!
 //! The agent's identity comes from how the server was started (one server
-//! per agent over stdio), never from tool arguments. What a tool returns
+//! per agent over stdio), or over HTTP from the token the request signed in
+//! with ([`SignedInAgent`]), never from tool arguments. What a tool returns
 //! never includes preview row values.
 
 use std::sync::Arc;
@@ -13,7 +14,10 @@ use std::sync::Arc;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
-use rmcp::{ServerHandler, ServiceExt, schemars, tool, tool_handler, tool_router};
+use rmcp::service::RequestContext;
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
+use rmcp::{RoleServer, ServerHandler, ServiceExt, schemars, tool, tool_handler, tool_router};
 use rowbit_engine::{ChangeStatus, Engine};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -27,10 +31,23 @@ rules: it may be applied at once, held for a person, or rejected with a \
 reason. Follow a held change with `change_status`. You cannot approve \
 changes; a person does.";
 
+/// The agent an HTTP request signed in as. The transport's sign-in puts it
+/// in the request's extensions after checking the request's token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedInAgent(pub String);
+
+#[derive(Clone)]
+enum Identity {
+    /// Over stdio: set by whoever configured the MCP client.
+    Fixed(String),
+    /// Over HTTP: each request's [`SignedInAgent`].
+    FromRequest,
+}
+
 #[derive(Clone)]
 pub struct RowbitMcp {
     engine: Arc<Engine>,
-    agent: String,
+    identity: Identity,
     database: String,
     #[allow(dead_code, reason = "used by the tool_handler macro")]
     tool_router: ToolRouter<Self>,
@@ -43,9 +60,52 @@ impl RowbitMcp {
     pub fn new(engine: Arc<Engine>, agent: impl Into<String>, database: impl Into<String>) -> Self {
         Self {
             engine,
-            agent: agent.into(),
+            identity: Identity::Fixed(agent.into()),
             database: database.into(),
             tool_router: Self::tool_router(),
+        }
+    }
+
+    /// The MCP streamable HTTP transport, for agents that sign in per
+    /// request. Mount it behind a layer that checks each request's token and
+    /// adds its [`SignedInAgent`]; a request without one gets no tool.
+    /// `hosts` are the `Host` values it answers, `origins` the only browser
+    /// origins it accepts (requests without an `Origin` pass).
+    pub fn http_service(
+        engine: Arc<Engine>,
+        database: impl Into<String>,
+        hosts: Vec<String>,
+        origins: Vec<String>,
+    ) -> StreamableHttpService<RowbitMcp, LocalSessionManager> {
+        let database = database.into();
+        let config = StreamableHttpServerConfig::default()
+            .with_allowed_hosts(hosts)
+            .with_allowed_origins(origins)
+            .enforce_origin_validation();
+        StreamableHttpService::new(
+            move || {
+                Ok(RowbitMcp {
+                    engine: engine.clone(),
+                    identity: Identity::FromRequest,
+                    database: database.clone(),
+                    tool_router: Self::tool_router(),
+                })
+            },
+            Arc::new(LocalSessionManager::default()),
+            config,
+        )
+    }
+
+    /// Who is calling: never from the tool's arguments.
+    fn agent(&self, ctx: &RequestContext<RoleServer>) -> Result<String, CallToolResult> {
+        match &self.identity {
+            Identity::Fixed(agent) => Ok(agent.clone()),
+            Identity::FromRequest => ctx
+                .extensions
+                .get::<http::request::Parts>()
+                .and_then(|p| p.extensions.get::<SignedInAgent>())
+                .map(|a| a.0.clone())
+                .ok_or_else(|| error("not signed in")),
         }
     }
 
@@ -96,9 +156,17 @@ pub struct StatusArgs {
 #[tool_router]
 impl RowbitMcp {
     #[tool(description = "Run one read-only SELECT. Returns columns and up to 1,000 rows.")]
-    async fn query(&self, Parameters(args): Parameters<QueryArgs>) -> CallToolResult {
+    async fn query(
+        &self,
+        Parameters(args): Parameters<QueryArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> CallToolResult {
+        let agent = match self.agent(&ctx) {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
         let database = self.database_or_default(args.database);
-        match self.engine.query(&self.agent, &database, &args.sql).await {
+        match self.engine.query(&agent, &database, &args.sql).await {
             Ok(result) => ok(json!({
                 "columns": result.columns,
                 "rows": result.rows,
@@ -111,9 +179,17 @@ impl RowbitMcp {
     #[tool(
         description = "List the tables you may use: their columns (name, type, nullable, primary key) and what you may do with each (read, insert, update, delete, ddl)."
     )]
-    async fn describe_schema(&self, Parameters(args): Parameters<DescribeArgs>) -> CallToolResult {
+    async fn describe_schema(
+        &self,
+        Parameters(args): Parameters<DescribeArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> CallToolResult {
+        let agent = match self.agent(&ctx) {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
         let database = self.database_or_default(args.database);
-        match self.engine.describe(&self.agent, &database).await {
+        match self.engine.describe(&agent, &database).await {
             Ok(tables) => ok(json!({
                 "tables": tables.iter().map(|t| json!({
                     "database": t.table.database,
@@ -134,17 +210,33 @@ impl RowbitMcp {
     #[tool(
         description = "Propose one write. Rowbit previews it, checks it against the rules, and applies it, holds it for a person, or rejects it. Returns the change's id, state, table, row count and reason."
     )]
-    async fn propose_write(&self, Parameters(args): Parameters<ProposeArgs>) -> CallToolResult {
+    async fn propose_write(
+        &self,
+        Parameters(args): Parameters<ProposeArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> CallToolResult {
+        let agent = match self.agent(&ctx) {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
         let database = self.database_or_default(args.database);
-        match self.engine.propose(&self.agent, &database, &args.sql).await {
+        match self.engine.propose(&agent, &database, &args.sql).await {
             Ok(status) => ok(status_json(&status)),
             Err(e) => error(&e.to_string()),
         }
     }
 
     #[tool(description = "The current state of a change you proposed.")]
-    async fn change_status(&self, Parameters(args): Parameters<StatusArgs>) -> CallToolResult {
-        match self.engine.status(&self.agent, args.id) {
+    async fn change_status(
+        &self,
+        Parameters(args): Parameters<StatusArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> CallToolResult {
+        let agent = match self.agent(&ctx) {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        match self.engine.status(&agent, args.id) {
             Ok(status) => ok(status_json(&status)),
             Err(e) => error(&e.to_string()),
         }
