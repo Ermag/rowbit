@@ -70,6 +70,10 @@ impl fmt::Display for Grant {
 pub struct Catalog {
     /// `(database, table)` to its columns in order.
     pub tables: BTreeMap<(String, String), Vec<String>>,
+    /// Views that run with their definer's rights (`SQL SECURITY DEFINER`,
+    /// the default). Reading one reads whatever its definer can, whatever
+    /// the agent's own grants say.
+    pub definer_views: BTreeSet<(String, String)>,
 }
 
 impl Catalog {
@@ -96,6 +100,16 @@ impl Catalog {
                     .or_default()
                     .push(column);
             }
+            let views: Vec<String> = conn
+                .exec(
+                    "SELECT TABLE_NAME FROM information_schema.VIEWS \
+                     WHERE TABLE_SCHEMA = ? AND SECURITY_TYPE <> 'INVOKER'",
+                    (db,),
+                )
+                .await?;
+            catalog
+                .definer_views
+                .extend(views.into_iter().map(|v| (db.clone(), v)));
         }
         Ok(catalog)
     }
@@ -120,6 +134,10 @@ pub struct Compiled {
     pub grants: BTreeSet<Grant>,
     /// Things a person should know: a named table that doesn't exist.
     pub notes: Vec<String>,
+    /// Deny entries that match nothing: a typo, or a name in the wrong
+    /// case. A deny list that denies nothing must not pass, so these stop
+    /// `rowbit grants` and the startup check.
+    pub errors: Vec<String>,
 }
 
 fn privileges(op: Operation) -> &'static [&'static str] {
@@ -134,14 +152,46 @@ fn privileges(op: Operation) -> &'static [&'static str] {
 
 /// Compiles scopes against the tables that exist now. See the table in
 /// "What Rowbit compiles" in `docs/spec/policy.md`.
+///
+/// Reads and writes are granted table by table, never on a whole
+/// database, so that a view running with its definer's rights is granted
+/// only when a scope names it exactly: through one, the agent would reach
+/// whatever the view's definer can, denied tables and columns included.
 pub fn compile(scopes: &Scopes, catalog: &Catalog) -> Compiled {
     let mut out = Compiled::default();
+    for entry in &scopes.deny_read.columns {
+        let mut parts = entry.splitn(3, '.');
+        let (db, table, column) = (parts.next(), parts.next(), parts.next());
+        let found = catalog.tables.iter().any(|((d, t), cols)| {
+            Some(d.as_str()) == db
+                && Some(t.as_str()) == table
+                && column.is_some_and(|x| cols.iter().any(|c| c.eq_ignore_ascii_case(x)))
+        });
+        if !found {
+            out.errors.push(format!(
+                "deny_read.columns: {entry} matches no column; check the spelling, or Rowbit would deny nothing"
+            ));
+        }
+    }
+    for entry in scopes.deny_read.tables.iter().filter(|t| !t.contains('*')) {
+        if !catalog
+            .tables
+            .keys()
+            .any(|(d, t)| format!("{d}.{t}") == *entry)
+        {
+            out.errors.push(format!(
+                "deny_read.tables: {entry} matches no table; check the spelling, or Rowbit would deny nothing"
+            ));
+        }
+    }
     for op in Operation::ALL {
         for pattern in scopes.patterns(op) {
             let Some((db, table_pattern)) = pattern.split_once('.') else {
                 continue;
             };
-            if table_pattern == "*" && !(op == Operation::Read && scopes.denies_in(db)) {
+            // Only schema changes are granted database-wide, so `ddl` can
+            // create new tables.
+            if table_pattern == "*" && op == Operation::Ddl {
                 for p in privileges(op) {
                     out.grants
                         .insert(Grant::on(Object::Database(escape_database(db)), p));
@@ -152,6 +202,16 @@ pub fn compile(scopes: &Scopes, catalog: &Catalog) -> Compiled {
                 .tables
                 .iter()
                 .filter(|((d, t), _)| d == db && glob(pattern, &format!("{d}.{t}")))
+                .filter(|(key, _)| {
+                    let definer = catalog.definer_views.contains(*key);
+                    if definer && table_pattern.contains('*') {
+                        out.notes.push(format!(
+                            "{}.{} is a view with its definer's rights, so {pattern} doesn't cover it; name it exactly to grant it",
+                            key.0, key.1
+                        ));
+                    }
+                    !definer || !table_pattern.contains('*')
+                })
                 .map(|((_, t), cols)| (t, cols))
                 .collect();
             if matching.is_empty() && !table_pattern.contains('*') {
@@ -173,6 +233,14 @@ pub fn compile(scopes: &Scopes, catalog: &Catalog) -> Compiled {
             for (table, columns) in matching {
                 let name = format!("{db}.{table}");
                 let object = Object::Table(db.to_owned(), table.clone());
+                if catalog
+                    .definer_views
+                    .contains(&(db.to_owned(), table.clone()))
+                {
+                    out.notes.push(format!(
+                        "{name} is a view with its definer's rights: the agent reads through it whatever its definer can, deny_read included"
+                    ));
+                }
                 if op != Operation::Read {
                     for p in privileges(op) {
                         out.grants.insert(Grant::on(object.clone(), p));
@@ -501,9 +569,89 @@ mod tests {
     }
 
     #[test]
-    fn database_wide_when_nothing_is_denied() {
-        let c = compile(&scopes("read: [crm.*]\ninsert: [crm.*]"), &catalog());
-        assert_eq!(shown(&c), ["INSERT ON crm.*", "SELECT ON crm.*"]);
+    fn table_by_table_even_when_nothing_is_denied() {
+        let c = compile(
+            &scopes("read: [crm.*]\ninsert: [crm.*]\nddl: [crm.*]"),
+            &catalog(),
+        );
+        assert_eq!(
+            shown(&c),
+            [
+                "ALTER ON crm.*",
+                "CREATE ON crm.*",
+                "DROP ON crm.*",
+                "INDEX ON crm.*",
+                "INSERT ON crm.people",
+                "SELECT ON crm.people"
+            ]
+        );
+    }
+
+    // Found in review: a view with its definer's rights, covered by a
+    // pattern, read denied tables and columns for the agent.
+    #[test]
+    fn definer_views_need_their_own_name() {
+        let mut cat = catalog();
+        for (v, cols) in [
+            ("card_report", vec!["id", "number"]),
+            ("open_refunds", vec!["id"]),
+        ] {
+            cat.tables.insert(
+                ("billing".into(), v.into()),
+                cols.into_iter().map(str::to_owned).collect(),
+            );
+        }
+        cat.definer_views
+            .insert(("billing".into(), "card_report".into()));
+        let c = compile(
+            &scopes(
+                "read: [billing.*]\nupdate: [billing.*]\ndeny_read: { tables: [billing.cards] }",
+            ),
+            &cat,
+        );
+        let s = shown(&c);
+        assert!(!s.iter().any(|g| g.contains("card_report")), "{s:?}");
+        assert!(
+            s.contains(&"SELECT ON billing.open_refunds".to_owned()),
+            "an invoker view is fine: {s:?}"
+        );
+        assert!(
+            c.notes.iter().any(|n| n.contains("card_report")),
+            "{:?}",
+            c.notes
+        );
+
+        let named = compile(&scopes("read: [billing.card_report]"), &cat);
+        assert_eq!(shown(&named), ["SELECT ON billing.card_report"]);
+        assert!(named.notes.iter().any(|n| n.contains("definer's rights")));
+    }
+
+    // Found in review: a deny entry in the wrong case, or misspelled,
+    // denied nothing, and the table was granted whole.
+    #[test]
+    fn deny_entries_ignore_case_and_must_match_something() {
+        let c = compile(
+            &scopes("read: [billing.customers]\ndeny_read: { columns: [billing.customers.EMAIL] }"),
+            &catalog(),
+        );
+        assert_eq!(
+            shown(&c),
+            [
+                "SELECT (id) ON billing.customers",
+                "SELECT (name) ON billing.customers"
+            ]
+        );
+        assert!(c.errors.is_empty(), "{:?}", c.errors);
+        for deny in [
+            "columns: [billing.customers.emial]",
+            "tables: [billing.crads]",
+        ] {
+            let c = compile(
+                &scopes(&format!("read: [billing.*]\ndeny_read: {{ {deny} }}")),
+                &catalog(),
+            );
+            assert_eq!(c.errors.len(), 1, "{deny}: {:?}", c.errors);
+        }
     }
 
     #[test]
@@ -544,10 +692,10 @@ mod tests {
 
     #[test]
     fn underscores_in_database_names_are_literal() {
-        let c = compile(&scopes("read: [my_db.*]"), &Catalog::default());
-        let g = c.grants.iter().next().unwrap();
+        let c = compile(&scopes("ddl: [my_db.*]"), &Catalog::default());
+        let g = c.grants.iter().find(|g| g.privilege == "ALTER").unwrap();
         assert_eq!(g.object, Object::Database("my\\_db".into()));
-        assert_eq!(g.to_string(), "SELECT ON my_db.*");
+        assert_eq!(g.to_string(), "ALTER ON my_db.*");
         let account = Account {
             user: "rowbit_bot".into(),
             host: "%".into(),
@@ -555,7 +703,7 @@ mod tests {
         let d = Diff::between(&c.grants, &BTreeSet::new());
         assert_eq!(
             d.statements(&account),
-            ["GRANT SELECT ON `my\\_db`.* TO 'rowbit_bot'@'%'"]
+            ["GRANT ALTER, CREATE, DROP, INDEX ON `my\\_db`.* TO 'rowbit_bot'@'%'"]
         );
     }
 
