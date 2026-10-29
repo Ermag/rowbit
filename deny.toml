@@ -13,6 +13,12 @@ ignore = [
     # keys (openidconnect -> rsa), which the attack doesn't reach. Revisit
     # when rsa ships a fix, or by 2027-04-01.
     { id = "RUSTSEC-2023-0071", reason = "rsa is used only to verify signatures with public keys" },
+    # crypto-bigint 0.5: some constant-time operations may branch on secret
+    # values. It reaches Rowbit through openidconnect -> p256/p384, used only
+    # to verify identity providers' ECDSA signatures with public keys, where
+    # nothing secret is computed. Revisit when openidconnect moves to a fixed
+    # crypto-bigint, or by 2027-04-01.
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint is used only to verify signatures with public keys" },
 ]
 
 [licenses]
