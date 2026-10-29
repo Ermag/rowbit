@@ -54,6 +54,10 @@ jobs:
         run: cargo test --workspace --locked
       - name: Check the example policy
         run: cargo run --locked -q -p rowbit-cli -- policy check examples/rowbit.yml
+      - name: Check the example server settings
+        env:
+          ROWBIT_OIDC_CLIENT_SECRET: not-a-real-secret
+        run: cargo run --locked -q -p rowbit-cli -- server check --config examples/rowbit-server.yml
       - name: Database logs
         if: failure()
         run: docker compose logs

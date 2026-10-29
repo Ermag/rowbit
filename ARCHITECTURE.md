@@ -21,7 +21,7 @@ person ─CLI/web─▶ rowbit ──┘        │
 | `rowbit-store` | AGPL-3.0-only | Change state and the hash-chained audit log, in SQLite. |
 | `rowbit-engine` | AGPL-3.0-only | Runs a proposed change through classify, preview, policy and the store. What surfaces call. |
 | `rowbit-mcp` | AGPL-3.0-only | MCP server: the `query`, `propose_write` and `change_status` tools, over stdio. |
-| `rowbit-web` | AGPL-3.0-only | The review page: held changes, approve, reject, undo. Plain HTML, no scripts. |
+| `rowbit-web` | AGPL-3.0-only | The review page: held changes, approve, reject, undo, and reviewer sign-in through an OpenID Connect provider. Plain HTML, no scripts. Reads `rowbit-server.yml`. |
 | `rowbit-cli` | AGPL-3.0-only | The `rowbit` binary: `mcp` for agents; `changes`, `show`, `approve`, `reject`, `undo`, `verify` and `serve` (the review page) for people; `policy check`, `ping`. |
 
 Client SDKs, when they exist, will be Apache-2.0 like the policy schema, so platforms can embed them.

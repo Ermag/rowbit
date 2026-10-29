@@ -2,17 +2,19 @@
 //! their rows before and after, and lets a person approve or reject them,
 //! and undo applied ones. No JavaScript.
 //!
-//! Reviewers sign in with the page's password, which `rowbit serve` prints
-//! once when it first starts (or which the operator sets). Sign-in gives an
-//! `HttpOnly` session cookie that carries the reviewer's name; every action
-//! needs that cookie and the session's form token. Being able to reach the
+//! Reviewers sign in through an OpenID Connect provider ([`oidc`]), or, on a
+//! loopback address only, with the page's password, which `rowbit serve`
+//! prints once when it first starts (or which the operator sets). Either
+//! gives the same `HttpOnly` session cookie that carries the reviewer's
+//! identity; every action needs that cookie and the session's form token. Being able to reach the
 //! port is not enough, so another user or an agent on the same host can't
 //! approve. The page also answers only requests addressed to the host it
 //! listens on (against DNS rebinding) and refuses forms from other origins.
 //!
-//! Sessions live in memory and end when the process stops. A shared
-//! password with a typed name is the v0.1 stand-in for sign-in with an
-//! identity provider (OIDC), planned for v0.2.
+//! Sessions live in memory and end when the process stops.
+
+pub mod config;
+pub mod oidc;
 
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -40,12 +42,32 @@ const RECENT: usize = 20;
 /// How long a sign-in lasts.
 const SESSION: Duration = Duration::from_secs(12 * 60 * 60);
 const COOKIE: &str = "rowbit_session";
+/// Brings the browser back from the provider to the login it started.
+const LOGIN_COOKIE: &str = "rowbit_login";
+
+/// How reviewers sign in.
+pub enum SignIn {
+    /// The page's password and a typed name: for one machine only.
+    Password { hash: String },
+    /// An OpenID Connect provider.
+    Oidc(Box<oidc::OidcLogin>),
+}
+
+/// What the review page needs besides the engine.
+pub struct Web {
+    pub sign_in: SignIn,
+    /// The `Host` header values it answers to, such as `127.0.0.1:8080`.
+    pub hosts: Vec<String>,
+    /// Mark cookies `Secure`, behind HTTPS.
+    pub secure: bool,
+}
 
 #[derive(Clone)]
 struct App {
     engine: Arc<Engine>,
     hosts: Arc<Vec<String>>,
-    password: Arc<String>,
+    sign_in: Arc<SignIn>,
+    secure: bool,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     /// Wrong passwords in a row, across all clients. Held for the whole of
     /// a sign-in, so passwords are checked one at a time and each wrong one
@@ -62,14 +84,13 @@ struct Session {
     expires: Instant,
 }
 
-/// The review page as a router. `password_hash` is from [`hash_password`].
-/// `hosts` are the `Host` header values it answers to, such as
-/// `127.0.0.1:8080`.
-pub fn router(engine: Arc<Engine>, password_hash: String, hosts: Vec<String>) -> Router {
+/// The review page as a router.
+pub fn router(engine: Arc<Engine>, web: Web) -> Router {
     let app = App {
         engine,
-        hosts: Arc::new(hosts),
-        password: Arc::new(password_hash),
+        hosts: Arc::new(web.hosts),
+        sign_in: Arc::new(web.sign_in),
+        secure: web.secure,
         sessions: Arc::new(Mutex::new(HashMap::new())),
         failures: Arc::new(tokio::sync::Mutex::new(0)),
     };
@@ -77,6 +98,8 @@ pub fn router(engine: Arc<Engine>, password_hash: String, hosts: Vec<String>) ->
         .route("/", get(index))
         .route("/login", get(login_page).post(login))
         .route("/logout", post(logout))
+        .route("/auth/start", get(auth_start))
+        .route("/auth/callback", get(auth_callback))
         .route("/changes/{id}", get(change_page))
         .route("/changes/{id}/approve", post(approve))
         .route("/changes/{id}/reject", post(reject))
@@ -85,19 +108,16 @@ pub fn router(engine: Arc<Engine>, password_hash: String, hosts: Vec<String>) ->
         .with_state(app)
 }
 
-/// Serves the page on `addr` until the process stops.
-pub async fn serve(
-    engine: Arc<Engine>,
-    password_hash: String,
-    addr: SocketAddr,
-) -> std::io::Result<()> {
+/// Serves the page on `addr` until the process stops. `web.hosts` gains
+/// the address it listens on.
+pub async fn serve(engine: Arc<Engine>, mut web: Web, addr: SocketAddr) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let local = listener.local_addr()?;
-    let mut hosts = vec![local.to_string()];
+    web.hosts.push(local.to_string());
     if local.ip().is_loopback() {
-        hosts.push(format!("localhost:{}", local.port()));
+        web.hosts.push(format!("localhost:{}", local.port()));
     }
-    axum::serve(listener, router(engine, password_hash, hosts)).await
+    axum::serve(listener, router(engine, web)).await
 }
 
 /// A random password for the page: 24 characters from an alphabet without
@@ -185,16 +205,7 @@ async fn guard(
 
 /// The signed-in session, from the cookie.
 fn session(app: &App, headers: &HeaderMap) -> Option<Session> {
-    let id = headers
-        .get_all(header::COOKIE)
-        .iter()
-        .filter_map(|v| v.to_str().ok())
-        .flat_map(|v| v.split(';'))
-        .find_map(|pair| {
-            pair.trim()
-                .strip_prefix(&format!("{COOKIE}="))
-                .map(str::to_owned)
-        })?;
+    let id = cookie(headers, COOKIE)?;
     let mut sessions = app.sessions.lock().unwrap_or_else(|p| p.into_inner());
     sessions.retain(|_, s| s.expires > Instant::now());
     sessions.get(&id).cloned()
@@ -239,7 +250,17 @@ struct LoginForm {
     password: String,
 }
 
-async fn login_page() -> Response {
+async fn login_page(State(app): State<App>) -> Response {
+    if let SignIn::Oidc(login) = &*app.sign_in {
+        return Html(page(
+            "Sign in to Rowbit",
+            &format!(
+                "<h1>Sign in</h1><p><a class=button href=\"/auth/start\">Sign in with {}</a></p>",
+                esc(&login.provider)
+            ),
+        ))
+        .into_response();
+    }
     Html(page(
         "Sign in to Rowbit",
         "<h1>Sign in</h1>\
@@ -261,6 +282,13 @@ async fn login(
     if !same_origin(&app, &headers) {
         return (StatusCode::FORBIDDEN, "sign-in refused").into_response();
     }
+    let SignIn::Password { hash } = &*app.sign_in else {
+        return (
+            StatusCode::NOT_FOUND,
+            "sign in through the identity provider",
+        )
+            .into_response();
+    };
     let name: String = form
         .name
         .trim()
@@ -270,7 +298,7 @@ async fn login(
         .collect();
     // One sign-in at a time, wait included.
     let mut failures = app.failures.lock().await;
-    let password = Arc::clone(&app.password);
+    let password = hash.clone();
     let given = form.password;
     let ok = tokio::task::spawn_blocking(move || password_matches(&password, &given))
         .await
@@ -291,9 +319,16 @@ async fn login(
     }
     *failures = 0;
     drop(failures);
+    let mut response = Redirect::to("/").into_response();
+    start_session(&app, name, &mut response);
+    response
+}
+
+/// Signs `reviewer` in: a new session, and its cookie on `response`.
+fn start_session(app: &App, reviewer: String, response: &mut Response) {
     let id = random_token();
     let session = Session {
-        reviewer: name,
+        reviewer,
         token: random_token(),
         expires: Instant::now() + SESSION,
     };
@@ -302,14 +337,114 @@ async fn login(
         .unwrap_or_else(|p| p.into_inner())
         .insert(id.clone(), session);
     let cookie = format!(
-        "{COOKIE}={id}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
-        SESSION.as_secs()
+        "{COOKIE}={id}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}{}",
+        SESSION.as_secs(),
+        if app.secure { "; Secure" } else { "" }
     );
-    let mut response = Redirect::to("/").into_response();
+    if let Ok(value) = HeaderValue::from_str(&cookie) {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+}
+
+fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .find_map(|pair| {
+            pair.trim()
+                .strip_prefix(name)
+                .and_then(|r| r.strip_prefix('='))
+                .map(str::to_owned)
+        })
+}
+
+/// Sends the browser to the provider, with a cookie that brings it back to
+/// this login. `SameSite=Lax`, since coming back is a cross-site navigation.
+async fn auth_start(State(app): State<App>) -> Response {
+    let SignIn::Oidc(login) = &*app.sign_in else {
+        return Redirect::to("/login").into_response();
+    };
+    let id = random_token();
+    let url = login.start(id.clone());
+    let mut response = Redirect::to(&url).into_response();
+    let cookie = format!(
+        "{LOGIN_COOKIE}={id}; HttpOnly; SameSite=Lax; Path=/auth; Max-Age={}{}",
+        oidc::LOGIN_WINDOW.as_secs(),
+        if app.secure { "; Secure" } else { "" }
+    );
     if let Ok(value) = HeaderValue::from_str(&cookie) {
         response.headers_mut().insert(header::SET_COOKIE, value);
     }
     response
+}
+
+#[derive(Deserialize)]
+struct Callback {
+    state: Option<String>,
+    code: Option<String>,
+    error: Option<String>,
+}
+
+/// Where the provider sends the browser back. On success the session
+/// starts, and a page of our own moves on to the queue: the browser
+/// doesn't send a `SameSite=Strict` cookie on a redirect that began at
+/// another site, but does on a navigation this page starts.
+async fn auth_callback(
+    State(app): State<App>,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<Callback>,
+) -> Response {
+    let SignIn::Oidc(login) = &*app.sign_in else {
+        return Redirect::to("/login").into_response();
+    };
+    let refused = |why: &str| {
+        let mut r = (
+            StatusCode::FORBIDDEN,
+            Html(page(
+                "Not signed in",
+                &format!(
+                    "<p class=error>Sign-in refused: {}</p><p><a href=\"/login\">Start again</a></p>",
+                    esc(why)
+                ),
+            )),
+        )
+            .into_response();
+        r.headers_mut().insert(
+            header::SET_COOKIE,
+            HeaderValue::from_static(
+                "rowbit_login=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0",
+            ),
+        );
+        r
+    };
+    if let Some(error) = q.error {
+        let error: String = error.chars().take(100).collect();
+        return refused(&format!("the provider said {error}"));
+    }
+    let (Some(state), Some(code), Some(id)) = (q.state, q.code, cookie(&headers, LOGIN_COOKIE))
+    else {
+        return refused("this sign-in didn't start here, or took too long; start again");
+    };
+    match login.finish(&id, &state, &code).await {
+        Err(why) => refused(&why),
+        Ok(reviewer) => {
+            let mut response = Html(page(
+                "Signed in",
+                "<meta http-equiv=refresh content=\"0;url=/\"><p>Signed in. <a href=\"/\">Continue</a></p>",
+            ))
+            .into_response();
+            response.headers_mut().insert(
+                header::SET_COOKIE,
+                HeaderValue::from_static(
+                    "rowbit_login=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0",
+                ),
+            );
+            start_session(&app, reviewer.email, &mut response);
+            response
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -658,7 +793,7 @@ table{border-collapse:collapse;width:100%;margin:8px 0}th,td{text-align:left;pad
 td.before{color:#a03030}td.after{color:#17794a}td{white-space:pre-wrap}i.null{color:#59627a}.muted{color:#59627a}.error{color:#a03030}\
 .actions{display:flex;gap:12px;flex-wrap:wrap}.actions form{display:flex;gap:6px}\
 form.login{display:flex;flex-direction:column;gap:10px;max-width:320px}form.login input{font:inherit;padding:4px}\
-button{font:inherit;padding:4px 12px;cursor:pointer}button.approve{background:#2b47c9;color:#fff;border:0;border-radius:4px}\
+button{font:inherit;padding:4px 12px;cursor:pointer}button.approve,a.button{background:#2b47c9;color:#fff;border:0;border-radius:4px}a.button{display:inline-block;padding:6px 14px;text-decoration:none}\
 @media (prefers-color-scheme:dark){body{background:#0d111c;color:#e6e9f2}section{background:#151b2b;border-color:#283149}pre{background:#0d111c}th,td{border-color:#283149}.muted{color:#9aa3bb}}";
 
 /// The statement as Rowbit understood it, without the agent's comments

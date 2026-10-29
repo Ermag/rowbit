@@ -16,6 +16,12 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 
 - The review page's sign-in and buttons work in browsers. The page sent `Referrer-Policy: no-referrer`, which makes browsers send `Origin: null` on the page's own forms, and the origin check refused them. It now sends `same-origin`.
 
+### Signing in
+
+- Reviewers sign in to the review page through an OpenID Connect provider (Google Workspace, Okta, Keycloak, Authentik, GitLab, ...), set in a new `rowbit-server.yml` with `public_url` and `reviewers`. Rowbit uses the code flow with PKCE, checks the ID token, requires a verified email, and lets in only the `emails`, `domains` or `groups` listed. The audit log records the reviewer's email.
+- Secrets in `rowbit-server.yml` are `${VARIABLE}` references to the environment; a literal secret is an error. `rowbit server check` validates the file.
+- Without a provider, the page password still works, but only on a loopback address: `rowbit serve` refuses to listen anywhere else, and with a provider it requires an `https://` `public_url`. (Breaking: v0.1 served the password page on any address with a warning.)
+
 ## 0.1.0 (2026-10-16)
 
 The first working version: an MCP server that previews, checks, holds, applies and undoes writes from AI agents to MariaDB and MySQL.
