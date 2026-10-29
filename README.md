@@ -23,7 +23,7 @@ Rowbit sits between your agents and your database. Agents talk to Rowbit, never 
 - **Rules and humans.** A small YAML file decides whether a write is auto-approved, held for a person, or blocked. Agents can propose changes and check their status. Only people approve.
 - **Apply what you approved.** If the rows changed between preview and approval, nothing is written.
 - **Undo one change.** Before-images are kept per change, so you can roll back one bad write and keep everything else.
-- **Scopes the database enforces.** Per agent, which tables it may read or write at all, and which tables and columns it may never read. Rowbit compiles them into native grants on a database user of the agent's own, so `SELECT *`, views and subqueries can't get around them.
+- **Scopes the database enforces.** Per agent, which tables it may read or write at all, and which tables and columns it may never read. Rowbit compiles them into native grants on a database user of the agent's own, so `SELECT *` and subqueries can't get around them, and views only lend their definer's rights when you name them.
 - **Shadow mode.** Put an agent in front of Rowbit without slowing it down: writes the rules would hold go through, and the log says what would have happened. `rowbit policy test` replays real traffic against new rules before you enforce them.
 - **Review where you are.** A web UI built into the binary, sign-in through your identity provider (OIDC), and Slack or webhook notifications when a change is held.
 - **Audit log.** Every proposed write is recorded with who asked, what the rules decided, who approved it (by verified email) and what it changed, in a hash chain.
