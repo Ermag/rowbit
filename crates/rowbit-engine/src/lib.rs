@@ -1069,15 +1069,9 @@ fn parser_scope_check(
         }
     }
     for t in &tables {
-        let denied: Vec<&String> = scopes
-            .deny_read
-            .columns
-            .iter()
-            .filter(|c| {
-                c.strip_prefix(t.as_str())
-                    .is_some_and(|r| r.starts_with('.'))
-            })
-            .collect();
+        // Without case: on servers whose table names ignore it, `ORDERS`
+        // is `orders` and must find its denies.
+        let denied = scopes.denied_columns(t);
         if denied.is_empty() {
             continue;
         }
@@ -1086,8 +1080,7 @@ fn parser_scope_check(
                 "* includes columns of {t} that {agent} may not read; name the columns"
             ));
         }
-        for c in denied {
-            let column = &c[t.len() + 1..];
+        for column in denied {
             if refs.columns.contains(&column.to_lowercase()) {
                 return Err(format!("{agent} may not read column {column} of {t}"));
             }
@@ -1223,6 +1216,39 @@ mod tests {
         };
         assert_eq!(engine.interrupted().unwrap(), [id]);
         assert_eq!(engine.change(id).unwrap().state, State::Approved);
+    }
+
+    // Found in second review: on a server whose table names ignore case,
+    // naming the table in another case skipped the denied-column check, and
+    // a USING join tested guesses at the column again. The database doesn't
+    // check join columns, so this check is all there is; it needs no server.
+    #[test]
+    fn denied_columns_are_found_whatever_the_case_of_the_table() {
+        let scopes: Scopes = serde_norway::from_str(
+            "read: [shop.*]\nupdate: [shop.notes]\ndeny_read: { columns: [shop.orders.email] }",
+        )
+        .unwrap();
+        for table in ["orders", "ORDERS", "shop.ORDERS", "`Orders`"] {
+            let sql = format!(
+                "SELECT o.id FROM {table} o JOIN (SELECT 'a@example.com' AS email) x USING (EMAIL)"
+            );
+            let refused = parser_scope_check("bot", &scopes, "shop", None, &sql).unwrap_err();
+            assert!(
+                refused.contains("may not read column email"),
+                "{sql}: {refused}"
+            );
+        }
+        let write = "UPDATE notes SET note = (SELECT 'hit' FROM SHOP.Orders o JOIN (SELECT 'a@example.com' AS email) x USING (email) WHERE o.id = 1) WHERE id = 1";
+        let refused = parser_scope_check(
+            "bot",
+            &scopes,
+            "shop",
+            Some((Kind::Update, "shop.notes")),
+            write,
+        )
+        .unwrap_err();
+        assert!(refused.contains("may not read column email"), "{refused}");
+        assert!(parser_scope_check("bot", &scopes, "shop", None, "SELECT id FROM ORDERS").is_ok());
     }
 
     #[test]
