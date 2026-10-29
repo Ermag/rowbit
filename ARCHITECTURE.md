@@ -21,14 +21,14 @@ person ─CLI/web─▶ rowbit ──┘        │
 | `rowbit-store` | AGPL-3.0-only | Change state and the hash-chained audit log, in SQLite. |
 | `rowbit-engine` | AGPL-3.0-only | Runs a proposed change through classify, preview, policy and the store. What surfaces call. |
 | `rowbit-mcp` | AGPL-3.0-only | MCP server: the `query`, `propose_write` and `change_status` tools, over stdio. |
-| `rowbit-web` | AGPL-3.0-only | The review page: held changes, approve, reject, undo, and reviewer sign-in through an OpenID Connect provider. Plain HTML, no scripts. Reads `rowbit-server.yml`. |
+| `rowbit-web` | AGPL-3.0-only | The review UI and its JSON API: held changes with their rows, approve, reject, undo, the log, and reviewer sign-in through an OpenID Connect provider. Reads `rowbit-server.yml`. The UI is a Svelte app in `web/`, built into `crates/rowbit-web/dist` and embedded in the binary. |
 | `rowbit-cli` | AGPL-3.0-only | The `rowbit` binary: `mcp` for agents; `changes`, `show`, `approve`, `reject`, `undo`, `verify` and `serve` (the review page) for people; `policy check`, `ping`. |
 
 Client SDKs, when they exist, will be Apache-2.0 like the policy schema, so platforms can embed them.
 
 ## Stack
 
-Rust (edition 2024), `tokio`, `sqlparser-rs` for SQL classification, `rmcp` for MCP, `axum` for HTTP and the review UI, SQLite for change state and the audit log. `mysql_async` talks to MariaDB and MySQL.
+Rust (edition 2024), `tokio`, `sqlparser-rs` for SQL classification, `rmcp` for MCP, `axum` for HTTP and the review UI's API, Svelte and Vite for the UI itself (built ahead of time, so building Rowbit needs no Node), SQLite for change state and the audit log. `mysql_async` talks to MariaDB and MySQL.
 
 ## Rules every change follows
 
