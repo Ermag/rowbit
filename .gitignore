@@ -28,3 +28,8 @@ placeholders/
 # Rowbit state (change log and previews; holds copies of database rows)
 rowbit.db
 rowbit.db-*
+
+# Test runs
+web/e2e/out/
+web/test-results/
+web/playwright-report/

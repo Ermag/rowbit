@@ -1,0 +1,23 @@
+name: Labels
+
+on:
+  pull_request:
+    types: [opened, reopened, labeled, unlabeled, synchronize]
+
+permissions: {}
+
+jobs:
+  release-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exactly one of breaking, feature, fix, docs, internal
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          found=$(jq -r '[.[] | select(IN("breaking","feature","fix","docs","internal"))] | join(", ")' <<<"$LABELS")
+          count=$(jq '[.[] | select(IN("breaking","feature","fix","docs","internal"))] | length' <<<"$LABELS")
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Give this pull request exactly one of the labels breaking, feature, fix, docs or internal (has: ${found:-none}). Release notes are grouped by it."
+            exit 1
+          fi
+          echo "Release label: $found"

@@ -145,7 +145,10 @@ async fn agents_sign_in_with_their_own_token() {
         .map(|t| t.name.into_owned())
         .collect();
     tools.sort();
-    assert_eq!(tools, ["change_status", "propose_write", "query"]);
+    assert_eq!(
+        tools,
+        ["change_status", "describe_schema", "propose_write", "query"]
+    );
 
     let (failed, text) = call(
         &refund,

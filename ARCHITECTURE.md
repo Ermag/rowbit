@@ -40,3 +40,6 @@ Rust (edition 2024), `tokio`, `sqlparser-rs` for SQL classification, `rmcp` for 
 
 - [Change lifecycle](docs/spec/change-lifecycle.md)
 - [rowbit.yml](docs/spec/policy.md)
+- [rowbit-server.yml](docs/spec/server.md)
+
+The [v0.2 plan](docs/plan/v0.2.md) lists the work in progress.
