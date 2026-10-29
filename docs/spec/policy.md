@@ -114,7 +114,7 @@ The agent's database user is `rowbit_<agent id>` (so scoped agent ids are at mos
 | Scope | Grant |
 |---|---|
 | `read` | `SELECT` on each matching table, and on each matching view that runs with the reader's rights (`SQL SECURITY INVOKER`). |
-| `deny_read.tables` | The table gets no `SELECT`, which turns a database-wide `SELECT` into per-table grants. |
+| `deny_read.tables` | The table gets no grant. |
 | `deny_read.columns` | The table gets column-level `SELECT` on every other column. `SELECT *` on it then fails in the database. |
 | `insert`, `update`, `delete` | `INSERT`, `UPDATE`, `DELETE` on each matching table and invoker view. |
 | `ddl` | `CREATE`, `ALTER`, `DROP` and `INDEX` on the database or on each matching table. |
