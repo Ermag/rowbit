@@ -48,14 +48,6 @@ When it starts serving agents, Rowbit compares each agent's user with what `rowb
 
 Rowbit keeps the agents' users' passwords in its state file, to connect as them. Each of those users can do no more than its agent's scopes allow, which is less than Rowbit's own user. Rowbit's own user should be able to see every table agents' scopes name (it needs `SELECT` on them for previews anyway); a table it can't see makes the agent's grants look larger than `rowbit.yml` says, and the agent is refused.
 
-## Agents' database users
-
-An agent with `scopes` in `rowbit.yml` gets a database user of its own, `rowbit_<agent>`, holding only what its scopes compile to. `rowbit grants apply` creates these users and keeps their grants in line, and needs an administrator who can create users and grant privileges with `GRANT OPTION`. Pass that administrator's URL for the one run, in `ROWBIT_ADMIN_DATABASE_URL` or `--admin-url`; Rowbit never stores it, and Rowbit's own user never needs those privileges. `rowbit grants diff` shows what `apply` would do.
-
-Views run with their definer's rights unless created `SQL SECURITY INVOKER`, so reading one reads whatever its definer can. A scope pattern like `billing.*` therefore covers only invoker views; a definer view is granted only when a scope names it exactly, and `grants diff` says so. A `deny_read` entry that matches no table or column is an error, so a typo can't quietly deny nothing.
-
-Rowbit keeps the agents' users' passwords in its state file, to connect as them. Each of those users can do no more than its agent's scopes allow, which is less than Rowbit's own user.
-
 ## The agent's credentials
 
 None. An agent that has its own connection string can write around Rowbit, and nothing Rowbit does can stop it. Give agents Rowbit's endpoint and nothing else, and keep Rowbit's database password where agents can't read it, including the environment and files of the machine they run on.

@@ -266,14 +266,6 @@ impl Setup {
         let src = std::fs::read_to_string(&self.policy)
             .with_context(|| format!("reading {}", self.policy.display()))?;
         let policy = PolicyFile::from_yaml(&src)?;
-        // Fail closed until enforcement lands: nobody should believe a
-        // scope is enforced when it is not.
-        anyhow::ensure!(
-            !policy.has_scopes(),
-            "{} has scopes, which `rowbit grants` compiles but this build doesn't enforce yet; \
-             remove them to run",
-            self.policy.display()
-        );
         let database = mysql_database(&self.url)?;
         let adapter = rowbit_mysql::MySqlAdapter::new(&self.url)?;
         let store = Store::open(&self.store)
