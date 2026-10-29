@@ -106,6 +106,55 @@ pub struct Change {
     pub created_at_ms: i64,
 }
 
+/// A notification to queue with a transition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewDelivery {
+    /// The `notify` target's name in `rowbit-server.yml`.
+    pub target: String,
+    /// The same across retries, so receivers can drop duplicates.
+    pub delivery: String,
+    /// JSON, as the target is sent it (before any reformatting).
+    pub payload: String,
+}
+
+/// A queued notification. Not part of the audit log's hash chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Delivery {
+    pub id: i64,
+    pub change_id: ChangeId,
+    pub target: String,
+    pub delivery: String,
+    pub payload: String,
+    /// `pending`, `delivered` or `failed`.
+    pub state: String,
+    pub attempts: i64,
+    pub last_error: Option<String>,
+    pub created_at_ms: i64,
+    pub done_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeliveryOutcome {
+    Delivered,
+    Retry { error: String, retry_in_ms: i64 },
+    Failed { error: String },
+}
+
+fn delivery_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Delivery> {
+    Ok(Delivery {
+        id: r.get(0)?,
+        change_id: r.get(1)?,
+        target: r.get(2)?,
+        delivery: r.get(3)?,
+        payload: r.get(4)?,
+        state: r.get(5)?,
+        attempts: r.get(6)?,
+        last_error: r.get(7)?,
+        created_at_ms: r.get(8)?,
+        done_at_ms: r.get(9)?,
+    })
+}
+
 /// One audit log entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AuditEvent {
@@ -200,7 +249,22 @@ impl Store {
              CREATE TABLE IF NOT EXISTS settings (
                  key TEXT PRIMARY KEY,
                  value TEXT NOT NULL
-             );",
+             );
+             CREATE TABLE IF NOT EXISTS deliveries (
+                 id INTEGER PRIMARY KEY,
+                 change_id INTEGER NOT NULL REFERENCES changes (id),
+                 target TEXT NOT NULL,
+                 delivery TEXT NOT NULL,
+                 payload TEXT NOT NULL,
+                 state TEXT NOT NULL,
+                 attempts INTEGER NOT NULL DEFAULT 0,
+                 next_at_ms INTEGER NOT NULL,
+                 lease_until_ms INTEGER NOT NULL DEFAULT 0,
+                 last_error TEXT,
+                 created_at_ms INTEGER NOT NULL,
+                 done_at_ms INTEGER
+             );
+             CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries (state, next_at_ms);",
         )?;
         Ok(Store { conn })
     }
@@ -284,10 +348,23 @@ impl Store {
         actor: &Actor,
         reviewed: Option<&str>,
     ) -> Result<State, StoreError> {
+        self.transition_notifying(id, event, actor, reviewed, &[])
+    }
+
+    /// [`Store::transition`], and queues `notify` in the same transaction,
+    /// so a notification is never lost to a crash after the state changed.
+    pub fn transition_notifying(
+        &mut self,
+        id: ChangeId,
+        event: &Event,
+        actor: &Actor,
+        reviewed: Option<&str>,
+        notify: &[NewDelivery],
+    ) -> Result<State, StoreError> {
         if matches!(event, Event::ApplySucceeded) {
             return Err(StoreError::ApplyNeedsRecord);
         }
-        self.transition_with(id, event, actor, reviewed, None)
+        self.transition_with(id, event, actor, reviewed, None, notify)
     }
 
     /// Records a successful apply (`ApplySucceeded`, by the system) together
@@ -299,6 +376,7 @@ impl Store {
             &Actor::System,
             None,
             Some(applied.to_canonical_json()),
+            &[],
         )
     }
 
@@ -309,6 +387,7 @@ impl Store {
         actor: &Actor,
         reviewed: Option<&str>,
         applied: Option<Vec<u8>>,
+        notify: &[NewDelivery],
     ) -> Result<State, StoreError> {
         let tx = self
             .conn
@@ -365,8 +444,79 @@ impl Store {
             },
             at,
         )?;
+        for d in notify {
+            tx.execute(
+                "INSERT INTO deliveries (change_id, target, delivery, payload, state, next_at_ms, created_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?5)",
+                params![id, d.target, d.delivery, d.payload, at],
+            )?;
+        }
         tx.commit()?;
         Ok(to)
+    }
+
+    /// Up to `limit` notifications due now, each leased to the caller for
+    /// `lease_ms` so another sender doesn't take it meanwhile.
+    pub fn claim_deliveries(
+        &mut self,
+        limit: usize,
+        lease_ms: i64,
+    ) -> Result<Vec<Delivery>, StoreError> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = now_ms();
+        let due: Vec<Delivery> = {
+            let mut stmt = tx.prepare(
+                "SELECT id, change_id, target, delivery, payload, state, attempts, last_error, created_at_ms, done_at_ms
+                 FROM deliveries WHERE state = 'pending' AND next_at_ms <= ?1 AND lease_until_ms <= ?1
+                 ORDER BY next_at_ms LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![now, limit as i64], delivery_row)?;
+            rows.collect::<Result<_, _>>()?
+        };
+        for d in &due {
+            tx.execute(
+                "UPDATE deliveries SET lease_until_ms = ?1 WHERE id = ?2",
+                params![now + lease_ms, d.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(due)
+    }
+
+    /// Records one attempt to send a notification: delivered, given up on,
+    /// or to try again after `retry_in_ms`.
+    pub fn record_delivery(&mut self, id: i64, outcome: DeliveryOutcome) -> Result<(), StoreError> {
+        let now = now_ms();
+        match outcome {
+            DeliveryOutcome::Delivered => self.conn.execute(
+                "UPDATE deliveries SET state = 'delivered', attempts = attempts + 1, last_error = NULL,
+                 done_at_ms = ?1, lease_until_ms = 0 WHERE id = ?2",
+                params![now, id],
+            )?,
+            DeliveryOutcome::Retry { error, retry_in_ms } => self.conn.execute(
+                "UPDATE deliveries SET attempts = attempts + 1, last_error = ?1, next_at_ms = ?2,
+                 lease_until_ms = 0 WHERE id = ?3",
+                params![error, now + retry_in_ms, id],
+            )?,
+            DeliveryOutcome::Failed { error } => self.conn.execute(
+                "UPDATE deliveries SET state = 'failed', attempts = attempts + 1, last_error = ?1,
+                 done_at_ms = ?2, lease_until_ms = 0 WHERE id = ?3",
+                params![error, now, id],
+            )?,
+        };
+        Ok(())
+    }
+
+    /// The newest notifications, newest first.
+    pub fn deliveries(&self, limit: usize) -> Result<Vec<Delivery>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, change_id, target, delivery, payload, state, attempts, last_error, created_at_ms, done_at_ms
+             FROM deliveries ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], delivery_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Logs something about a change without moving it: an event whose

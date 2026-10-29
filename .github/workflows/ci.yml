@@ -57,6 +57,7 @@ jobs:
       - name: Check the example server settings
         env:
           ROWBIT_OIDC_CLIENT_SECRET: not-a-real-secret
+          ROWBIT_SLACK_WEBHOOK_URL: https://hooks.slack.com/services/not/a/real-url
         run: cargo run --locked -q -p rowbit-cli -- server check --config examples/rowbit-server.yml
       - uses: actions/setup-node@v4
         with:

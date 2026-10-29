@@ -46,4 +46,5 @@ export const approve = (id, review, rows) => call('POST', `/api/changes/${id}/ap
 export const reject = (id, reason) => call('POST', `/api/changes/${id}/reject`, { reason });
 export const undo = (id) => call('POST', `/api/changes/${id}/undo`, {});
 export const verify = () => call('GET', '/api/verify');
+export const deliveries = () => call('GET', '/api/deliveries');
 export const logout = () => call('POST', '/api/logout', {});

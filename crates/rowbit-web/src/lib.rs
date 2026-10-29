@@ -16,6 +16,7 @@
 
 mod api;
 pub mod config;
+pub mod notify;
 pub mod oidc;
 
 use std::collections::HashMap;
@@ -113,6 +114,7 @@ pub fn router(engine: Arc<Engine>, web: Web) -> Router {
         .route("/api/changes/{id}/reject", post(api::reject))
         .route("/api/changes/{id}/undo", post(api::undo))
         .route("/api/verify", get(api::verify))
+        .route("/api/deliveries", get(api::deliveries))
         .layer(axum::middleware::from_fn_with_state(app.clone(), guard))
         .with_state(app)
 }

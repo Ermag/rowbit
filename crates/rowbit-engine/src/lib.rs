@@ -24,7 +24,8 @@ use rowbit_policy::{
     ChangeFacts, Decision, Mode, Operation, PolicyFile, Scopes, StatementKind, Verdict, agent_user,
     evaluate,
 };
-use rowbit_store::{AuditEvent, Change, ChangeId, Review, Store, StoreError};
+use rowbit_store::{AuditEvent, Change, ChangeId, NewDelivery, Review, Store, StoreError};
+pub use rowbit_store::{Delivery, DeliveryOutcome};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -331,7 +332,23 @@ impl Engine {
             // Kept for blocked changes too, so the log shows what was refused.
             let mut store = self.store();
             store.set_review(id, &review)?;
-            store.transition(id, &event, &actor, None)?;
+            let notify = match &event {
+                Event::PolicyHeld { reason } => {
+                    let held = Held {
+                        id,
+                        agent,
+                        database,
+                        table: &facts.table,
+                        statement: statement_name(facts.statement),
+                        rows: (facts.statement != StatementKind::Ddl).then_some(facts.rows),
+                        rule: rule.as_deref(),
+                        reason,
+                    };
+                    notifications(&store, &held)
+                }
+                _ => Vec::new(),
+            };
+            store.transition_notifying(id, &event, &actor, None, &notify)?;
         }
         if decision == Decision::Allow || shadow {
             self.apply(id).await?;
@@ -490,6 +507,32 @@ impl Engine {
         }
         ids.sort_unstable();
         Ok(ids)
+    }
+
+    /// Where held-change notifications go, for every process that shares
+    /// the state file. `rowbit serve` sets it from `rowbit-server.yml`.
+    pub fn set_notify(&self, setting: &NotifySetting) -> Result<(), EngineError> {
+        let json = serde_json::to_string(setting).expect("a setting always serializes");
+        Ok(self.store().set_setting(NOTIFY_SETTING, &json)?)
+    }
+
+    /// Notifications due now, leased to the caller; see
+    /// [`Store::claim_deliveries`].
+    pub fn claim_deliveries(
+        &self,
+        limit: usize,
+        lease_ms: i64,
+    ) -> Result<Vec<Delivery>, EngineError> {
+        Ok(self.store().claim_deliveries(limit, lease_ms)?)
+    }
+
+    pub fn record_delivery(&self, id: i64, outcome: DeliveryOutcome) -> Result<(), EngineError> {
+        Ok(self.store().record_delivery(id, outcome)?)
+    }
+
+    /// The newest notifications, newest first.
+    pub fn deliveries(&self, limit: usize) -> Result<Vec<Delivery>, EngineError> {
+        Ok(self.store().deliveries(limit)?)
     }
 
     /// Checks the whole audit log; see [`Store::verify`].
@@ -825,6 +868,139 @@ pub fn recorded_decision(history: &[AuditEvent]) -> Option<Decision> {
     })
 }
 
+/// Where `rowbit serve` said to send held-change notifications, kept in the
+/// state file so every process that proposes changes queues them.
+pub const NOTIFY_SETTING: &str = "notify.targets";
+
+/// What `rowbit serve` keeps under [`NOTIFY_SETTING`]. No secrets: those
+/// stay in its memory.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NotifySetting {
+    /// The UI's address, for links to a change; `None` without `public_url`.
+    pub review_url: Option<String>,
+    pub targets: Vec<NotifyTarget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NotifyTarget {
+    pub name: String,
+    /// Only changes from these agents; every agent if `None`.
+    pub agents: Option<Vec<String>>,
+}
+
+struct Held<'a> {
+    id: ChangeId,
+    agent: &'a str,
+    database: &'a str,
+    table: &'a str,
+    statement: &'static str,
+    rows: Option<u64>,
+    rule: Option<&'a str>,
+    reason: &'a str,
+}
+
+fn statement_name(k: StatementKind) -> &'static str {
+    match k {
+        StatementKind::Insert => "insert",
+        StatementKind::Update => "update",
+        StatementKind::Delete => "delete",
+        StatementKind::Ddl => "ddl",
+    }
+}
+
+/// The notifications to queue for a held change: one per matching target.
+/// What they carry is in "Notifications" in `docs/spec/server.md`: never
+/// row values or the statement's text.
+fn notifications(store: &Store, h: &Held<'_>) -> Vec<NewDelivery> {
+    let Some(setting) = store
+        .setting(NOTIFY_SETTING)
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str::<NotifySetting>(&s).ok())
+    else {
+        return Vec::new();
+    };
+    setting
+        .targets
+        .iter()
+        .filter(|t| {
+            t.agents
+                .as_ref()
+                .is_none_or(|a| a.iter().any(|a| a == h.agent))
+        })
+        .map(|t| {
+            let delivery = uuid();
+            let payload = serde_json::json!({
+                "event": "change.held",
+                "delivery": delivery,
+                "time": rfc3339_now(),
+                "change": {
+                    "id": h.id,
+                    "agent": h.agent,
+                    "database": h.database,
+                    "table": h.table,
+                    "statement": h.statement,
+                    "rows": h.rows,
+                    "rule": h.rule,
+                    "reason": h.reason,
+                    "url": setting.review_url.as_ref().map(|u| format!("{u}/#/changes/{}", h.id)),
+                },
+            });
+            NewDelivery {
+                target: t.name.clone(),
+                delivery,
+                payload: payload.to_string(),
+            }
+        })
+        .collect()
+}
+
+/// A random version 4 UUID.
+fn uuid() -> String {
+    let mut b = [0u8; 16];
+    getrandom::fill(&mut b).expect("the system has a random source");
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &h[..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..]
+    )
+}
+
+/// Now, in UTC, as `2026-11-20T14:03:11Z`.
+fn rfc3339_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    rfc3339(secs)
+}
+
+fn rfc3339(secs: i64) -> String {
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Days to a civil date (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
 fn qualified(t: &TableName, database: &str) -> String {
     format!("{}.{}", t.database.as_deref().unwrap_or(database), t.table)
 }
@@ -1062,6 +1238,17 @@ mod tests {
         .unwrap_err();
         assert!(refused.contains("may not read column email"), "{refused}");
         assert!(parser_scope_check("bot", &scopes, "shop", None, "SELECT id FROM ORDERS").is_ok());
+    }
+
+    #[test]
+    fn times_and_ids_are_well_formed() {
+        assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
+        assert_eq!(rfc3339(1_795_701_791), "2026-11-26T14:03:11Z");
+        assert_eq!(rfc3339(951_782_400), "2000-02-29T00:00:00Z");
+        let u = uuid();
+        assert_eq!(u.len(), 36);
+        assert_eq!(&u[14..15], "4");
+        assert_ne!(u, uuid());
     }
 
     #[test]

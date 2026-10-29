@@ -19,3 +19,15 @@ reviewers:
     domains: [example.com]
     emails: [contractor@elsewhere.dev]
     # groups: [db-reviewers]
+
+# Announce held changes. Slack's incoming webhook URL is a secret; a
+# webhook is signed with its own secret (see docs/spec/server.md).
+notify:
+  - name: billing-slack
+    kind: slack
+    url: ${ROWBIT_SLACK_WEBHOOK_URL}
+    agents: [refund-bot]
+  # - name: on-call
+  #   kind: webhook
+  #   url: https://hooks.example.com/rowbit
+  #   secret: ${ROWBIT_WEBHOOK_SECRET}
