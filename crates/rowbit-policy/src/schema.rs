@@ -30,6 +30,9 @@ pub struct AgentPolicy {
     /// privileges, as in v0.1.
     #[serde(default)]
     pub scopes: Option<Scopes>,
+    /// `shadow` records what rules would hold or block instead of doing it.
+    #[serde(default)]
+    pub mode: Mode,
 }
 
 fn default_decision() -> Decision {
@@ -102,6 +105,15 @@ pub enum StatementKind {
     Update,
     Delete,
     Ddl,
+}
+
+/// Whether an agent's rules are enforced. See "Shadow mode" in the spec.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    #[default]
+    Enforce,
+    Shadow,
 }
 
 /// Ordered from least to most restrictive, so `max` picks the stricter one.

@@ -10,7 +10,7 @@ mod scopes;
 
 pub use eval::{ChangeFacts, Verdict, evaluate, glob};
 pub use schema::{
-    AgentPolicy, Decision, Match, OneOrMany, PolicyFile, Range, Rule, StatementKind, SumMatch,
+    AgentPolicy, Decision, Match, Mode, OneOrMany, PolicyFile, Range, Rule, StatementKind, SumMatch,
 };
 pub use scopes::{AGENT_USER_PREFIX, DenyRead, MAX_SCOPED_AGENT_ID, Operation, Scopes, agent_user};
 

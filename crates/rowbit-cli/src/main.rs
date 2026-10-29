@@ -59,6 +59,10 @@ enum Command {
         /// Only changes in this state: held, applied, rejected, ...
         #[arg(long)]
         state: Option<String>,
+        /// Only changes from agents in shadow mode that a rule would have
+        /// held or blocked
+        #[arg(long)]
+        shadowed: bool,
         #[command(flatten)]
         store: StoreArgs,
     },
@@ -285,6 +289,14 @@ impl Setup {
     }
 }
 
+fn decision_name(d: rowbit_policy::Decision) -> &'static str {
+    match d {
+        rowbit_policy::Decision::Allow => "allowed",
+        rowbit_policy::Decision::Hold => "held",
+        rowbit_policy::Decision::Block => "blocked",
+    }
+}
+
 /// Checks scoped agents' database users, and tells the operator what is
 /// wrong. Agents that fail are refused, not the whole server.
 async fn check_scopes(engine: &RowbitEngine) {
@@ -370,6 +382,17 @@ enum PolicyCommand {
         #[arg(default_value = "rowbit.yml")]
         path: PathBuf,
     },
+    /// Replay the changes Rowbit has recorded against a policy file, and
+    /// list every decision that would differ
+    ///
+    /// Uses each change's stored preview, so it needs no database. Scopes
+    /// aren't replayed: they need the database's own check.
+    Test {
+        /// The policy to try
+        path: PathBuf,
+        #[command(flatten)]
+        store: StoreArgs,
+    },
 }
 
 #[tokio::main]
@@ -390,6 +413,51 @@ async fn main() -> anyhow::Result<()> {
             for warning in policy.warnings() {
                 println!("warning: {warning}");
             }
+        }
+        Command::Policy {
+            command: PolicyCommand::Test { path, store },
+        } => {
+            let src = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let policy = PolicyFile::from_yaml(&src)?;
+            let store = store.open()?;
+            let mut ids = Vec::new();
+            for state in State::ALL {
+                ids.extend(store.list(state)?);
+            }
+            ids.sort_unstable();
+            let (mut checked, mut differ) = (0, 0);
+            for id in ids {
+                let change = store.get(id)?;
+                let Some(was) = rowbit_engine::recorded_decision(&store.events(id)?) else {
+                    continue;
+                };
+                let Some(now) = rowbit_engine::replay(&policy, &change) else {
+                    continue;
+                };
+                checked += 1;
+                if now.decision == was {
+                    continue;
+                }
+                differ += 1;
+                let by = now.rule.map(|r| format!("rule {r}")).unwrap_or_else(|| {
+                    if now.floor {
+                        "a floor".into()
+                    } else {
+                        "the default".into()
+                    }
+                });
+                println!(
+                    "{}  was {}, would be {} by {by}",
+                    review::line(&change),
+                    decision_name(was),
+                    decision_name(now.decision)
+                );
+            }
+            println!(
+                "{checked} recorded change(s) replayed against {}: {differ} would be decided differently",
+                path.display()
+            );
         }
         Command::Mcp { agent, setup } => {
             let (engine, database) = setup.engine()?;
@@ -417,7 +485,11 @@ async fn main() -> anyhow::Result<()> {
             let status = engine.propose(&agent, &database, &sql).await?;
             println!("{}", rowbit_mcp::status_json(&status));
         }
-        Command::Changes { state, store } => {
+        Command::Changes {
+            state,
+            shadowed,
+            store,
+        } => {
             let store = store.open()?;
             let states = match state {
                 Some(s) => vec![State::parse(&s).with_context(|| format!("unknown state {s}"))?],
@@ -429,7 +501,20 @@ async fn main() -> anyhow::Result<()> {
             }
             ids.sort_unstable();
             for id in ids {
-                println!("{}", review::line(&store.get(id)?));
+                let events = store.events(id)?;
+                let shadow = events.iter().find(|e| e.event == "PolicyShadowed");
+                if shadowed && shadow.is_none() {
+                    continue;
+                }
+                let line = review::line(&store.get(id)?);
+                match shadow {
+                    Some(e) if shadowed => println!(
+                        "{line}  {} ({})",
+                        rowbit_core::text::reveal(e.detail.as_deref().unwrap_or_default()),
+                        rowbit_core::text::reveal(&e.actor)
+                    ),
+                    _ => println!("{line}"),
+                }
             }
         }
         Command::Show { id, all, store } => {

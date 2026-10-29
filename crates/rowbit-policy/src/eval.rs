@@ -27,6 +27,9 @@ pub struct Verdict {
     /// The rule that decided, or `None` for the agent default or a floor.
     pub rule: Option<String>,
     pub reason: Option<String>,
+    /// Decided by one of Rowbit's floors rather than the agent's rules.
+    /// Shadow mode never overrides a floor.
+    pub floor: bool,
 }
 
 impl Verdict {
@@ -35,6 +38,7 @@ impl Verdict {
             decision,
             rule: None,
             reason: Some(reason.to_owned()),
+            floor: true,
         }
     }
 }
@@ -55,6 +59,7 @@ pub fn evaluate(policy: &PolicyFile, agent: &str, facts: &ChangeFacts) -> Verdic
         decision: agent_policy.default,
         rule: None,
         reason: Some("no rule matched".to_owned()),
+        floor: false,
     };
     for rule in &agent_policy.rules {
         match matches(&rule.when, facts) {
@@ -63,6 +68,7 @@ pub fn evaluate(policy: &PolicyFile, agent: &str, facts: &ChangeFacts) -> Verdic
                     decision: rule.then,
                     rule: Some(rule.name.clone()),
                     reason: rule.reason.clone(),
+                    floor: false,
                 };
                 break;
             }
@@ -72,6 +78,7 @@ pub fn evaluate(policy: &PolicyFile, agent: &str, facts: &ChangeFacts) -> Verdic
                     decision: Decision::Block,
                     rule: Some(rule.name.clone()),
                     reason: Some(format!("preview did not compute the sum of {missing}")),
+                    floor: false,
                 };
             }
         }
@@ -271,6 +278,23 @@ mod tests {
     }
 
     #[test]
+    fn shadow_mode_is_per_agent() {
+        let p = PolicyFile::from_yaml("version: 0\nagents:\n  a:\n    mode: shadow\n  b: {}\n")
+            .unwrap();
+        assert_eq!(p.agents["a"].mode, crate::Mode::Shadow);
+        assert_eq!(p.agents["b"].mode, crate::Mode::Enforce);
+    }
+
+    #[test]
+    fn floors_say_they_are_floors() {
+        let mut facts = refund_update(1, 1.0);
+        facts.has_primary_key = false;
+        assert!(evaluate(&example(), "refund-bot", &facts).floor);
+        assert!(!evaluate(&example(), "refund-bot", &refund_update(1, 1.0)).floor);
+        assert!(evaluate(&example(), "stranger", &refund_update(1, 1.0)).floor);
+    }
+
+    #[test]
     fn invalid_files_are_rejected() {
         let bad = [
             ("version: 1\n", "unsupported version"),
@@ -310,6 +334,10 @@ mod tests {
             (
                 "version: 0\nagents:\n  bot:\n    rules:\n      - {name: a, then: hold, when: {sum: {column: amount}}}\n",
                 "sum needs",
+            ),
+            (
+                "version: 0\nagents:\n  bot:\n    mode: dry-run\n",
+                "unknown variant",
             ),
         ];
         for (src, needle) in bad {

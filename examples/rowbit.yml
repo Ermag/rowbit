@@ -31,6 +31,9 @@ agents:
 
   support-bot:
     description: Updates ticket status and notes.
+    # Rules are logged, not enforced, while the team tunes them: writes go
+    # through, and the log says what would have been held or blocked.
+    mode: shadow
     rules:
       - name: tickets
         when:
