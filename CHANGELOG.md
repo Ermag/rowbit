@@ -2,6 +2,12 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
+## Unreleased
+
+### Fixes
+
+- The review page's sign-in and buttons work in browsers. The page sent `Referrer-Policy: no-referrer`, which makes browsers send `Origin: null` on the page's own forms, and the origin check refused them. It now sends `same-origin`.
+
 ## 0.1.0 (2026-10-16)
 
 The first working version: an MCP server that previews, checks, holds, applies and undoes writes from AI agents to MariaDB and MySQL.
