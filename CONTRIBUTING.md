@@ -38,6 +38,20 @@ git rebase --signoff origin/main
 git push --force-with-lease
 ```
 
+## Labels
+
+Every pull request carries exactly one of these, which groups it in the release notes. A maintainer can set it if you can't.
+
+| Label | For |
+|---|---|
+| `breaking` | Anything that makes an existing `rowbit.yml`, command, tool or deployment stop working or change meaning |
+| `feature` | New behaviour |
+| `fix` | A bug fix |
+| `docs` | Documentation only |
+| `internal` | CI, refactoring, dependencies; left out of the release notes |
+
+Issues labelled `good first issue` are small and self-contained; `help wanted` marks ones we'd welcome help on.
+
 ## Licenses
 
 The server crates are AGPL-3.0-only. `rowbit-policy` (the `rowbit.yml` schema) and future client SDKs are Apache-2.0. Contributions are accepted under the license of the crate they touch.
