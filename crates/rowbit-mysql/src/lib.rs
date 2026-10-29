@@ -2,6 +2,7 @@
 //! so one adapter serves both and tells them apart by the server version.
 
 mod apply;
+pub mod grants;
 mod preview;
 mod query;
 pub mod statement;
