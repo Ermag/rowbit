@@ -13,6 +13,9 @@ pub struct TableInfo {
     pub database: String,
     pub name: String,
     pub columns: Vec<ColumnInfo>,
+    /// A view that runs with its definer's rights (not `SQL SECURITY
+    /// INVOKER`).
+    pub definer_view: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +55,7 @@ impl MySqlAdapter {
                         database: db.clone(),
                         name: table,
                         columns: Vec::new(),
+                        definer_view: false,
                     });
                 }
                 if let Some(t) = out.last_mut() {
@@ -62,6 +66,21 @@ impl MySqlAdapter {
                         primary_key: key == "PRI",
                     });
                 }
+            }
+        }
+        for db in databases {
+            let views: Vec<String> = conn
+                .exec(
+                    "SELECT TABLE_NAME FROM information_schema.VIEWS \
+                     WHERE TABLE_SCHEMA = ? AND SECURITY_TYPE <> 'INVOKER'",
+                    (db,),
+                )
+                .await?;
+            for t in out
+                .iter_mut()
+                .filter(|t| t.database == *db && views.contains(&t.name))
+            {
+                t.definer_view = true;
             }
         }
         let _ = conn.disconnect().await;
@@ -77,6 +96,11 @@ pub fn catalog(tables: &[TableInfo]) -> Catalog {
             (t.database.clone(), t.name.clone()),
             t.columns.iter().map(|c| c.name.clone()).collect(),
         );
+        if t.definer_view {
+            catalog
+                .definer_views
+                .insert((t.database.clone(), t.name.clone()));
+        }
     }
     catalog
 }

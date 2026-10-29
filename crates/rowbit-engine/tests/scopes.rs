@@ -229,6 +229,29 @@ async fn scopes_hold_against_an_agent(var: &str, prefix: &str) {
         let reason = s.query(&sql).await.unwrap_err();
         assert!(reason.contains("outside"), "{sql}: {reason}");
     }
+    // Found in review: the database doesn't check column privileges on join
+    // columns, so USING and NATURAL JOIN tested guesses at a denied column.
+    for (sql, why) in [
+        (
+            format!(
+                "SELECT o.id FROM {orders} o JOIN (SELECT 'a@example.com' AS email) x USING (email)"
+            ),
+            "may not read column email",
+        ),
+        (
+            format!(
+                "SELECT o.id FROM {orders} o JOIN (SELECT 'a@example.com' AS EMAIL) x USING (EMAIL)"
+            ),
+            "may not read column email",
+        ),
+        (
+            format!("SELECT id FROM {orders} NATURAL JOIN (SELECT 'a@example.com' AS email) x"),
+            "NATURAL JOIN",
+        ),
+    ] {
+        let reason = s.query(&sql).await.unwrap_err();
+        assert!(reason.contains(why), "{sql}: {reason}");
+    }
 
     // Writes: in scope it applies; reading out of scope, or another
     // operation, is blocked by policy:scope before any preview.
@@ -243,6 +266,12 @@ async fn scopes_hold_against_an_agent(var: &str, prefix: &str) {
         format!("UPDATE {orders} SET status = (SELECT number FROM {view} LIMIT 1) WHERE id = 2"),
         // Copying a denied column into a readable one.
         format!("UPDATE {orders} SET status = email WHERE id = 2"),
+        format!(
+            "UPDATE {orders} SET status = (SELECT x.g FROM {orders} c JOIN (SELECT 'b@example.com' AS email, 'hit' AS g) x USING (email) WHERE c.id = 2) WHERE id = 1"
+        ),
+        format!(
+            "UPDATE {orders} SET status = (SELECT 'hit' FROM {orders} c NATURAL JOIN (SELECT 'b@example.com' AS email) x LIMIT 1) WHERE id = 1"
+        ),
         format!("UPDATE {orders} SET status = 'x' WHERE email LIKE 'b%'"),
         format!("DELETE FROM {orders} WHERE id = 2"),
         format!(
@@ -381,4 +410,93 @@ async fn the_database_has_the_last_word(var: &str, prefix: &str) {
     );
     assert_eq!(s.query(&format!("SELECT id FROM {orders}")).await, Ok(3));
     s.cleanup().await;
+}
+
+on_both!(patterns_dont_reach_through_definer_views, "sc_view");
+async fn patterns_dont_reach_through_definer_views(var: &str, prefix: &str) {
+    let Some(url) = url(var) else {
+        return;
+    };
+    let admin_url = url.replacen("//rowbit:rowbit@", "//root:rowbit@", 1);
+    let mut admin = mysql_async::Conn::from_url(&admin_url).await.unwrap();
+    let agent = prefix.replace('_', "-");
+    let (orders, cards, view) = (
+        format!("{prefix}_orders"),
+        format!("{prefix}_cards"),
+        format!("{prefix}_report"),
+    );
+    admin
+        .query_drop(format!(
+            "USE rowbit_test; DROP VIEW IF EXISTS {view}; DROP TABLE IF EXISTS {orders}, {cards}; \
+             CREATE TABLE {orders} (id INT PRIMARY KEY, email VARCHAR(50) NOT NULL) ENGINE=InnoDB; \
+             CREATE TABLE {cards} (id INT PRIMARY KEY, number VARCHAR(20) NOT NULL) ENGINE=InnoDB; \
+             CREATE VIEW {view} AS SELECT o.id, o.email, c.number FROM {orders} o JOIN {cards} c USING (id); \
+             INSERT INTO {orders} VALUES (1, 'a@example.com'); INSERT INTO {cards} VALUES (1, '4111')"
+        ))
+        .await
+        .unwrap();
+    let yaml = |deny_column: &str| {
+        format!(
+            "version: 0\nagents:\n  {agent}:\n    scopes:\n      read: [rowbit_test.{prefix}_*]\n      deny_read: {{ tables: [rowbit_test.{cards}], columns: [rowbit_test.{orders}.{deny_column}] }}\n"
+        )
+    };
+    let policy = PolicyFile::from_yaml(&yaml("email")).unwrap();
+    let account = Account {
+        user: format!("rowbit_{agent}"),
+        host: "%".into(),
+    };
+    grants::drop_user(&mut admin, &account).await.unwrap();
+    let password = password();
+    grants::create_user(&mut admin, &account, &password)
+        .await
+        .unwrap();
+    let scopes = policy.agents[&agent].scopes.clone().unwrap();
+    let catalog = grants::Catalog::read(&mut admin, &grants::databases(&scopes))
+        .await
+        .unwrap();
+    let compiled = grants::compile(&scopes, &catalog);
+    for sql in Diff::between(&compiled.grants, &Default::default()).statements(&account) {
+        admin.query_drop(&sql).await.unwrap();
+    }
+    let engine = |policy: PolicyFile| {
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .set_setting(&format!("agent.{agent}.password"), &password)
+            .unwrap();
+        Engine::new(MySqlAdapter::new(&url).unwrap(), policy, store)
+    };
+
+    let e = engine(policy);
+    assert!(e.check_scopes().await.is_empty());
+    // The view reads denied data with its definer's rights, so the pattern
+    // doesn't cover it: the database refuses it.
+    for sql in [
+        format!("SELECT number FROM {view}"),
+        format!("SELECT email FROM {view}"),
+    ] {
+        assert!(e.query(&agent, "rowbit_test", &sql).await.is_err(), "{sql}");
+    }
+    let tables = e.describe(&agent, "rowbit_test").await.unwrap();
+    let names: Vec<&str> = tables.iter().map(|t| t.table.name.as_str()).collect();
+    assert_eq!(names, [orders.as_str()], "no cards, no definer view");
+
+    // A deny entry that matches no column would deny nothing: the agent is
+    // refused rather than served without it.
+    let typo = engine(PolicyFile::from_yaml(&yaml("emial")).unwrap());
+    let notes = typo.check_scopes().await;
+    assert!(
+        notes.len() == 1 && notes[0].contains("matches no column"),
+        "{notes:?}"
+    );
+    assert!(
+        typo.query(&agent, "rowbit_test", &format!("SELECT id FROM {orders}"))
+            .await
+            .is_err()
+    );
+
+    grants::drop_user(&mut admin, &account).await.unwrap();
+    admin
+        .query_drop(format!("DROP VIEW {view}; DROP TABLE {orders}, {cards}"))
+        .await
+        .unwrap();
 }

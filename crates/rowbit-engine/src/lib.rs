@@ -178,6 +178,9 @@ impl Engine {
                 )
             })?;
         let compiled = grants::compile(scopes, &schema::catalog(&tables));
+        if let Some(error) = compiled.errors.first() {
+            return Err(format!("rowbit.yml's scopes: {error}"));
+        }
         let diff = Diff::between(&compiled.grants, &current.grants);
         if let Some(extra) = diff.extra.iter().next() {
             return Err(format!(
@@ -814,9 +817,11 @@ impl Engine {
             .into_iter()
             .filter_map(|mut table| {
                 let name = format!("{}.{}", table.database, table.name);
+                // As compiled: a definer view only when named exactly.
+                let named = |op: Operation| scopes.patterns(op).contains(&name);
                 let operations: Vec<Operation> = Operation::ALL
                     .into_iter()
-                    .filter(|op| scopes.allows(*op, &name))
+                    .filter(|op| scopes.allows(*op, &name) && (!table.definer_view || named(*op)))
                     .collect();
                 if operations.is_empty() {
                     return None;
@@ -1031,6 +1036,13 @@ fn parser_scope_check(
     sql: &str,
 ) -> Result<(), String> {
     let refs = references(sql).map_err(|r| r.to_string())?;
+    // The database doesn't check column privileges on the columns a
+    // NATURAL join matches, so a scoped agent may not use one.
+    if refs.natural_join {
+        return Err(format!(
+            "{agent} has scopes, so it can't use NATURAL JOIN; join with ON and name the columns"
+        ));
+    }
     let tables: Vec<String> = refs.tables.iter().map(|t| qualified(t, database)).collect();
     if let Some((kind, target)) = write {
         let op = operation(kind);

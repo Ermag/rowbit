@@ -101,6 +101,9 @@ impl Plan {
         for n in &self.compiled.notes {
             writeln!(out, "  note: {n}")?;
         }
+        for e in &self.compiled.errors {
+            writeln!(out, "  error: {e}")?;
+        }
         for line in &self.current.unmanaged {
             writeln!(out, "  can't fix, remove it by hand: {line}")?;
         }
@@ -215,11 +218,17 @@ pub async fn diff(admin: Admin) -> anyhow::Result<()> {
     for plan in &plans {
         plan.print(false, &mut out)?;
     }
+    let errors: usize = plans.iter().map(|p| p.compiled.errors.len()).sum();
     drop(out);
     print_unscoped(&unscoped);
     if plans.is_empty() {
         println!("No agent in {} has scopes.", admin.policy.display());
     }
+    anyhow::ensure!(
+        errors == 0,
+        "{} has {errors} error(s) above",
+        admin.policy.display()
+    );
     Ok(())
 }
 
@@ -262,6 +271,13 @@ pub async fn apply(admin: Admin, args: ApplyArgs) -> anyhow::Result<()> {
     drop(out);
     print_unscoped(&unscoped);
 
+    // A deny entry that matches nothing would grant what it meant to deny.
+    let errors: usize = plans.iter().map(|p| p.compiled.errors.len()).sum();
+    anyhow::ensure!(
+        errors == 0,
+        "{} has {errors} error(s) above; nothing changed",
+        admin.policy.display()
+    );
     let work = plans.iter().any(|p| !p.is_empty(args.rotate_passwords)) || !removed.is_empty();
     if work && !args.yes && !confirm()? {
         anyhow::bail!("nothing changed");

@@ -100,7 +100,7 @@ fn agent_url(url: &str, account: &Account) -> String {
 
 async fn denied(conn: &mut Conn, sql: &str) -> bool {
     match conn.query_drop(sql).await {
-        Err(mysql_async::Error::Server(e)) => matches!(e.code, 1142 | 1143 | 1044),
+        Err(mysql_async::Error::Server(e)) => matches!(e.code, 1142 | 1143 | 1044 | 1356),
         Err(e) => panic!("{sql}: {e}"),
         Ok(()) => false,
     }
@@ -282,4 +282,62 @@ async fn mariadb_roles_are_unmanaged() {
 #[tokio::test]
 async fn mysql_roles_are_unmanaged() {
     roles_are_unmanaged(common::MYSQL).await;
+}
+
+/// Found in review: views run with their definer's rights by default, so
+/// one covered by `db.*` read a denied table for the agent. Only views
+/// that run with the reader's rights are granted by a pattern.
+async fn views_dont_lend_their_definers_rights(var: &str) {
+    let Some(url) = common::url(var) else { return };
+    let mut admin = connect(&admin_url(&url)).await;
+    let account = setup(&mut admin, "rg_views", "grants-views").await;
+    grants::create_user(&mut admin, &account, &password())
+        .await
+        .unwrap();
+    for sql in [
+        "CREATE VIEW rg_views.card_report AS SELECT id, number FROM rg_views.cards",
+        "CREATE SQL SECURITY INVOKER VIEW rg_views.card_invoker AS SELECT id, number FROM rg_views.cards",
+        "CREATE VIEW rg_views.contacts AS SELECT id, email FROM rg_views.orders",
+    ] {
+        run(&mut admin, sql).await;
+    }
+    let want = compile(
+        &mut admin,
+        "read: [rg_views.*]\ndeny_read: { tables: [rg_views.cards], columns: [rg_views.orders.email] }",
+    )
+    .await;
+    assert!(
+        !want.iter().any(
+            |g| matches!(&g.object, Object::Table(_, t) if t == "card_report" || t == "contacts")
+        ),
+        "{want:?}"
+    );
+    converge(&mut admin, &account, &want).await;
+
+    let mut agent_conn = connect(&agent_url(&url, &account)).await;
+    for sql in [
+        "SELECT number FROM rg_views.card_report",
+        "SELECT email FROM rg_views.contacts",
+        // Granted, but it reads with the agent's own rights.
+        "SELECT number FROM rg_views.card_invoker",
+        "SELECT number FROM rg_views.cards",
+    ] {
+        assert!(denied(&mut agent_conn, sql).await, "{sql}");
+    }
+    assert!(!denied(&mut agent_conn, "SELECT id, status FROM rg_views.orders").await);
+    let _ = agent_conn.disconnect().await;
+
+    grants::drop_user(&mut admin, &account).await.unwrap();
+    run(&mut admin, "DROP DATABASE rg_views").await;
+    let _ = admin.disconnect().await;
+}
+
+#[tokio::test]
+async fn mariadb_views_dont_lend_their_definers_rights() {
+    views_dont_lend_their_definers_rights(common::MARIADB).await;
+}
+
+#[tokio::test]
+async fn mysql_views_dont_lend_their_definers_rights() {
+    views_dont_lend_their_definers_rights(common::MYSQL).await;
 }
