@@ -96,12 +96,14 @@ impl Scopes {
         self.deny_read.tables.iter().any(|p| glob(p, table))
     }
 
-    /// Whether `column` of `database.table` may not be read.
+    /// Whether `column` of `database.table` may not be read. Column names
+    /// compare without case, as MariaDB and MySQL compare them.
     pub fn column_denied(&self, table: &str, column: &str) -> bool {
-        self.deny_read
-            .columns
-            .iter()
-            .any(|c| c.strip_prefix(table).and_then(|r| r.strip_prefix('.')) == Some(column))
+        self.deny_read.columns.iter().any(|c| {
+            c.strip_prefix(table)
+                .and_then(|r| r.strip_prefix('.'))
+                .is_some_and(|c| c.eq_ignore_ascii_case(column))
+        })
     }
 
     /// Whether any table or column in `database` is denied for reading, so
@@ -194,6 +196,10 @@ mod tests {
         assert!(s.allows(Operation::Update, "billing.refunds"));
         assert!(!s.allows(Operation::Delete, "billing.refunds"));
         assert!(s.column_denied("billing.customers", "email"));
+        assert!(
+            s.column_denied("billing.customers", "EMAIL"),
+            "column names ignore case"
+        );
         assert!(!s.column_denied("billing.customers", "name"));
         assert!(!s.column_denied("billing.customer", "s.email"));
         assert!(s.denies_in("billing"));

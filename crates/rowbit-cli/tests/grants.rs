@@ -102,6 +102,18 @@ async fn operator_runs_grants(var: &str) {
     );
     assert!(out.contains("plain  no scopes"), "{out}");
 
+    // A misspelled deny entry would deny nothing: refused, and nothing runs.
+    s.policy(
+        "version: 0\nagents:\n  cli-grants:\n    scopes:\n      read: [rg_cli.orders]\n      deny_read: { columns: [rg_cli.orders.emial] }\n",
+    );
+    let (ok, out) = s.rowbit(&["grants", "diff"]);
+    assert!(!ok && out.contains("emial matches no column"), "{out}");
+    let (ok, out) = s.rowbit(&["grants", "apply", "--yes"]);
+    assert!(!ok && out.contains("nothing changed"), "{out}");
+    s.policy(
+        "version: 0\nagents:\n  cli-grants:\n    scopes:\n      read: [rg_cli.orders]\n      update: [rg_cli.orders]\n      deny_read: { columns: [rg_cli.orders.email] }\n  plain: {}\n",
+    );
+
     // Without a terminal, apply refuses to ask and changes nothing.
     let (ok, out) = s.rowbit(&["grants", "apply"]);
     assert!(!ok, "{out}");
