@@ -2,7 +2,7 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
-## Unreleased
+## 0.1.1 (2026-10-29)
 
 ### Fixes
 
