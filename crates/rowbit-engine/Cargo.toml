@@ -19,6 +19,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+serde_norway.workspace = true
 mysql_async.workspace = true
 tokio.workspace = true
 

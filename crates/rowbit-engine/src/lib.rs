@@ -6,16 +6,24 @@
 //! Anything that goes wrong before a decision blocks the change. What an
 //! agent gets back is a [`ChangeStatus`], which never carries row values.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Mutex;
 
 use rowbit_core::change::{Actor, Event, State};
 use rowbit_core::preview::{Applied, Preview, WriteKind};
-use rowbit_mysql::statement::{Classified, Kind, classify, classify_read, is_system_schema};
+use rowbit_mysql::agent::{AgentDb, ExplainError};
+use rowbit_mysql::grants::{self, Diff};
+use rowbit_mysql::schema::{self, TableInfo};
+use rowbit_mysql::statement::{
+    Classified, Kind, TableName, classify, classify_read, is_system_schema, references,
+};
 use rowbit_mysql::{
     ApplyError, MySqlAdapter, PreviewError, PreviewLimits, QueryLimits, QueryResult, server_message,
 };
-use rowbit_policy::{ChangeFacts, Decision, Mode, PolicyFile, StatementKind, Verdict, evaluate};
+use rowbit_policy::{
+    ChangeFacts, Decision, Mode, Operation, PolicyFile, Scopes, StatementKind, Verdict, agent_user,
+    evaluate,
+};
 use rowbit_store::{AuditEvent, Change, ChangeId, NewDelivery, Review, Store, StoreError};
 pub use rowbit_store::{Delivery, DeliveryOutcome};
 use thiserror::Error;
@@ -69,7 +77,23 @@ pub struct Engine {
     limits: PreviewLimits,
     /// Changes being applied or undone right now.
     busy: Mutex<HashSet<ChangeId>>,
+    /// Scoped agents whose database user passed [`Engine::check_scopes`].
+    /// An agent missing here is refused.
+    scopes_checked: Mutex<BTreeSet<String>>,
 }
+
+/// A table an agent may use, for the `describe_schema` tool.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaTable {
+    pub table: TableInfo,
+    /// What the agent may do with it.
+    pub operations: Vec<Operation>,
+}
+
+/// What an agent is told when its database user didn't pass the startup
+/// check. People get the details on the terminal.
+const SCOPE_NOT_READY: &str =
+    "Rowbit can't serve this agent until an operator runs `rowbit grants apply`";
 
 struct Claim<'a> {
     engine: &'a Engine,
@@ -91,7 +115,115 @@ impl Engine {
             store: Mutex::new(store),
             limits: PreviewLimits::default(),
             busy: Mutex::new(HashSet::new()),
+            scopes_checked: Mutex::new(BTreeSet::new()),
         }
+    }
+
+    /// Compares every scoped agent's database user with what `rowbit.yml`
+    /// compiles to. An agent whose user holds more, or can't be reached, is
+    /// refused until this runs again; one that holds less is served, and the
+    /// database denies what is missing. Returns what people should know.
+    /// Run it at startup: until it has run, scoped agents are refused.
+    pub async fn check_scopes(&self) -> Vec<String> {
+        let mut notes = Vec::new();
+        let mut ready = BTreeSet::new();
+        for (agent, policy) in &self.policy.agents {
+            let Some(scopes) = &policy.scopes else {
+                continue;
+            };
+            match self.check_agent_user(agent, scopes).await {
+                Ok(missing) => {
+                    ready.insert(agent.clone());
+                    if missing > 0 {
+                        notes.push(format!(
+                            "agent {agent}: its database user lacks {missing} grant(s) rowbit.yml gives it; \
+                             the database will refuse those until `rowbit grants apply` runs"
+                        ));
+                    }
+                }
+                Err(why) => notes.push(format!("agent {agent} is refused: {why}")),
+            }
+        }
+        *self
+            .scopes_checked
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = ready;
+        notes
+    }
+
+    /// How many compiled grants the agent's user lacks, or why it can't be
+    /// trusted.
+    async fn check_agent_user(&self, agent: &str, scopes: &Scopes) -> Result<usize, String> {
+        let db = self.agent_db(agent)?.ok_or("it has no scopes")?;
+        let (_, current) = db.grants().await.map_err(|e| {
+            format!(
+                "Rowbit can't connect as {} ({}); run `rowbit grants apply`",
+                agent_user(agent),
+                rowbit_mysql::db_error_code(&e)
+            )
+        })?;
+        if let Some(line) = current.unmanaged.first() {
+            return Err(format!(
+                "its database user has a grant Rowbit doesn't manage ({line}); remove it by hand"
+            ));
+        }
+        let tables = self
+            .adapter
+            .tables(&grants::databases(scopes))
+            .await
+            .map_err(|e| {
+                format!(
+                    "reading the schema failed ({})",
+                    rowbit_mysql::db_error_code(&e)
+                )
+            })?;
+        let compiled = grants::compile(scopes, &schema::catalog(&tables));
+        if let Some(error) = compiled.errors.first() {
+            return Err(format!("rowbit.yml's scopes: {error}"));
+        }
+        let diff = Diff::between(&compiled.grants, &current.grants);
+        if let Some(extra) = diff.extra.iter().next() {
+            return Err(format!(
+                "its database user holds more than rowbit.yml gives it ({extra}, and {} more); \
+                 run `rowbit grants apply`",
+                diff.extra.len() - 1
+            ));
+        }
+        Ok(diff.missing.len())
+    }
+
+    fn scopes(&self, agent: &str) -> Option<&Scopes> {
+        self.policy.agents.get(agent)?.scopes.as_ref()
+    }
+
+    /// The agent's own database user, if it is scoped.
+    fn agent_db(&self, agent: &str) -> Result<Option<AgentDb>, String> {
+        if self.scopes(agent).is_none() {
+            return Ok(None);
+        }
+        let password = self
+            .store()
+            .setting(&format!("agent.{agent}.password"))
+            .map_err(|e| e.to_string())?
+            .ok_or("no database password is stored for it; run `rowbit grants apply`")?;
+        Ok(Some(self.adapter.agent(&agent_user(agent), &password)))
+    }
+
+    /// For a scoped agent, its database user, once it passed the startup
+    /// check. `Err` holds the reason the agent is told.
+    fn ready_agent_db(&self, agent: &str) -> Result<Option<AgentDb>, String> {
+        if self.scopes(agent).is_none() {
+            return Ok(None);
+        }
+        let checked = self
+            .scopes_checked
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains(agent);
+        if !checked {
+            return Err(SCOPE_NOT_READY.to_owned());
+        }
+        self.agent_db(agent).map_err(|_| SCOPE_NOT_READY.to_owned())
     }
 
     pub fn with_limits(mut self, limits: PreviewLimits) -> Engine {
@@ -128,6 +260,11 @@ impl Engine {
             Ok(c) => c,
             Err(refusal) => return self.block(id, agent, &refusal.to_string(), None),
         };
+        if self.scopes(agent).is_some() {
+            if let Err(reason) = self.check_write_scope(agent, database, &classified).await {
+                return self.block_by("scope", id, agent, &reason, None);
+            }
+        }
 
         let (review, facts) = if classified.kind == Kind::Ddl {
             let facts = ddl_facts(&classified, database);
@@ -223,8 +360,8 @@ impl Engine {
     /// and only with a statement that passes the same checks as a write.
     /// Reads are not logged as changes.
     ///
-    /// The agent reads with Rowbit's database privileges; scope them to what
-    /// agents may see (per-agent grants come in v0.2).
+    /// An agent without scopes reads with Rowbit's database privileges; a
+    /// scoped one reads on its own database user, after the scope check.
     pub async fn query(
         &self,
         agent: &str,
@@ -242,19 +379,30 @@ impl Engine {
             )));
         }
         let sql = classify_read(sql).map_err(|r| EngineError::Query(r.to_string()))?;
-        self.adapter
-            .query(database, &sql, QueryLimits::default())
-            .await
-            .map_err(|e| {
-                EngineError::Query(match e {
-                    PreviewError::Refused(reason) => reason,
-                    // The server's message: about the agent's own read, of
-                    // tables it may read anyway.
-                    PreviewError::Database(mysql_async_error) => {
-                        format!("database error: {}", server_message(&mysql_async_error))
-                    }
-                })
+        let agent_db = self.ready_agent_db(agent).map_err(EngineError::Query)?;
+        let result = match &agent_db {
+            Some(db) => {
+                let scopes = self.scopes(agent).expect("an agent with a user is scoped");
+                parser_scope_check(agent, scopes, database, None, &sql)
+                    .map_err(EngineError::Query)?;
+                db.query(database, &sql, QueryLimits::default()).await
+            }
+            None => {
+                self.adapter
+                    .query(database, &sql, QueryLimits::default())
+                    .await
+            }
+        };
+        result.map_err(|e| {
+            EngineError::Query(match e {
+                PreviewError::Refused(reason) => reason,
+                // The server's message: about the agent's own read, of
+                // tables it may read anyway.
+                PreviewError::Database(mysql_async_error) => {
+                    format!("database error: {}", server_message(&mysql_async_error))
+                }
             })
+        })
     }
 
     /// A person approves a held change, naming the review hash they saw,
@@ -429,25 +577,49 @@ impl Engine {
                 action: "applied",
             });
         }
+        // The agent's user, if it is scoped: a missing password fails the
+        // apply rather than falling back to Rowbit's own privileges.
+        let agent_db = self
+            .agent_db(&change.agent)
+            .map_err(|reason| ApplyError::Conflict {
+                reason: format!("outside the agent's scope: {reason}"),
+                row: None,
+            });
         self.store().note(id, &Actor::System, "ApplyStarted", "")?;
-        let result = match &change.review {
-            Some(Review::Rows(preview)) => match classify(&change.sql) {
+        let result = match (&change.review, agent_db) {
+            (_, Err(e)) => Err(e),
+            (Some(Review::Rows(preview)), Ok(agent_db)) => match classify(&change.sql) {
                 Ok(statement) => {
-                    self.adapter
-                        .apply(&change.database, &statement, preview)
-                        .await
+                    let scope = match &agent_db {
+                        Some(db) => db
+                            .explain(&change.database, &statement.canonical)
+                            .await
+                            .map_err(|e| ApplyError::Conflict {
+                                reason: e.to_string(),
+                                row: None,
+                            }),
+                        None => Ok(()),
+                    };
+                    match scope {
+                        Ok(()) => {
+                            self.adapter
+                                .apply(&change.database, &statement, preview)
+                                .await
+                        }
+                        Err(e) => Err(e),
+                    }
                 }
                 Err(refusal) => Err(ApplyError::Conflict {
                     reason: refusal.to_string(),
                     row: None,
                 }),
             },
-            Some(Review::Ddl { sql }) => self
-                .adapter
-                .run_ddl(&change.database, sql)
-                .await
-                .map(|()| Applied { keys: Vec::new() }),
-            None => Err(ApplyError::Conflict {
+            (Some(Review::Ddl { sql }), Ok(agent_db)) => match &agent_db {
+                Some(db) => db.run_ddl(&change.database, sql).await,
+                None => self.adapter.run_ddl(&change.database, sql).await,
+            }
+            .map(|()| Applied { keys: Vec::new() }),
+            (None, Ok(_)) => Err(ApplyError::Conflict {
                 reason: "nothing was reviewed".to_owned(),
                 row: None,
             }),
@@ -532,6 +704,18 @@ impl Engine {
         reason: &str,
         detail: Option<&str>,
     ) -> Result<ChangeStatus, EngineError> {
+        self.block_by("floor", id, agent, reason, detail)
+    }
+
+    /// Blocks before policy could decide, as `policy:<by>`.
+    fn block_by(
+        &self,
+        by: &str,
+        id: ChangeId,
+        agent: &str,
+        reason: &str,
+        detail: Option<&str>,
+    ) -> Result<ChangeStatus, EngineError> {
         let mut store = self.store();
         if let Some(detail) = detail {
             store.note(id, &Actor::System, "ErrorDetail", detail)?;
@@ -541,11 +725,103 @@ impl Engine {
             &Event::PolicyBlocked {
                 reason: reason.to_owned(),
             },
-            &Actor::Policy("floor".to_owned()),
+            &Actor::Policy(by.to_owned()),
             None,
         )?;
         drop(store);
         self.status(agent, id)
+    }
+
+    /// The scope check for a write: the parser check, then for a row write
+    /// an `EXPLAIN` on the agent's own user. `Err` is the reason the agent
+    /// is told.
+    async fn check_write_scope(
+        &self,
+        agent: &str,
+        database: &str,
+        c: &Classified,
+    ) -> Result<(), String> {
+        let db = self.ready_agent_db(agent)?.ok_or(SCOPE_NOT_READY)?;
+        let scopes = self.scopes(agent).ok_or(SCOPE_NOT_READY)?;
+        let target = qualified(&c.table, database);
+        parser_scope_check(
+            agent,
+            scopes,
+            database,
+            Some((c.kind, &target)),
+            &c.canonical,
+        )?;
+        if c.kind == Kind::Ddl {
+            // EXPLAIN doesn't take DDL; it runs on the agent's user once approved.
+            return Ok(());
+        }
+        db.explain(database, &c.canonical)
+            .await
+            .map_err(|e: ExplainError| e.to_string())
+    }
+
+    /// The tables `agent` may use: for a scoped agent, those in its scopes,
+    /// without denied tables and columns; otherwise those in `database`.
+    pub async fn describe(
+        &self,
+        agent: &str,
+        database: &str,
+    ) -> Result<Vec<SchemaTable>, EngineError> {
+        let Some(policy) = self.policy.agents.get(agent) else {
+            return Err(EngineError::Query(
+                "agent is not listed in rowbit.yml".to_owned(),
+            ));
+        };
+        let unreadable = |e: rowbit_mysql::Error| {
+            EngineError::Query(format!(
+                "reading the schema failed ({})",
+                rowbit_mysql::db_error_code(&e)
+            ))
+        };
+        let Some(scopes) = &policy.scopes else {
+            if is_system_schema(database) {
+                return Err(EngineError::Query(format!(
+                    "{database} is a system schema, which agents may not read"
+                )));
+            }
+            let tables = self
+                .adapter
+                .tables(&BTreeSet::from([database.to_owned()]))
+                .await
+                .map_err(unreadable)?;
+            return Ok(tables
+                .into_iter()
+                .map(|table| SchemaTable {
+                    table,
+                    operations: Operation::ALL.to_vec(),
+                })
+                .collect());
+        };
+        self.ready_agent_db(agent).map_err(EngineError::Query)?;
+        let tables = self
+            .adapter
+            .tables(&grants::databases(scopes))
+            .await
+            .map_err(unreadable)?;
+        Ok(tables
+            .into_iter()
+            .filter_map(|mut table| {
+                let name = format!("{}.{}", table.database, table.name);
+                // As compiled: a definer view only when named exactly.
+                let named = |op: Operation| scopes.patterns(op).contains(&name);
+                let operations: Vec<Operation> = Operation::ALL
+                    .into_iter()
+                    .filter(|op| scopes.allows(*op, &name) && (!table.definer_view || named(*op)))
+                    .collect();
+                if operations.is_empty() {
+                    return None;
+                }
+                table
+                    .columns
+                    .retain(|c| !scopes.column_denied(&name, &c.name));
+                Some(SchemaTable { table, operations })
+            })
+            .collect())
     }
 
     fn store(&self) -> std::sync::MutexGuard<'_, Store> {
@@ -725,6 +1001,83 @@ fn rfc3339(secs: i64) -> String {
     )
 }
 
+fn qualified(t: &TableName, database: &str) -> String {
+    format!("{}.{}", t.database.as_deref().unwrap_or(database), t.table)
+}
+
+fn operation(kind: Kind) -> Operation {
+    match kind {
+        Kind::Insert => Operation::Insert,
+        Kind::Update => Operation::Update,
+        Kind::Delete => Operation::Delete,
+        Kind::Ddl => Operation::Ddl,
+    }
+}
+
+/// Compares what `sql` names with the agent's scopes, so the agent gets a
+/// clear reason. The database checks the real thing afterwards. `write` is
+/// the statement's kind and target, `None` for a read.
+fn parser_scope_check(
+    agent: &str,
+    scopes: &Scopes,
+    database: &str,
+    write: Option<(Kind, &str)>,
+    sql: &str,
+) -> Result<(), String> {
+    let refs = references(sql).map_err(|r| r.to_string())?;
+    // The database doesn't check column privileges on the columns a
+    // NATURAL join matches, so a scoped agent may not use one.
+    if refs.natural_join {
+        return Err(format!(
+            "{agent} has scopes, so it can't use NATURAL JOIN; join with ON and name the columns"
+        ));
+    }
+    let tables: Vec<String> = refs.tables.iter().map(|t| qualified(t, database)).collect();
+    if let Some((kind, target)) = write {
+        let op = operation(kind);
+        if !scopes.allows(op, target) {
+            return Err(format!(
+                "{target} is outside {agent}'s {} scope",
+                op.as_str()
+            ));
+        }
+        if kind == Kind::Ddl {
+            // Every table a schema change names, a new name included.
+            if let Some(t) = tables.iter().find(|t| !scopes.allows(Operation::Ddl, t)) {
+                return Err(format!("{t} is outside {agent}'s ddl scope"));
+            }
+            return Ok(());
+        }
+    }
+    let target = write.map(|(_, t)| t);
+    for t in &tables {
+        // Reading the written table is left to the database, which checks
+        // it column by column.
+        if Some(t.as_str()) != target && !scopes.allows(Operation::Read, t) {
+            return Err(format!("{t} is outside {agent}'s read scope"));
+        }
+    }
+    for t in &tables {
+        // Without case: on servers whose table names ignore it, `ORDERS`
+        // is `orders` and must find its denies.
+        let denied = scopes.denied_columns(t);
+        if denied.is_empty() {
+            continue;
+        }
+        if refs.wildcard {
+            return Err(format!(
+                "* includes columns of {t} that {agent} may not read; name the columns"
+            ));
+        }
+        for column in denied {
+            if refs.columns.contains(&column.to_lowercase()) {
+                return Err(format!("{agent} may not read column {column} of {t}"));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn ddl_facts(c: &Classified, database: &str) -> ChangeFacts {
     let db = c.table.database.as_deref().unwrap_or(database);
     ChangeFacts {
@@ -852,6 +1205,39 @@ mod tests {
         };
         assert_eq!(engine.interrupted().unwrap(), [id]);
         assert_eq!(engine.change(id).unwrap().state, State::Approved);
+    }
+
+    // Found in second review: on a server whose table names ignore case,
+    // naming the table in another case skipped the denied-column check, and
+    // a USING join tested guesses at the column again. The database doesn't
+    // check join columns, so this check is all there is; it needs no server.
+    #[test]
+    fn denied_columns_are_found_whatever_the_case_of_the_table() {
+        let scopes: Scopes = serde_norway::from_str(
+            "read: [shop.*]\nupdate: [shop.notes]\ndeny_read: { columns: [shop.orders.email] }",
+        )
+        .unwrap();
+        for table in ["orders", "ORDERS", "shop.ORDERS", "`Orders`"] {
+            let sql = format!(
+                "SELECT o.id FROM {table} o JOIN (SELECT 'a@example.com' AS email) x USING (EMAIL)"
+            );
+            let refused = parser_scope_check("bot", &scopes, "shop", None, &sql).unwrap_err();
+            assert!(
+                refused.contains("may not read column email"),
+                "{sql}: {refused}"
+            );
+        }
+        let write = "UPDATE notes SET note = (SELECT 'hit' FROM SHOP.Orders o JOIN (SELECT 'a@example.com' AS email) x USING (email) WHERE o.id = 1) WHERE id = 1";
+        let refused = parser_scope_check(
+            "bot",
+            &scopes,
+            "shop",
+            Some((Kind::Update, "shop.notes")),
+            write,
+        )
+        .unwrap_err();
+        assert!(refused.contains("may not read column email"), "{refused}");
+        assert!(parser_scope_check("bot", &scopes, "shop", None, "SELECT id FROM ORDERS").is_ok());
     }
 
     #[test]
