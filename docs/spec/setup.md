@@ -124,9 +124,10 @@ So that a held write ends with the person knowing where to look, `propose_write`
 A skill teaches an agent how to work with Rowbit, which the MCP tools' descriptions alone don't. It lives in `plugins/rowbit/skills/rowbit/SKILL.md`, with `.claude-plugin/marketplace.json` at the repository root, so in Claude Code:
 
 ```
-/plugin marketplace add Ermag/rowbit
-/plugin install rowbit@rowbit
+/plugin install rowbit --marketplace Ermag/rowbit
 ```
+
+or, on Claude Code before 2.1.275, `/plugin marketplace add Ermag/rowbit` then `/plugin install rowbit@rowbit`. The skill is Apache-2.0, like `rowbit.yml`'s schema, so other tools can carry it.
 
 `SKILL.md` is the format Codex, Cursor and Gemini CLI read too; the docs say where to copy it for each. It tells the agent to:
 
