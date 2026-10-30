@@ -167,6 +167,7 @@ async fn propose_and_follow_a_change(var: &str, table: &str) {
     let status: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(status["state"], "applied", "{text}");
     assert_eq!(status["rows"], 2);
+    assert!(status.get("review_url").is_none(), "{text}");
 
     let (_, text) = call(
         &client,
@@ -179,6 +180,10 @@ async fn propose_and_follow_a_change(var: &str, table: &str) {
     assert_eq!(
         held["reason"],
         "Large refund batches are reviewed by billing."
+    );
+    assert_eq!(
+        held["review_url"],
+        format!("http://127.0.0.1:8080/#/changes/{}", held["id"])
     );
 
     let (_, text) = call(&client, "change_status", json!({ "id": held["id"] })).await;

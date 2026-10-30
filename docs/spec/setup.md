@@ -117,7 +117,7 @@ The home page and the README also offer install links for VS Code (`https://insi
 
 ## Review links
 
-So that a held write ends with the person knowing where to look, `propose_write` and `change_status` return `review_url` for a held change: `<public_url>/#/changes/<id>`, or `http://<listen>/#/changes/<id>` without a `public_url`, the same link notifications use. `rowbit mcp` over stdio reads `rowbit-server.yml` as `rowbit serve` does (current directory or `--config`) and falls back to `http://127.0.0.1:8080`. The server's instructions tell the agent to give the person that link and not to retry the write in another form. The link reveals nothing: the page needs sign-in, and the agent could reach its address already. See [Agent tools](change-lifecycle.md#agent-tools-mcp).
+So that a held write ends with the person knowing where to look, `propose_write` and `change_status` return `review_url` for a held change: `<public_url>/#/changes/<id>`, or `http://<listen>/#/changes/<id>` without a `public_url`, the same link notifications use. `rowbit serve` records that address in the state file when it starts, so `rowbit mcp` over stdio, which shares the file, links to the same place; before `rowbit serve` has ever run, the link uses `http://127.0.0.1:8080`. The server's instructions tell the agent to give the person that link and not to retry the write in another form. The link reveals nothing: the page needs sign-in, and the agent could reach its address already. See [Agent tools](change-lifecycle.md#agent-tools-mcp).
 
 ## The skill
 

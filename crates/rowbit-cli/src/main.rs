@@ -633,6 +633,11 @@ async fn main() -> anyhow::Result<()> {
                     })
                     .collect(),
             })?;
+            let address = config
+                .public_url
+                .clone()
+                .unwrap_or_else(|| format!("http://{listen}"));
+            engine.set_review_address(&address)?;
             let engine = std::sync::Arc::new(engine);
             tokio::spawn(
                 rowbit_web::notify::Notifier::new(engine.clone(), config.notify.clone()).run(),
@@ -643,10 +648,7 @@ async fn main() -> anyhow::Result<()> {
                 secure: config.https(),
                 mcp: config.mcp_http.then_some(database),
             };
-            let address = config
-                .public_url
-                .clone()
-                .unwrap_or_else(|| format!("http://{listen}"));
+            let address = address.trim_end_matches('/');
             eprintln!("rowbit: review page on {address}/");
             if config.mcp_http {
                 eprintln!("rowbit: agents over MCP at {address}/mcp, each with its own token");

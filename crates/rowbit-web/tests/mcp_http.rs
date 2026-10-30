@@ -38,6 +38,10 @@ async fn server(url: &str) -> Server {
     ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let host = listener.local_addr().unwrap().to_string();
+    // As `rowbit serve` does, so held results link to this server.
+    engine
+        .set_review_address(&format!("http://{host}"))
+        .unwrap();
     let router = rowbit_web::router(
         engine,
         rowbit_web::Web {
@@ -159,8 +163,13 @@ async fn agents_sign_in_with_their_own_token() {
     assert!(!failed, "{text}");
     let held: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(held["state"], "held");
-    let (failed, _) = call(&refund, "change_status", json!({ "id": held["id"] })).await;
+    assert_eq!(
+        held["review_url"],
+        format!("{}/#/changes/{}", s.base, held["id"])
+    );
+    let (failed, text) = call(&refund, "change_status", json!({ "id": held["id"] })).await;
     assert!(!failed);
+    assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), held);
 
     // The identity is the token's, whatever session the request names: the
     // other agent can't see this change.

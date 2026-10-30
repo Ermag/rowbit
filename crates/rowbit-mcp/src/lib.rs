@@ -28,8 +28,10 @@ Rowbit guards writes to this database. See the tables you may use with \
 send one INSERT, UPDATE or DELETE (or a schema change) to `propose_write`. \
 Rowbit previews it without running it and checks it against the team's \
 rules: it may be applied at once, held for a person, or rejected with a \
-reason. Follow a held change with `change_status`. You cannot approve \
-changes; a person does.";
+reason. You cannot approve changes; a person does. When a change is held, \
+give the person its `review_url`, say what it changes, and stop: don't \
+retry the write in another form or split it to get under a rule. Follow \
+it with `change_status`.";
 
 /// The agent an HTTP request signed in as. The transport's sign-in puts it
 /// in the request's extensions after checking the request's token.
@@ -208,7 +210,7 @@ impl RowbitMcp {
     }
 
     #[tool(
-        description = "Propose one write. Rowbit previews it, checks it against the rules, and applies it, holds it for a person, or rejects it. Returns the change's id, state, table, row count and reason."
+        description = "Propose one write. Rowbit previews it, checks it against the rules, and applies it, holds it for a person, or rejects it. Returns the change's id, state, table, row count and reason, and for a held change review_url, its page for the person who reviews it."
     )]
     async fn propose_write(
         &self,
@@ -255,13 +257,17 @@ impl ServerHandler for RowbitMcp {
 /// Everything an agent learns about a change. Built field by field from
 /// [`ChangeStatus`], which carries no row values.
 pub fn status_json(s: &ChangeStatus) -> Value {
-    json!({
+    let mut json = json!({
         "id": s.id,
         "state": s.state.as_str(),
         "table": s.table,
         "rows": s.rows,
         "reason": s.reason,
-    })
+    });
+    if let Some(url) = &s.review_url {
+        json["review_url"] = json!(url);
+    }
+    json
 }
 
 fn ok(value: Value) -> CallToolResult {

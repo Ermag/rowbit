@@ -68,6 +68,10 @@ pub struct ChangeStatus {
     pub rows: Option<usize>,
     /// Why it was held, blocked, rejected or failed.
     pub reason: Option<String>,
+    /// The change's page on the review UI, while it is held, so the agent
+    /// can tell the person where to look. Reveals nothing: the page needs
+    /// sign-in.
+    pub review_url: Option<String>,
 }
 
 pub struct Engine {
@@ -512,6 +516,15 @@ impl Engine {
         Ok(ids)
     }
 
+    /// Where `rowbit serve` serves the review UI (`public_url`, or
+    /// `http://<listen>`), for the links agents get to held changes from
+    /// every process that shares the state file.
+    pub fn set_review_address(&self, address: &str) -> Result<(), EngineError> {
+        Ok(self
+            .store()
+            .set_setting(REVIEW_ADDRESS_SETTING, address.trim_end_matches('/'))?)
+    }
+
     /// Where held-change notifications go, for every process that shares
     /// the state file. `rowbit serve` sets it from `rowbit-server.yml`.
     pub fn set_notify(&self, setting: &NotifySetting) -> Result<(), EngineError> {
@@ -690,12 +703,21 @@ impl Engine {
             Some(Review::Rows(p)) => (Some(p.table.qualified_name()), Some(p.rows.len())),
             Some(Review::Ddl { .. }) | None => (None, None),
         };
+        let review_url = (change.state == State::Held).then(|| {
+            let address = store
+                .setting(REVIEW_ADDRESS_SETTING)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| DEFAULT_REVIEW_ADDRESS.to_owned());
+            change_link(&address, id)
+        });
         Ok(ChangeStatus {
             id,
             state: change.state,
             table,
             rows,
             reason,
+            review_url,
         })
     }
 
@@ -882,6 +904,18 @@ pub fn recorded_decision(history: &[AuditEvent]) -> Option<Decision> {
 /// state file so every process that proposes changes queues them.
 pub const NOTIFY_SETTING: &str = "notify.targets";
 
+/// Where `rowbit serve` last served the review UI; see
+/// [`Engine::set_review_address`].
+pub const REVIEW_ADDRESS_SETTING: &str = "review.address";
+
+/// `rowbit serve`'s address when nothing else says where it is.
+pub const DEFAULT_REVIEW_ADDRESS: &str = "http://127.0.0.1:8080";
+
+/// A change's page on the review UI at `address`.
+pub fn change_link(address: &str, id: ChangeId) -> String {
+    format!("{}/#/changes/{id}", address.trim_end_matches('/'))
+}
+
 /// What `rowbit serve` keeps under [`NOTIFY_SETTING`]. No secrets: those
 /// stay in its memory.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -953,7 +987,7 @@ fn notifications(store: &Store, h: &Held<'_>) -> Vec<NewDelivery> {
                     "rows": h.rows,
                     "rule": h.rule,
                     "reason": h.reason,
-                    "url": setting.review_url.as_ref().map(|u| format!("{u}/#/changes/{}", h.id)),
+                    "url": setting.review_url.as_deref().map(|u| change_link(u, h.id)),
                 },
             });
             NewDelivery {
