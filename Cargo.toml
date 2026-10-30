@@ -26,6 +26,7 @@ base64 = "0.22"
 axum = { version = "0.8", default-features = false, features = ["form", "http1", "json", "tokio", "query"] }
 getrandom = "0.3"
 hmac = "0.12"
+indexmap = { version = "2", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 openidconnect = { version = "4", default-features = false, features = ["reqwest", "timing-resistant-secret-traits"] }
 # The system's trusted CAs, so an identity provider behind a company CA works.
@@ -42,6 +43,7 @@ serde_norway = "0.9"
 sqlparser = { version = "0.63", features = ["visitor"] }
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+toml_edit = "0.25"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
