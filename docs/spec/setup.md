@@ -93,13 +93,15 @@ Compose names the project after the directory, so two demo directories with the 
 |---|---|
 | `claude-code` | Runs `claude mcp add` with `--scope local` (this directory, the default) or `--scope user`. `--scope project` is refused: it writes `.mcp.json`, which is meant to be committed, and would commit the token or database URL. |
 | `cursor` | Edits `~/.cursor/mcp.json`, adding the server under `mcpServers` with `url` and `headers`, or `command`, `args` and `env`. |
-| `vscode` | Runs `code --add-mcp` with an `http` or `stdio` server, which adds it to the user's VS Code profile. |
+| `vscode` | Edits the user profile's `mcp.json` (`~/Library/Application Support/Code/User/` on macOS, `$XDG_CONFIG_HOME/Code/User/` or `~/.config/Code/User/` on Linux), adding the server under `servers` with `type: http`, `url` and `headers`, or `type: stdio`, `command`, `args` and `env`. |
 | `claude-desktop` | Edits `claude_desktop_config.json` (`~/Library/Application Support/Claude/` on macOS), adding a stdio server under `mcpServers`; Claude Desktop's file takes no HTTP servers. Restart Claude Desktop to load it. macOS only. |
-| `codex` | Edits `~/.codex/config.toml`, adding `[mcp_servers.<name>]` with `url` and the `Authorization` header in `http_headers`, or `command`, `args` and `env`, and keeping the rest of the file, comments included. If the installed Codex takes no static headers, it writes `bearer_token_env_var = "ROWBIT_TOKEN"` instead and prints the `export` line. |
-| `gemini` | Runs `gemini mcp add --scope user` with `--transport http` and the header, or the stdio command. |
+| `codex` | Edits `~/.codex/config.toml`, adding `[mcp_servers.<name>]` with `url` and the `Authorization` header in `http_headers`, or `command`, `args` and `env`, and keeping the rest of the file, comments included. |
+| `gemini` | Edits `~/.gemini/settings.json`, adding the server under `mcpServers` with `httpUrl` and `headers`, or `command`, `args` and `env`. |
 | `windsurf` | Edits `~/.codeium/windsurf/mcp_config.json`, adding the server under `mcpServers` with `serverUrl` and `headers`, or `command`, `args` and `env`. |
 
-A client's own command must be on `PATH`; if it isn't, Rowbit says so and changes nothing. Those commands take the token or URL as an argument, so other users on the same machine could see it in the process list while the command runs; on a shared machine, use `--print` and add it by hand.
+A client must look installed (its command on `PATH`, or its configuration directory present); if it doesn't, Rowbit says so and changes nothing. Claude Code must have `claude` on `PATH`. `claude mcp add` takes the token or URL as an argument, so other users on the same machine could see it in the process list while it runs; on a shared machine, use `--print` and add it by hand. Every other client's file is edited directly, so the token never goes on a command line.
+
+The checks (the client, an entry by that name, a file Rowbit can parse, the agent's existing token) all run before Rowbit makes a token, so a refusal costs nothing. If writing the client's configuration then fails, Rowbit revokes the token it just made.
 
 When Rowbit edits a client's file itself, it:
 

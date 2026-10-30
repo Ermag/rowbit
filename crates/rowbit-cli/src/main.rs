@@ -1,3 +1,4 @@
+mod connect;
 mod grants;
 mod review;
 
@@ -165,6 +166,13 @@ enum Command {
         #[command(subcommand)]
         command: GrantsCommand,
     },
+    /// Add Rowbit to an agent client: Claude Code, Cursor, VS Code, ...
+    ///
+    /// Run it where `rowbit serve` runs. With mcp.http in
+    /// rowbit-server.yml, the client gets the address and a new token for
+    /// the agent, and nothing else; otherwise it starts `rowbit mcp` itself,
+    /// with the database URL. Without a client, lists the ones it knows.
+    Connect(connect::ConnectArgs),
     /// Check that Rowbit can reach a database
     Ping {
         /// mysql://user:password@host:port/database
@@ -367,6 +375,18 @@ struct ServerArgs {
 }
 
 impl ServerArgs {
+    /// Just where `rowbit serve` is and whether agents use HTTP, without the
+    /// file's secrets.
+    fn address(&self) -> anyhow::Result<rowbit_web::config::Address> {
+        let named = self.config != std::path::Path::new("rowbit-server.yml");
+        if !self.config.exists() && !named {
+            return Ok(Default::default());
+        }
+        let src = std::fs::read_to_string(&self.config)
+            .with_context(|| format!("reading {}", self.config.display()))?;
+        Ok(rowbit_web::config::ServerConfig::address(&src)?)
+    }
+
     /// The settings, or the defaults if the default file doesn't exist. A
     /// file named on purpose must exist.
     fn load(&self) -> anyhow::Result<rowbit_web::config::ServerConfig> {
@@ -739,6 +759,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Grants {
             command: GrantsCommand::Apply { admin, args },
         } => grants::apply(admin, args).await?,
+        Command::Connect(args) => connect::run(args)?,
         Command::Ping { url } => {
             let adapter = rowbit_mysql::MySqlAdapter::new(&url)?;
             let info = adapter.server_info().await?;
