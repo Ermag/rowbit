@@ -2,6 +2,12 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
+## Unreleased
+
+### Docs
+
+- The docs are on the web at https://ermag.github.io/rowbit/docs/, rendered from `docs/`, with each page's Markdown next to it and `llms.txt` and `llms-full.txt` for agents. A new page, [Connect your agent](docs/connect.md), covers `rowbit connect`, the skill, and stdio versus HTTP.
+
 ## 0.2.0 (2026-10-30)
 
 Scopes the database enforces, shadow mode, a built-in review UI with sign-in through your identity provider, notifications for held changes, and MCP over HTTP.

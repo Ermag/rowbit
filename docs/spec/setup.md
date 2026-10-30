@@ -156,7 +156,7 @@ The README's first screen follows the same order: the name, the sentence, badges
 
 ## The docs site
 
-The Pages workflow renders `docs/` into `https://ermag.github.io/rowbit/docs/` with mdBook, so the repository stays the one source and GitHub and the site never disagree. It runs on every push to `main` that touches `docs/` or `site/`, and CI builds it on every pull request and fails on a broken link. The sidebar: Quickstart, Connect your agent, Rules (`rowbit.yml`), How a change moves, Server settings (`rowbit-server.yml`), Database privileges, Running Rowbit, Security. Links that leave `docs/` (the changelog, `examples/`) become links to the file on GitHub.
+The Pages workflow renders `docs/` into `https://ermag.github.io/rowbit/docs/` with mdBook, so the repository stays the one source and GitHub and the site never disagree. It runs on every push to `main` that touches `docs/` or `site/`, and CI builds it on every pull request and fails on a broken link. The sidebar is `docs/SUMMARY.md`: Quickstart, Connect your agent, Rules (`rowbit.yml`), How a change moves, Server settings (`rowbit-server.yml`), Installing and setting up, Database privileges, Running Rowbit. The plan and other pages not listed stay on GitHub only; `scripts/build-docs.py` builds the site, and runs locally with `mdbook` on `PATH`. Links that leave `docs/` (the changelog, `examples/`) become links to the file on GitHub.
 
 For agents, next to the pages:
 
