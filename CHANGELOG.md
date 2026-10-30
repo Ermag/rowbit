@@ -2,6 +2,12 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
+## Unreleased
+
+### New
+
+- A held change's result now carries `review_url`, its page on the review UI, from `propose_write`, `change_status` and `rowbit propose`. The server's instructions tell the agent to give the person that link and stop, not to retry the write in another form. `rowbit serve` records its address in the state file, so agents over stdio get the same link.
+
 ## 0.2.0 (2026-10-30)
 
 Scopes the database enforces, shadow mode, a built-in review UI with sign-in through your identity provider, notifications for held changes, and MCP over HTTP.
