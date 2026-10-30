@@ -79,7 +79,7 @@ The well-known incidents of coding agents wiping production databases are a cred
 | Path | What |
 |---|---|
 | `crates/` | Rust workspace: `rowbit-core`, `rowbit-policy`, `rowbit-mysql`, `rowbit-store`, `rowbit-engine`, `rowbit-mcp`, `rowbit-web`, `rowbit-cli`. See [ARCHITECTURE.md](ARCHITECTURE.md) |
-| `docs/spec/` | [Change lifecycle](docs/spec/change-lifecycle.md), [rowbit.yml](docs/spec/policy.md) and [rowbit-server.yml](docs/spec/server.md) specs |
+| `docs/spec/` | [Change lifecycle](docs/spec/change-lifecycle.md), [rowbit.yml](docs/spec/policy.md) and [rowbit-server.yml](docs/spec/server.md) specs, and [installing and setting up](docs/spec/setup.md) |
 | `docs/operating.md` | [Running Rowbit](docs/operating.md): outages, upgrades, retention |
 | `examples/` | Example `rowbit.yml` and `rowbit-server.yml`, and the [quickstart](docs/quickstart.md)'s sample database |
 | `web/` | The review UI's source (Svelte), built into `crates/rowbit-web/dist` |
