@@ -7,6 +7,7 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 ### New
 
 - `rowbit connect <client>` adds Rowbit to Claude Code, Cursor, VS Code, Claude Desktop, Codex, Gemini CLI or Windsurf as one agent: over HTTP with a new token when `mcp.http` is on, otherwise over stdio. It edits the client's own file (Claude Code through `claude mcp add`), keeps a backup, refuses a file it can't parse, and replaces nothing without `--force` or `--new-token`. `--print` shows what to add by hand; `rowbit connect` alone lists the clients it finds.
+- `rowbit demo` runs the quickstart's shop database in Docker with Rowbit in front of it, in a `rowbit-demo` directory: it proposes three example writes, offers to connect an agent client it finds, prints what to ask the agent, and serves the review page. `rowbit demo clean` removes the client entry, the database and the files. Needs Docker; nothing else.
 
 ## 0.2.0 (2026-10-30)
 

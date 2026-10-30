@@ -190,6 +190,8 @@ impl Scope {
 /// a home of their own.
 pub struct Env {
     pub home: PathBuf,
+    /// Where Claude Code's `local` scope applies.
+    pub cwd: PathBuf,
     pub macos: bool,
     pub path: Option<std::ffi::OsString>,
     pub xdg_config_home: Option<PathBuf>,
@@ -203,6 +205,7 @@ impl Env {
             .context("HOME is not set")?;
         Ok(Env {
             home,
+            cwd: std::env::current_dir()?,
             macos: cfg!(target_os = "macos"),
             path: std::env::var_os("PATH"),
             xdg_config_home: std::env::var_os("XDG_CONFIG_HOME")
@@ -264,6 +267,7 @@ pub fn check_name(name: &str) -> anyhow::Result<()> {
 pub fn exists(client: Client, env: &Env, name: &str) -> anyhow::Result<bool> {
     if client == Client::ClaudeCode {
         let status = Command::new("claude")
+            .current_dir(&env.cwd)
             .args(["mcp", "get", name])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -309,6 +313,7 @@ pub fn apply(
         if force {
             // Fails if there was nothing to remove, which is fine.
             let _ = Command::new("claude")
+                .current_dir(&env.cwd)
                 .args(["mcp", "remove", "--scope", scope.as_str(), name])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -316,6 +321,7 @@ pub fn apply(
                 .status();
         }
         let output = Command::new("claude")
+            .current_dir(&env.cwd)
             .args(claude_args(scope, name, server))
             .stdin(Stdio::null())
             .output()
@@ -350,6 +356,113 @@ pub fn apply(
     Ok(Applied {
         place: file.display().to_string(),
     })
+}
+
+/// What `remove` found.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Removal {
+    Removed,
+    /// Not the entry Rowbit wrote: left as it is.
+    Changed,
+    Missing,
+}
+
+/// Takes back an entry `apply` added, if it still points at `url` (or,
+/// for a stdio entry, still runs `rowbit mcp`).
+pub fn remove(client: Client, env: &Env, name: &str, url: Option<&str>) -> anyhow::Result<Removal> {
+    if client == Client::ClaudeCode {
+        let status = Command::new("claude")
+            .current_dir(&env.cwd)
+            .args(["mcp", "remove", "--scope", "local", name])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .context("running claude")?;
+        return Ok(if status.success() {
+            Removal::Removed
+        } else {
+            Removal::Missing
+        });
+    }
+    let file = client
+        .config_file(env)
+        .context("this client isn't supported on this system")?;
+    let src = match std::fs::read_to_string(&file) {
+        Ok(src) => src,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Removal::Missing),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", file.display())),
+    };
+    let ours = |found_url: Option<&str>, args: Option<String>| match url {
+        Some(url) => found_url == Some(url),
+        None => args.is_some_and(|a| a.starts_with("mcp ")),
+    };
+    let new = if client == Client::Codex {
+        let mut doc = parse_toml(&file, &src)?;
+        let Some(servers) = doc
+            .get_mut("mcp_servers")
+            .and_then(|t| t.as_table_like_mut())
+        else {
+            return Ok(Removal::Missing);
+        };
+        let Some(entry) = servers.get(name) else {
+            return Ok(Removal::Missing);
+        };
+        let args = entry.get("args").and_then(|a| a.as_array()).map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        });
+        if !ours(entry.get("url").and_then(|u| u.as_str()), args) {
+            return Ok(Removal::Changed);
+        }
+        servers.remove(name);
+        doc.to_string()
+    } else {
+        let mut doc = parse_json(&file, &src)?;
+        let Json::Obj(top) = &mut doc else {
+            return Ok(Removal::Missing);
+        };
+        let Some(Json::Obj(servers)) = top.get_mut(client.servers_key()) else {
+            return Ok(Removal::Missing);
+        };
+        let Some(Json::Obj(entry)) = servers.get(name) else {
+            return Ok(if servers.contains_key(name) {
+                Removal::Changed
+            } else {
+                Removal::Missing
+            });
+        };
+        let text = |k: &str| match entry.get(k) {
+            Some(Json::Str(s)) => Some(s.as_str()),
+            _ => None,
+        };
+        let found_url = text("url").or(text("httpUrl")).or(text("serverUrl"));
+        let args = match entry.get("args") {
+            Some(Json::Arr(a)) => Some(
+                a.iter()
+                    .filter_map(|v| match v {
+                        Json::Str(s) => Some(s.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            _ => None,
+        };
+        if !ours(found_url, args) {
+            return Ok(Removal::Changed);
+        }
+        servers.shift_remove(name);
+        let mut text = serde_json::to_string_pretty(&doc).expect("JSON always serializes");
+        text.push('\n');
+        text
+    };
+    std::fs::copy(&file, backup_path(&file))
+        .with_context(|| format!("backing up {}", file.display()))?;
+    write_private(&file, &new)?;
+    Ok(Removal::Removed)
 }
 
 /// The file's new text, with the entry added.
@@ -590,14 +703,55 @@ pub struct ConnectArgs {
     store: super::StoreArgs,
     #[command(flatten)]
     server: super::ServerArgs,
+    /// Set by `rowbit demo`: run as if in this directory.
+    #[arg(skip)]
+    dir: Option<PathBuf>,
 }
 
-pub fn run(a: ConnectArgs) -> anyhow::Result<()> {
-    let env = Env::current()?;
+impl ConnectArgs {
+    /// What `rowbit demo` runs in its directory.
+    pub fn in_dir(dir: &Path, client: Client) -> ConnectArgs {
+        ConnectArgs {
+            client: Some(client),
+            agent: None,
+            name: "rowbit".into(),
+            scope: Scope::Local,
+            stdio: false,
+            new_token: false,
+            force: false,
+            print: false,
+            url: None,
+            policy: dir.join("rowbit.yml"),
+            store: super::StoreArgs {
+                store: dir.join("rowbit.db"),
+            },
+            server: super::ServerArgs {
+                config: dir.join("rowbit-server.yml"),
+            },
+            dir: Some(dir.to_owned()),
+        }
+    }
+}
+
+/// What `run` set up, for `rowbit demo` to remember and take back.
+pub struct Connected {
+    pub client: Client,
+    pub name: String,
+    pub agent: String,
+    /// The `/mcp` address, over HTTP.
+    pub url: Option<String>,
+}
+
+pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
+    let mut env = Env::current()?;
+    if let Some(dir) = &a.dir {
+        env.cwd = dir.clone();
+    }
     check_name(&a.name)?;
     let Some(client) = a.client else {
         if a.print {
-            return print_address(&a);
+            print_address(&a)?;
+            return Ok(None);
         }
         println!("Clients Rowbit can set up (rowbit connect <client>):\n");
         for c in Client::ALL {
@@ -609,7 +763,7 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<()> {
             println!("  {:<15} {:<15} {found}", c.id(), c.label());
         }
         println!("\nFor any other MCP client: rowbit connect --print");
-        return Ok(());
+        return Ok(None);
     };
     anyhow::ensure!(
         a.scope != Scope::Project,
@@ -652,7 +806,7 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<()> {
     };
     if a.print {
         print!("{}", snippet(client, &env, &a.name, &server, a.scope));
-        return Ok(());
+        return Ok(None);
     }
     let applied = match apply(client, &env, &a.name, &server, a.scope, a.force) {
         Ok(applied) => applied,
@@ -676,7 +830,9 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<()> {
                 applied.place,
                 &token[token.len().saturating_sub(4)..]
             );
-            if address.public_url.is_none()
+            // `rowbit demo` starts the server right after.
+            if a.dir.is_none()
+                && address.public_url.is_none()
                 && std::net::TcpStream::connect_timeout(
                     &address.listen,
                     std::time::Duration::from_millis(500),
@@ -706,7 +862,15 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<()> {
         Client::ClaudeCode | Client::Gemini | Client::Codex => {}
         _ => println!("Restart {} to load it.", client.label()),
     }
-    Ok(())
+    Ok(Some(Connected {
+        client,
+        name: a.name,
+        agent,
+        url: match server {
+            Server::Http { url, .. } => Some(url),
+            Server::Stdio { .. } => None,
+        },
+    }))
 }
 
 fn pick_agent(a: &ConnectArgs) -> anyhow::Result<String> {
@@ -753,7 +917,8 @@ fn issue_token(a: &ConnectArgs, agent: &str) -> anyhow::Result<String> {
 }
 
 fn stdio_server(a: &ConnectArgs, agent: &str) -> anyhow::Result<Server> {
-    let url = a.url.clone().context(
+    let here = a.dir.clone().unwrap_or_else(|| PathBuf::from("."));
+    let url = a.url.clone().or_else(|| crate::demo::database_url(&here)).context(
         "over stdio the client needs the database URL: set ROWBIT_DATABASE_URL, or turn on mcp.http in rowbit-server.yml",
     )?;
     let absolute = |p: &Path| -> anyhow::Result<String> {
@@ -801,6 +966,7 @@ mod tests {
     fn env(home: &Path, macos: bool) -> Env {
         Env {
             home: home.to_owned(),
+            cwd: home.to_owned(),
             macos,
             path: None,
             xdg_config_home: None,
@@ -1034,6 +1200,40 @@ mod tests {
             ),
             "{out}"
         );
+    }
+
+    #[test]
+    fn remove_takes_back_only_its_own_entry() {
+        let h = home("remove");
+        let e = env(&h, false);
+        let url = Some("http://127.0.0.1:8080/mcp");
+        assert_eq!(
+            remove(Client::Cursor, &e, "rowbit", url).unwrap(),
+            Removal::Missing
+        );
+        apply(Client::Cursor, &e, "other", &stdio(), Scope::Local, false).unwrap();
+        apply(Client::Cursor, &e, "rowbit", &http(), Scope::Local, false).unwrap();
+        assert_eq!(
+            remove(Client::Cursor, &e, "rowbit", Some("http://elsewhere/mcp")).unwrap(),
+            Removal::Changed
+        );
+        assert_eq!(
+            remove(Client::Cursor, &e, "rowbit", url).unwrap(),
+            Removal::Removed
+        );
+        let doc: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(Client::Cursor.config_file(&e).unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert!(doc["mcpServers"].get("rowbit").is_none());
+        assert!(doc["mcpServers"].get("other").is_some());
+
+        apply(Client::Codex, &e, "rowbit", &http(), Scope::Local, false).unwrap();
+        assert_eq!(
+            remove(Client::Codex, &e, "rowbit", url).unwrap(),
+            Removal::Removed
+        );
+        assert!(!exists(Client::Codex, &e, "rowbit").unwrap());
     }
 
     #[test]

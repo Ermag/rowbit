@@ -1,4 +1,5 @@
 mod connect;
+mod demo;
 mod grants;
 mod review;
 
@@ -166,6 +167,13 @@ enum Command {
         #[command(subcommand)]
         command: GrantsCommand,
     },
+    /// Try Rowbit on a sample shop database, with an agent connected
+    ///
+    /// Needs Docker. Writes the quickstart's files into a directory of its
+    /// own (rowbit-demo), starts MariaDB, proposes three example writes,
+    /// offers to connect an agent client, then serves the review page.
+    /// `rowbit demo clean` removes it all again.
+    Demo(demo::DemoArgs),
     /// Add Rowbit to an agent client: Claude Code, Cursor, VS Code, ...
     ///
     /// Run it where `rowbit serve` runs. With mcp.http in
@@ -310,6 +318,70 @@ impl Setup {
             .with_context(|| format!("opening {}", self.store.display()))?;
         Ok((RowbitEngine::new(adapter, policy, store), database))
     }
+}
+
+/// `rowbit serve`, also run by `rowbit demo`.
+async fn serve(
+    listen: Option<std::net::SocketAddr>,
+    set_password: bool,
+    server: &ServerArgs,
+    setup: &Setup,
+) -> anyhow::Result<()> {
+    let config = server.load()?;
+    let listen = config.listen(listen);
+    config.check_listen(listen)?;
+    let sign_in = match (&config.oidc, &config.public_url) {
+        (Some(oidc), Some(public_url)) => {
+            anyhow::ensure!(
+                !set_password,
+                "reviewers sign in through {}; there is no page password",
+                oidc.issuer
+            );
+            let login = rowbit_web::oidc::OidcLogin::discover(oidc, public_url)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+            rowbit_web::SignIn::Oidc(Box::new(login))
+        }
+        _ => rowbit_web::SignIn::Password {
+            hash: page_password(&setup.store, set_password)?,
+        },
+    };
+    let (engine, database) = setup.engine()?;
+    check_scopes(&engine).await;
+    // Every process that proposes changes queues notifications from
+    // this setting; only this one sends them, with the secrets.
+    engine.set_notify(&rowbit_engine::NotifySetting {
+        review_url: config.public_url.clone(),
+        targets: config
+            .notify
+            .iter()
+            .map(|n| rowbit_engine::NotifyTarget {
+                name: n.name.clone(),
+                agents: n.agents.clone(),
+            })
+            .collect(),
+    })?;
+    let engine = std::sync::Arc::new(engine);
+    tokio::spawn(rowbit_web::notify::Notifier::new(engine.clone(), config.notify.clone()).run());
+    let web = rowbit_web::Web {
+        sign_in,
+        hosts: config.public_host().into_iter().collect(),
+        secure: config.https(),
+        mcp: config.mcp_http.then_some(database),
+    };
+    let address = config
+        .public_url
+        .clone()
+        .unwrap_or_else(|| format!("http://{listen}"));
+    eprintln!("rowbit: review page on {address}/");
+    if config.mcp_http {
+        eprintln!("rowbit: agents over MCP at {address}/mcp, each with its own token");
+    }
+    for n in &config.notify {
+        eprintln!("rowbit: held changes are announced to {}", n.name);
+    }
+    rowbit_web::serve(engine, web, listen).await?;
+    Ok(())
 }
 
 fn decision_name(d: rowbit_policy::Decision) -> &'static str {
@@ -618,64 +690,7 @@ async fn main() -> anyhow::Result<()> {
             set_password,
             server,
             setup,
-        } => {
-            let config = server.load()?;
-            let listen = config.listen(listen);
-            config.check_listen(listen)?;
-            let sign_in = match (&config.oidc, &config.public_url) {
-                (Some(oidc), Some(public_url)) => {
-                    anyhow::ensure!(
-                        !set_password,
-                        "reviewers sign in through {}; there is no page password",
-                        oidc.issuer
-                    );
-                    let login = rowbit_web::oidc::OidcLogin::discover(oidc, public_url)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                    rowbit_web::SignIn::Oidc(Box::new(login))
-                }
-                _ => rowbit_web::SignIn::Password {
-                    hash: page_password(&setup.store, set_password)?,
-                },
-            };
-            let (engine, database) = setup.engine()?;
-            check_scopes(&engine).await;
-            // Every process that proposes changes queues notifications from
-            // this setting; only this one sends them, with the secrets.
-            engine.set_notify(&rowbit_engine::NotifySetting {
-                review_url: config.public_url.clone(),
-                targets: config
-                    .notify
-                    .iter()
-                    .map(|n| rowbit_engine::NotifyTarget {
-                        name: n.name.clone(),
-                        agents: n.agents.clone(),
-                    })
-                    .collect(),
-            })?;
-            let engine = std::sync::Arc::new(engine);
-            tokio::spawn(
-                rowbit_web::notify::Notifier::new(engine.clone(), config.notify.clone()).run(),
-            );
-            let web = rowbit_web::Web {
-                sign_in,
-                hosts: config.public_host().into_iter().collect(),
-                secure: config.https(),
-                mcp: config.mcp_http.then_some(database),
-            };
-            let address = config
-                .public_url
-                .clone()
-                .unwrap_or_else(|| format!("http://{listen}"));
-            eprintln!("rowbit: review page on {address}/");
-            if config.mcp_http {
-                eprintln!("rowbit: agents over MCP at {address}/mcp, each with its own token");
-            }
-            for n in &config.notify {
-                eprintln!("rowbit: held changes are announced to {}", n.name);
-            }
-            rowbit_web::serve(engine, web, listen).await?;
-        }
+        } => serve(listen, set_password, &server, &setup).await?,
         Command::Agents {
             command,
             policy,
@@ -759,7 +774,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Grants {
             command: GrantsCommand::Apply { admin, args },
         } => grants::apply(admin, args).await?,
-        Command::Connect(args) => connect::run(args)?,
+        Command::Demo(args) => demo::run(args).await?,
+        Command::Connect(args) => {
+            connect::run(args)?;
+        }
         Command::Ping { url } => {
             let adapter = rowbit_mysql::MySqlAdapter::new(&url)?;
             let info = adapter.server_info().await?;
