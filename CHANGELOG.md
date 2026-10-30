@@ -2,6 +2,14 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
+## Unreleased
+
+### Docs
+
+- The home page is rewritten around what ships: the two commands to try Rowbit, the agent clients it works with, a VS Code install button, a prompt to have an agent set up the demo, and the interactive demo retold with the README's orders story. CI checks it doesn't drift back to describing an unreleased Rowbit.
+- The README's first screen is the pitch, the two commands and the clients, with a section per client; the plan and the repository layout moved to ARCHITECTURE.md and CONTRIBUTING.md.
+- The quickstart starts from `rowbit demo` and needs no Rust; other ways to install, provenance checks included, are at its end.
+
 ## 0.2.0 (2026-10-30)
 
 Scopes the database enforces, shadow mode, a built-in review UI with sign-in through your identity provider, notifications for held changes, and MCP over HTTP.
