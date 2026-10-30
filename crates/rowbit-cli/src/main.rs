@@ -433,6 +433,18 @@ async fn main() -> anyhow::Result<()> {
                 path.display(),
                 policy.agents.len()
             );
+            for (id, agent) in &policy.agents {
+                let mode = match agent.mode {
+                    rowbit_policy::Mode::Enforce => "rules enforced",
+                    rowbit_policy::Mode::Shadow => "shadow mode: rules logged, not enforced",
+                };
+                let scopes = if agent.scopes.is_some() {
+                    "scoped"
+                } else {
+                    "no scopes: Rowbit's own database privileges"
+                };
+                println!("  {id}: {mode}; {scopes}");
+            }
             for warning in policy.warnings() {
                 println!("warning: {warning}");
             }
@@ -449,13 +461,15 @@ async fn main() -> anyhow::Result<()> {
                 ids.extend(store.list(state)?);
             }
             ids.sort_unstable();
-            let (mut checked, mut differ) = (0, 0);
+            let (mut checked, mut differ, mut skipped) = (0, 0, 0);
             for id in ids {
                 let change = store.get(id)?;
                 let Some(was) = rowbit_engine::recorded_decision(&store.events(id)?) else {
+                    skipped += 1;
                     continue;
                 };
                 let Some(now) = rowbit_engine::replay(&policy, &change) else {
+                    skipped += 1;
                     continue;
                 };
                 checked += 1;
@@ -478,7 +492,8 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
             println!(
-                "{checked} recorded change(s) replayed against {}: {differ} would be decided differently",
+                "{checked} recorded change(s) replayed against {}: {differ} would be decided differently; \
+                 {skipped} skipped (refused before policy, so nothing to replay)",
                 path.display()
             );
         }
@@ -633,6 +648,12 @@ async fn main() -> anyhow::Result<()> {
                 .clone()
                 .unwrap_or_else(|| format!("http://{listen}"));
             eprintln!("rowbit: review page on {address}/");
+            if config.mcp_http {
+                eprintln!("rowbit: agents over MCP at {address}/mcp, each with its own token");
+            }
+            for n in &config.notify {
+                eprintln!("rowbit: held changes are announced to {}", n.name);
+            }
             rowbit_web::serve(engine, web, listen).await?;
         }
         Command::Agents {

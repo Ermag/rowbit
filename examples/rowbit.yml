@@ -33,7 +33,13 @@ agents:
     description: Updates ticket status and notes.
     # Rules are logged, not enforced, while the team tunes them: writes go
     # through, and the log says what would have been held or blocked.
+    # Scopes still apply in shadow mode, so the database keeps this agent
+    # to tickets whatever the rules would say.
     mode: shadow
+    scopes:
+      read: [support.tickets]
+      insert: [support.tickets]
+      update: [support.tickets]
     rules:
       - name: tickets
         when:
@@ -46,4 +52,4 @@ agents:
           table: billing.*
         then: block
         reason: Support agents do not write to billing.
-    # default: hold (unmatched changes wait for a person)
+    # default: hold. In shadow mode that is logged, and the change applied.

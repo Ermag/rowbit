@@ -36,6 +36,13 @@ struct File {
     #[serde(default)]
     notify: Vec<NotifyFile>,
     mcp: Option<McpFile>,
+    agent_users: Option<AgentUsersFile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AgentUsersFile {
+    host: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -153,6 +160,8 @@ pub struct ServerConfig {
     pub notify: Vec<Notify>,
     /// Serve agents over MCP at `/mcp`.
     pub mcp_http: bool,
+    /// The host part for scoped agents' database users, if not Rowbit's own.
+    pub agent_users_host: Option<String>,
 }
 
 impl ServerConfig {
@@ -247,6 +256,14 @@ impl ServerConfig {
                 agents: n.agents,
             });
         }
+        let agent_users_host = file.agent_users.and_then(|a| a.host);
+        if let Some(host) = &agent_users_host
+            && (host.is_empty() || host.contains('\\') || host.contains('\''))
+        {
+            return invalid(
+                "agent_users.host must be a host part such as 10.0.0.%, without quotes or backslashes",
+            );
+        }
         if oidc.is_some() && public_url.is_none() {
             return invalid(
                 "public_url is needed with reviewers.oidc: the provider redirects back to it",
@@ -258,7 +275,18 @@ impl ServerConfig {
             oidc,
             notify,
             mcp_http: file.mcp.is_some_and(|m| m.http),
+            agent_users_host,
         })
+    }
+
+    /// Just `agent_users.host`, for `rowbit grants`, which shouldn't need
+    /// the sign-in and notification secrets the rest of the file reads.
+    pub fn agent_users_host(src: &str) -> Result<Option<String>, ConfigError> {
+        let v: serde_norway::Value = serde_norway::from_str(src)?;
+        Ok(v.get("agent_users")
+            .and_then(|a| a.get("host"))
+            .and_then(|h| h.as_str())
+            .map(str::to_owned))
     }
 
     /// Where to listen: `flag` if given, else the file's, else the default.

@@ -23,9 +23,17 @@ pub struct Admin {
     /// Rowbit's user, so they can connect from where Rowbit runs.
     #[arg(long, env = "ROWBIT_DATABASE_URL", hide_env_values = true)]
     url: Option<String>,
-    /// The host part for agents' users, instead of Rowbit's
+    /// The host part for agents' users, instead of rowbit-server.yml's
+    /// agent_users.host or Rowbit's own
     #[arg(long)]
     agent_host: Option<String>,
+    /// Server settings, for agent_users.host
+    #[arg(
+        long = "config",
+        env = "ROWBIT_SERVER_CONFIG",
+        default_value = "rowbit-server.yml"
+    )]
+    config: PathBuf,
     /// The policy file
     #[arg(long, env = "ROWBIT_POLICY", default_value = "rowbit.yml")]
     policy: PathBuf,
@@ -110,7 +118,14 @@ async fn connect(url: &str) -> anyhow::Result<Conn> {
 
 /// The host part for agents' users.
 async fn agent_host(admin: &Admin) -> anyhow::Result<String> {
-    let host = match (&admin.agent_host, &admin.url) {
+    let from_file = if admin.config.exists() {
+        let src = std::fs::read_to_string(&admin.config)
+            .with_context(|| format!("reading {}", admin.config.display()))?;
+        rowbit_web::config::ServerConfig::agent_users_host(&src)?
+    } else {
+        None
+    };
+    let host = match (admin.agent_host.as_ref().or(from_file.as_ref()), &admin.url) {
         (Some(host), _) => host.clone(),
         (None, Some(url)) => {
             let mut conn = connect(url)
@@ -127,8 +142,8 @@ async fn agent_host(admin: &Admin) -> anyhow::Result<String> {
         ),
     };
     anyhow::ensure!(
-        !host.contains('\\'),
-        "the host part {host:?} has a backslash, which Rowbit refuses"
+        !host.is_empty() && !host.contains('\\') && !host.contains('\''),
+        "the host part {host:?} is empty or has a quote or backslash, which Rowbit refuses"
     );
     Ok(host)
 }
