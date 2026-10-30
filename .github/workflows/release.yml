@@ -1,0 +1,209 @@
+name: Release
+
+# On a v* tag: build every target, check the install script against the
+# builds, then publish a GitHub Release with the archives, SHA256SUMS and
+# build provenance attestations. Run by hand, or on a pull request that
+# touches the build or the install script, it does everything but publish.
+# See docs/spec/setup.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "site/install.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: The tag is the workspace version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          test -n "$version"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME isn't v$version, the version in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-15
+          - target: aarch64-apple-darwin
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    env:
+      NAME: rowbit-${{ needs.version.outputs.version }}-${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: musl C toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Rust target
+        run: rustup target add ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked -p rowbit-cli --target ${{ matrix.target }}
+      - name: Runs
+        run: |
+          bin=target/${{ matrix.target }}/release/rowbit
+          if [ "${{ matrix.target }}" = x86_64-apple-darwin ]; then
+            # Built on Apple silicon; runs under Rosetta where the runner has it.
+            arch -x86_64 "$bin" --version || echo "::warning::no Rosetta on this runner; x86_64 binary not run"
+          else
+            "$bin" --version
+          fi
+          file "$bin"
+      - name: Static
+        if: runner.os == 'Linux'
+        run: |
+          out=$(ldd target/${{ matrix.target }}/release/rowbit 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -Eq 'not a dynamic executable|statically linked'
+      - name: Pack
+        run: |
+          mkdir "$NAME"
+          cp target/${{ matrix.target }}/release/rowbit LICENSE README.md CHANGELOG.md "$NAME/"
+          tar -czf "$NAME.tar.gz" "$NAME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: ${{ env.NAME }}.tar.gz
+          if-no-files-found: error
+
+  sums:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: dist
+        run: |
+          sha256sum rowbit-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+
+  install-script:
+    needs: [version, sums]
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck site/install.sh
+      - name: Serve the builds
+        run: |
+          (cd dist && python3 -m http.server 8765 >/dev/null 2>&1 &)
+          for _ in $(seq 20); do curl -fs -o /dev/null http://127.0.0.1:8765/SHA256SUMS && exit 0; sleep 0.5; done
+          exit 1
+      - name: Installs and runs
+        env:
+          ROWBIT_DOWNLOAD_URL: http://127.0.0.1:8765
+          ROWBIT_INSTALL_DIR: ${{ runner.temp }}/bin
+        run: |
+          sh site/install.sh
+          test "$("$ROWBIT_INSTALL_DIR/rowbit" --version)" = "rowbit ${{ needs.version.outputs.version }}"
+      - name: Installs with wget
+        if: runner.os == 'Linux'
+        env:
+          ROWBIT_DOWNLOAD_URL: http://127.0.0.1:8765
+          ROWBIT_INSTALL_DIR: ${{ runner.temp }}/bin-wget
+        run: |
+          mkdir "$RUNNER_TEMP/no-curl"
+          for tool in sh uname mktemp grep head cut tar gzip mkdir cp chmod mv rm sha256sum wget; do
+            ln -s "$(command -v "$tool")" "$RUNNER_TEMP/no-curl/$tool"
+          done
+          PATH="$RUNNER_TEMP/no-curl" sh site/install.sh
+          "$ROWBIT_INSTALL_DIR/rowbit" --version
+      - name: Refuses a download that doesn't match SHA256SUMS
+        env:
+          ROWBIT_DOWNLOAD_URL: http://127.0.0.1:8765
+          ROWBIT_INSTALL_DIR: ${{ runner.temp }}/bin-bad
+        run: |
+          cp dist/SHA256SUMS sums.good
+          sed 's/^./0/' sums.good > dist/SHA256SUMS
+          if sh site/install.sh; then echo "installed despite a bad checksum"; exit 1; fi
+          test ! -e "$ROWBIT_INSTALL_DIR/rowbit"
+          cp sums.good dist/SHA256SUMS
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [version, install-script]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: The archives are the ones SHA256SUMS lists
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/rowbit-*.tar.gz
+      - name: Notes
+        run: |
+          {
+            echo "What changed for someone running Rowbit, and how to upgrade: [the changelog](https://github.com/$GH_REPO/blob/$GITHUB_REF_NAME/CHANGELOG.md)."
+            echo
+            echo 'Install: `curl -fsSL https://ermag.github.io/rowbit/install.sh | sh`. Check an archive came from this workflow with `gh attestation verify <archive> --repo Ermag/rowbit`.'
+            echo
+            gh api "repos/$GH_REPO/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body
+          } > notes.md
+          cat notes.md
+      - name: Publish
+        run: |
+          pre=
+          case "$VERSION" in *-*) pre=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Rowbit $VERSION" \
+            --notes-file notes.md $pre dist/rowbit-*.tar.gz dist/SHA256SUMS

@@ -2,6 +2,14 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
+## Unreleased
+
+### New
+
+- Prebuilt binaries for Linux (x86-64 and ARM64, static) and macOS (Intel and Apple silicon) on each GitHub release, with `SHA256SUMS` and build provenance attestations (`gh attestation verify`).
+- An install script: `curl -fsSL https://ermag.github.io/rowbit/install.sh | sh` installs the latest release to `~/.local/bin`, checking it against `SHA256SUMS`, without `sudo`.
+- `cargo binstall --git https://github.com/Ermag/rowbit rowbit-cli` installs the release binary without compiling.
+
 ## 0.2.0 (2026-10-30)
 
 Scopes the database enforces, shadow mode, a built-in review UI with sign-in through your identity provider, notifications for held changes, and MCP over HTTP.
