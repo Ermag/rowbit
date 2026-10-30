@@ -1,0 +1,17 @@
+# The docs site, https://ermag.github.io/rowbit/docs/. Built by
+# scripts/build-docs.py, which rewrites links that leave docs/ and adds the
+# Markdown copies and llms.txt, into a build directory with the pages under
+# src/. See docs/spec/setup.md.
+[book]
+title = "Rowbit docs"
+description = "A safety net for AI agents that write to your database: preview every write, approve the risky ones, undo any single change."
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/Ermag/rowbit"
+site-url = "/rowbit/docs/"
+no-section-label = true
+
+[output.html.search]
+enable = true
