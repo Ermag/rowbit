@@ -75,7 +75,7 @@ The suggested prompt is picked so that a typical agent writes the too-broad `UPD
 
 Stopping it with Ctrl-C stops `rowbit serve` and leaves the database running, so the next `rowbit demo` starts at once.
 
-`rowbit demo clean [--dir <path>]` works only on a directory marked `.rowbit-demo`. It removes the client entries the demo added (with the client's own remove command, or by editing its file as below; an entry changed since, or a client with no remove command, such as VS Code, is left and named, with how to remove it), runs `docker compose down -v`, which removes the container and its data, deletes the files the demo wrote, `rowbit.db` and its side files, and the directory if nothing else is left in it.
+`rowbit demo clean [--dir <path>]` works only on a directory marked `.rowbit-demo`. It removes the client entries the demo added (with `claude mcp remove` for Claude Code, otherwise by editing the client's file as below; an entry that no longer points at the demo is left, and named), runs `docker compose down -v`, which removes the container and its data, deletes the files the demo wrote, `rowbit.db` and its side files, and the directory if nothing else is left in it.
 
 Compose names the project after the directory, so two demo directories with the same name share a database. Run one demo at a time.
 
