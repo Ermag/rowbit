@@ -23,6 +23,18 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo deny check    # cargo install cargo-deny
 ```
 
+## Repository layout
+
+| Path | What |
+|---|---|
+| `crates/` | Rust workspace: `rowbit-core`, `rowbit-policy`, `rowbit-mysql`, `rowbit-store`, `rowbit-engine`, `rowbit-mcp`, `rowbit-web`, `rowbit-cli`. See [ARCHITECTURE.md](ARCHITECTURE.md) |
+| `docs/spec/` | [Change lifecycle](docs/spec/change-lifecycle.md), [rowbit.yml](docs/spec/policy.md) and [rowbit-server.yml](docs/spec/server.md) specs, and [installing and setting up](docs/spec/setup.md) |
+| `docs/operating.md` | [Running Rowbit](docs/operating.md): outages, upgrades, retention |
+| `examples/` | Example `rowbit.yml` and `rowbit-server.yml`, and the [quickstart](docs/quickstart.md)'s sample database |
+| `web/` | The review UI's source (Svelte), built into `crates/rowbit-web/dist` |
+| `compose.yaml` | MariaDB 11.4 and MySQL 8.4 for integration tests |
+| `site/` | The home page and `install.sh`, deployed to GitHub Pages with the docs from `docs/` on every push to `main` |
+
 ## Sign off your commits (DCO)
 
 Rowbit uses the [Developer Certificate of Origin](https://developercertificate.org/) instead of a CLA. By adding a `Signed-off-by` line to a commit you certify that you wrote it or otherwise have the right to submit it under the project's licenses.

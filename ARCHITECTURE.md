@@ -36,6 +36,12 @@ Rust (edition 2024), `tokio`, `sqlparser-rs` for SQL classification, `rmcp` for 
 - An agent can never approve. There is no MCP tool for it, and the state machine refuses it from an agent actor.
 - Apply exactly the previewed rows, and refuse if they drifted.
 
+## Direction
+
+- Rust core, Svelte review UI built into the binary.
+- MCP server first, MySQL wire-protocol proxy second.
+- MariaDB and MySQL first, other databases through adapters later.
+
 ## Specs
 
 - [Change lifecycle](docs/spec/change-lifecycle.md)
