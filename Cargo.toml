@@ -43,6 +43,10 @@ sqlparser = { version = "0.63", features = ["visitor"] }
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
+# Release binaries without symbols, about a quarter smaller.
+[profile.release]
+strip = "symbols"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
