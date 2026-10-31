@@ -153,7 +153,7 @@ fn claude_code_is_set_up_with_its_own_command() {
     assert!(!ok && out.contains("committed"), "{out}");
     let (ok, out) = c.run(&["connect", "claude-code"]);
     assert!(ok, "{out}");
-    assert!(out.contains("Start Claude Code in "), "{out}");
+    assert!(out.contains("Start Claude Code there: cd "), "{out}");
     assert!(!out.contains("workspace"), "{out}");
     let calls = std::fs::read_to_string(&log).unwrap();
     assert!(calls.starts_with("mcp get rowbit\n"), "{calls}");
@@ -168,6 +168,45 @@ fn claude_code_is_set_up_with_its_own_command() {
         !ok && out.contains("already has a server called rowbit"),
         "{out}"
     );
+}
+
+#[test]
+fn check_says_whether_the_client_sees_rowbit_and_rowbit_answers() {
+    let c = Case::new("check");
+    c.http();
+    c.fake_claude();
+    let (ok, out) = c.run(&["connect", "claude-code", "--check"]);
+    assert!(
+        !ok && out.contains("Claude Code has no server called rowbit when started in "),
+        "{out}"
+    );
+    let (ok, out) = c.run(&["connect", "claude-code"]);
+    assert!(ok, "{out}");
+    // Nothing listens on port 1.
+    let (ok, out) = c.run(&["connect", "claude-code", "--check"]);
+    assert!(
+        !ok && out.contains("Claude Code has rowbit when started in ")
+            && out.contains("Nothing answers at http://127.0.0.1:1"),
+        "{out}"
+    );
+    let (ok, out) = c.run(&["connect", "claude-code", "--check", "--force"]);
+    assert!(!ok && out.contains("cannot be used with"), "{out}");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    std::fs::write(
+        c.dir.join("rowbit-server.yml"),
+        format!(
+            "version: 0\nlisten: {}\nmcp:\n  http: true\n",
+            listener.local_addr().unwrap()
+        ),
+    )
+    .unwrap();
+    let (ok, out) = c.run(&["connect", "claude-code", "--check"]);
+    assert!(
+        ok && out.contains("Rowbit answers at http://127.0.0.1:"),
+        "{out}"
+    );
+    assert!(out.contains("&& claude"), "{out}");
 }
 
 #[test]

@@ -188,13 +188,16 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
             println!();
             // A client that can't be set up shouldn't stop the demo.
             match connect::run(connect::ConnectArgs::in_dir(&dir, &workspace, client)) {
-                Ok(Some(c)) => marker.connected.push(Entry {
-                    client: c.client.id().into(),
-                    name: c.name,
-                    agent: c.agent,
-                    url: c.url,
-                    token_end: c.token_end,
-                }),
+                Ok(Some(c)) => {
+                    check_connected(&c, &workspace);
+                    marker.connected.push(Entry {
+                        client: c.client.id().into(),
+                        name: c.name,
+                        agent: c.agent,
+                        url: c.url,
+                        token_end: c.token_end,
+                    })
+                }
                 Ok(None) => {}
                 Err(e) => {
                     say(&format!("Couldn't connect {}: {e:#}", client.label()));
@@ -213,6 +216,10 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
         .connected
         .first()
         .and_then(|e| Some((client_by_id(&e.client)?, e.agent.clone())));
+    let env = Env::current()?;
+    let open = connected
+        .as_ref()
+        .map(|(client, _)| client.open_in(&workspace, &env));
 
     let password = rowbit_web::new_password();
     {
@@ -228,19 +235,36 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
         "Review page: {address}    password: {password}    name: anything"
     ));
     println!();
-    match connected {
-        Some((client, agent)) => {
-            let open = match client {
-                Client::ClaudeCode => format!("Open Claude Code in {shown_workspace}"),
-                Client::Codex | Client::Gemini => {
-                    format!("Start {} in {shown_workspace}", client.label())
+    match (&connected, &open) {
+        (Some((client, agent)), Some(open)) => {
+            match client {
+                Client::ClaudeCode => {
+                    say(&format!(
+                        "Claude Code is connected as {agent}, in {shown_workspace} only. In a new terminal, start it there:"
+                    ));
+                    println!();
+                    say(&format!("  {open}"));
+                    println!();
+                    say("(A Claude Code already open there needs a restart.) Then ask:");
                 }
-                _ => format!("Open {} on {shown_workspace}", client.label()),
-            };
-            say(&format!(
-                "{} is connected as {agent}. {open} and ask:",
-                client.label()
-            ));
+                Client::Codex | Client::Gemini => {
+                    say(&format!(
+                        "{} is connected as {agent}. In a new terminal, start it in {shown_workspace}:",
+                        client.label()
+                    ));
+                    println!();
+                    say(&format!("  {open}"));
+                    println!();
+                    say("Then ask:");
+                }
+                Client::ClaudeDesktop => say(&format!(
+                    "Claude Desktop is connected as {agent}. Restart it, then ask:"
+                )),
+                _ => say(&format!(
+                    "{} is connected as {agent}. Open it on {shown_workspace} (restart it if it's open) and ask:",
+                    client.label()
+                )),
+            }
             println!();
             say(&format!("  {PROMPT}"));
             println!();
@@ -252,7 +276,7 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
             );
             say("(Change 2 on the review page is the demo's own example of that write.)");
         }
-        None => {
+        _ => {
             say(&format!(
                 "Connect an agent: cd {shown} && rowbit connect <client> (rowbit connect lists them)."
             ));
@@ -270,6 +294,12 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
     say(
         "Ctrl-C stops the review page; the database keeps running. `rowbit demo clean` removes it all.",
     );
+    if let (Some((client, _)), Some(open)) = (&connected, &open)
+        && client.uses_dir()
+    {
+        println!();
+        say(&format!("Next, in a new terminal: {open}"));
+    }
     println!();
     std::io::stdout().flush()?;
 
@@ -283,6 +313,24 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
         &setup,
     )
     .await
+}
+
+/// Says so if the client doesn't show the entry just added, where the agent
+/// works. A warning, not an error: the demo is still worth running.
+fn check_connected(c: &connect::Connected, workspace: &Path) {
+    let seen = Env::current().and_then(|mut env| {
+        env.cwd = workspace.to_owned();
+        connect::exists(c.client, &env, &c.name)
+    });
+    if !matches!(seen, Ok(true)) {
+        say(&format!(
+            "{} doesn't show {} in {} yet; once the demo is up, run `rowbit connect {} --check` in another terminal to see why.",
+            c.client.label(),
+            c.name,
+            shown_dir(workspace),
+            c.client.id()
+        ));
+    }
 }
 
 /// The directory, created and filled, or the existing demo's marker.

@@ -2,6 +2,17 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
+## Unreleased
+
+### Fixed
+
+- `rowbit demo` connected Claude Code in `rowbit-demo/workspace` while the quickstart sent people to `rowbit-demo`, where Claude Code has no Rowbit tools. The demo now ends with the line to paste into a new terminal (`cd <full path>/workspace && claude`), checks that the client shows the entry, and the quickstart opens the agent before the CLI steps.
+
+### New
+
+- `rowbit connect <client> --check` says whether the client has Rowbit from here and whether Rowbit answers, without changing anything.
+- The Rowbit skill tells an agent without Rowbit's tools to say so and how to fix it, instead of reaching the database another way.
+
 ## 0.2.1 (2026-10-31)
 
 Easy start: prebuilt binaries, a demo with an agent connected in two commands, one-command setup for seven agent clients, and review links agents hand to the person.

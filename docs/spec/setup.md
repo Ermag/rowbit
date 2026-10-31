@@ -62,7 +62,11 @@ Upgrading is running it again, after stopping every Rowbit process and backing u
    Rowbit is guarding the demo shop database.
    Review page: http://127.0.0.1:8080    password: 7Kq…    name: anything
 
-   Claude Code is connected as coding-agent. Open Claude Code in rowbit-demo/workspace/ and ask:
+   Claude Code is connected as coding-agent, in rowbit-demo/workspace/ only. In a new terminal, start it there:
+
+     cd /Users/you/rowbit-demo/workspace && claude
+
+   (A Claude Code already open there needs a restart.) Then ask:
 
      The pending orders are stuck. Cancel them.
 
@@ -71,7 +75,9 @@ Upgrading is running it again, after stopping every Rowbit process and backing u
    (Change 2 on the review page is the demo's own example of that write.)
    ```
 
-   It says to open the client on `workspace/`, which matters for Claude Code, whose entry applies only there. Without a connected client, it prints how to connect one and the `rowbit propose` line from the quickstart instead. Then the `export ROWBIT_DATABASE_URL=...` line for the CLI, and `rowbit demo clean`.
+   For a client started in a directory (Claude Code, Codex, Gemini CLI), it prints the line that starts it in `workspace/`, with the full path, shell-quoted, so it can be pasted into a new terminal. That matters most for Claude Code, whose entry applies only there. Other clients are told to open `workspace/`, and Claude Desktop to restart. Without a connected client, it prints how to connect one and the `rowbit propose` line from the quickstart instead. Then the `export ROWBIT_DATABASE_URL=...` line for the CLI, `rowbit demo clean`, and, for a client started in a directory, the start line again as `Next, in a new terminal: ...`, so it's the last thing on screen.
+
+   Right after connecting, the demo asks the client whether it shows the entry from `workspace/`, as `rowbit connect --check` does. If it doesn't, the demo says so and to run `rowbit connect <client> --check`, and carries on.
 
 The suggested prompt is picked so that a typical agent writes the too-broad `UPDATE` and Rowbit holds it; a careful agent may ask first which orders count, and the person says all of them. `workspace/` is a separate working directory, not a sandbox: an agent with a shell can still reach `..`, so for anything beyond the demo, run Rowbit as a user the agent can't act as (see [Before you use it for real](../quickstart.md#before-you-use-it-for-real)).
 
@@ -112,6 +118,8 @@ When Rowbit edits a client's file itself, it:
 - copies the old file to `<file>.rowbit-backup` before writing, and writes through a temporary file and a rename. The file then holds a token or a database URL, so it is made readable by its owner only, and Rowbit says so if it wasn't; a new file starts that way. A symlinked file (a dotfile manager's) is followed and its target written, so the link stays.
 
 Every run prints what it changed and where, with the token shortened to `rbt_` and its last four characters, and says to restart the client if it only reads its configuration on start.
+
+`rowbit connect <client> --check` changes nothing and makes no token. It says whether the client has the entry (`claude mcp get` from the directory the entry applies to, which in a demo directory is `workspace/`, or the client's file), then, over HTTP without a `public_url`, whether anything answers at the address, and for Claude Code the line that starts it in that directory. It exits non-zero if the entry is missing or nothing answers. It can't be combined with `--print`, `--force`, `--new-token` or `--stdio`.
 
 `rowbit connect <client> --print` changes no client configuration: it prints the command to run or the entry to add, with the full token, for setting up by hand or on another machine. It still makes the token. `rowbit connect --print` without a client prints the address and the token, for any other MCP client.
 
