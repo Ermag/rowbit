@@ -194,6 +194,17 @@ rowbit serve
 claude mcp add --transport http rowbit http://127.0.0.1:8080/mcp --header "Authorization: Bearer <token>"
 ```
 
+### Let Rowbit set up the client
+
+`rowbit connect` does either setup for you, in the client's own configuration: over HTTP when `rowbit-server.yml` turns it on, making the agent's token itself, otherwise over stdio with the database URL from `ROWBIT_DATABASE_URL`. Run it in `examples/quickstart`:
+
+```sh
+rowbit connect                  # lists the clients it knows, and which are installed
+rowbit connect claude-code      # or cursor, vscode, claude-desktop, codex, gemini, windsurf
+```
+
+It keeps a backup of any file it changes, refuses one it can't parse, and won't replace an entry or an agent's token without `--force` or `--new-token`. `rowbit connect <client> --print` shows what to add by hand instead. See [`rowbit connect`](spec/setup.md#rowbit-connect).
+
 ## Before you use it for real
 
 - **Keep the agent away from Rowbit's credentials, state and review page.** The setup above is for trying Rowbit only. An agent that can read the database URL can connect around Rowbit. An agent that can also read `rowbit.db` can run `rowbit approve` and approve its own change: the CLI records whatever name `--as` gives. The review page needs its password, so keep that from the agent too. So run Rowbit and its files as an operating system user the agent can't act as. With stdio, one way is to have the MCP client start Rowbit through `sudo`:
