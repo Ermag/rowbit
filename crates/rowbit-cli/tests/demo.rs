@@ -77,11 +77,23 @@ fn never_writes_into_a_directory_of_yours() {
 #[test]
 fn writes_the_quickstart_files_with_its_port() {
     let r = root("files");
-    // Compose "succeeds" without starting anything, so the demo stops at
-    // the database it can't reach, after writing its files.
-    fake_docker(&r, 0);
-    let (ok, out) = rowbit(&r, &["demo", "--port", "1", "--no-connect"]);
-    assert!(!ok, "{out}");
+    // Docker is there, but `compose up` fails, so the demo stops after
+    // writing its files.
+    let path = r.join("bin/docker");
+    std::fs::write(&path, "#!/bin/sh\n[ \"$2\" = up ] && exit 1\nexit 0\n").unwrap();
+    std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let (ok, out) = rowbit(
+        &r,
+        &[
+            "demo",
+            "--port",
+            "1",
+            "--listen",
+            "127.0.0.1:0",
+            "--no-connect",
+        ],
+    );
+    assert!(!ok && out.contains("docker compose up failed"), "{out}");
     let dir = r.join("rowbit-demo");
     let compose = std::fs::read_to_string(dir.join("compose.yaml")).unwrap();
     assert!(
