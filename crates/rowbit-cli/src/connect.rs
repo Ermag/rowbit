@@ -337,7 +337,7 @@ pub fn apply(
         return Ok(Applied {
             place: match scope {
                 Scope::User => "Claude Code (user settings)".into(),
-                _ => "Claude Code (this directory)".into(),
+                _ => format!("Claude Code (for {})", env.cwd.display()),
             },
             tightened: false,
         });
@@ -812,6 +812,10 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
     let mut env = Env::current()?;
     if let Some(cwd) = a.cwd.as_ref().or(a.dir.as_ref()) {
         env.cwd = cwd.clone();
+    } else if let Some(workspace) = crate::demo::workspace(&env.cwd) {
+        // In a demo directory, the agent works in its workspace, not next
+        // to the demo's passwords.
+        env.cwd = workspace;
     }
     check_name(&a.name)?;
     let Some(client) = a.client else {
@@ -931,7 +935,7 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
         // `rowbit demo` says where to open the client itself.
         _ if a.dir.is_some() => {}
         Client::ClaudeCode if a.scope == Scope::Local => {
-            println!("Start Claude Code in this directory to use it.")
+            println!("Start Claude Code in {} to use it.", env.cwd.display())
         }
         Client::ClaudeCode | Client::Gemini | Client::Codex => {}
         _ => println!("Restart {} to load it.", client.label()),

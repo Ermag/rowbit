@@ -102,6 +102,12 @@ struct Entry {
     token_end: Option<String>,
 }
 
+/// The agent's workspace, if `dir` is a demo directory that has one.
+pub fn workspace(dir: &Path) -> Option<PathBuf> {
+    let w = dir.join(WORKSPACE);
+    (dir.join(MARKER).is_file() && w.is_dir()).then_some(w)
+}
+
 /// The database URL a demo directory records, for `rowbit connect`.
 pub fn database_url(dir: &Path) -> Option<String> {
     read_marker(dir).ok().flatten().map(|m| m.database_url)
