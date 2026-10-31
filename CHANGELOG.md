@@ -2,17 +2,34 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
-## Unreleased
+## 0.2.1 (2026-10-31)
+
+Easy start: prebuilt binaries, a demo with an agent connected in two commands, one-command setup for seven agent clients, and review links agents hand to the person.
+
+```sh
+curl -fsSL https://ermag.github.io/rowbit/install.sh | sh
+rowbit demo
+```
+
+### Upgrading from 0.2.0
+
+Back up `rowbit.db`, stop every Rowbit process, and replace the binary (the install script does that for `~/.local/bin`). Nothing in `rowbit.yml`, `rowbit-server.yml` or the state file changes. Links to a held change are now `/changes/<id>`, in notifications too; the old `/#/changes/<id>` still opens the UI.
 
 ### New
 
 - Prebuilt binaries for Linux (x86-64 and ARM64, static) and macOS (Intel and Apple silicon) on each GitHub release, with `SHA256SUMS` and build provenance attestations (`gh attestation verify`).
-- An install script: `curl -fsSL https://ermag.github.io/rowbit/install.sh | sh` installs the latest release to `~/.local/bin`, checking it against `SHA256SUMS`, without `sudo`.
+- An install script: `curl -fsSL https://ermag.github.io/rowbit/install.sh | sh` installs the latest release to `~/.local/bin`, checking it against `SHA256SUMS`, without `sudo`, and says how to run it if that directory isn't on `PATH` yet.
 - `cargo binstall --git https://github.com/Ermag/rowbit rowbit-cli` installs the release binary without compiling.
-- A held change's result now carries `review_url`, its page on the review UI, from `propose_write`, `change_status` and `rowbit propose`. The server's instructions tell the agent to give the person that link and stop, not to retry the write in another form. `rowbit serve` records its address in the state file, so agents over stdio get the same link. The link (`/changes/<id>`, now also in notifications) opens that change, through sign-in if needed; it used to land on the queue.
-- `rowbit connect <client>` adds Rowbit to Claude Code, Cursor, VS Code, Claude Desktop, Codex, Gemini CLI or Windsurf as one agent: over HTTP with a new token when `mcp.http` is on, otherwise over stdio. It edits the client's own file (Claude Code through `claude mcp add`), keeps a backup, refuses a file it can't parse, and replaces nothing without `--force` or `--new-token`. `--print` shows what to add by hand; `rowbit connect` alone lists the clients it finds.
+- `rowbit demo` runs the quickstart's shop database in Docker with Rowbit in front of it, in a `rowbit-demo` directory: it proposes three example writes, offers to connect an agent client it finds, prints what to ask the agent, and serves the review page. The agent works in `rowbit-demo/workspace/`, a separate directory (not a sandbox). `rowbit demo clean` removes the client entry, the database and the files. Needs Docker; nothing else.
+- `rowbit connect <client>` adds Rowbit to Claude Code, Cursor, VS Code, Claude Desktop, Codex, Gemini CLI or Windsurf as one agent: over HTTP with a new token when `mcp.http` is on, otherwise over stdio. It edits the client's own file (Claude Code through `claude mcp add`), keeps a backup, makes the file its owner's only, refuses a file it can't parse, and replaces nothing without `--force` or `--new-token`. `--print` shows what to add by hand; `rowbit connect` alone lists the clients it finds.
+- A held change's result carries `review_url`, from `propose_write`, `change_status` and `rowbit propose`, and the server's instructions tell the agent to give it to the person and stop rather than retry the write in another form. The link opens that change, through sign-in if needed.
 - A Rowbit skill for coding agents, as a Claude Code plugin from this repository (`/plugin marketplace add Ermag/rowbit`, then `/plugin install rowbit@rowbit`): read the schema first, propose one narrow write at a time, give the person the review link when a write is held, never work around a rule. The `SKILL.md` works in other agents that read skills. Apache-2.0.
-- `rowbit demo` runs the quickstart's shop database in Docker with Rowbit in front of it, in a `rowbit-demo` directory: it proposes three example writes, offers to connect an agent client it finds, prints what to ask the agent, and serves the review page. The agent works in an empty `rowbit-demo/workspace/`, away from the demo's database passwords and state. `rowbit demo clean` removes the client entry, the database and the files. Needs Docker; nothing else.
+
+### Docs
+
+- The docs are on the web at https://ermag.github.io/rowbit/docs/, rendered from `docs/`, with each page's Markdown next to it and `llms.txt` and `llms-full.txt` for agents. A new page, Connect your agent, covers `rowbit connect`, the skill, and stdio versus HTTP.
+- The home page is rewritten around what ships: the two commands, the agent clients it works with, a VS Code install button, a prompt to have an agent install Rowbit, and the interactive demo retold with the orders story.
+- The README's first screen is the pitch, the two commands and the clients, with a section per client. The quickstart starts from `rowbit demo` and needs no Rust.
 
 ## 0.2.0 (2026-10-30)
 

@@ -244,7 +244,12 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
             println!();
             say(&format!("  {PROMPT}"));
             println!();
-            say("Rowbit will hold its write, and the agent will give you a link to review it.");
+            say(
+                "A typical agent proposes cancelling every pending order; Rowbit holds it, and the",
+            );
+            say(
+                "agent gives you a link to review it. If it asks first which orders, say all of them.",
+            );
             say("(Change 2 on the review page is the demo's own example of that write.)");
         }
         None => {
