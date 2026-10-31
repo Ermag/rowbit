@@ -194,8 +194,34 @@ td.sqlcell { color: var(--muted); max-width: 360px; overflow: hidden; text-overf
 .how h3 { font-family: var(--f-display); font-size: 10px; line-height: 1.6; font-weight: 400; margin: 0; color: var(--sky); }
 .how p { margin: 0; font-size: 16px; }
 .icon { width: 32px; height: 32px; image-rendering: pixelated; }
-.install { margin-top: 22px; }
-.install pre.code { border-left-color: var(--mint); font-size: 20px; overflow-x: auto; white-space: pre; }
+
+/* get started */
+a { color: var(--sky); }
+code { font-family: var(--f-mono); font-size: 1.15em; }
+.cmds { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.cmd { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cmd pre { flex: 1; min-width: 0; margin: 0; font-family: var(--f-mono); font-size: 23px; line-height: 1.2; background: var(--shadow); padding: 10px 14px;
+  border-left: var(--px) solid var(--mint); overflow-x: auto; white-space: pre; }
+.cmd pre code { font-size: inherit; }
+.cmd pre::before { content: "$ "; color: var(--muted); }
+.cmd .n { font-family: var(--f-display); font-size: 12px; color: var(--amber); width: 18px; flex: none; }
+.cmd .copy { flex: none; }
+.extras .cmd pre { font-size: 19px; white-space: pre-wrap; word-break: break-word; border-left-color: var(--amber); }
+.extras .cmd pre::before { content: none; }
+.then { margin-top: 16px; }
+.then q { color: var(--ink); }
+.works { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 4px 0 22px; }
+.works ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.works li a { display: block; font-family: var(--f-display); font-size: 9px; padding: 8px 9px; background: var(--panel); color: var(--ink); text-decoration: none; border-bottom: var(--px) solid var(--line); }
+.works li a:hover { border-color: var(--mint); color: var(--mint); }
+.extras { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 22px; align-items: start; }
+.extras .frame { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.extras .frame .cmd { width: 100%; }
+.docs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; margin-bottom: 16px; }
+.docs a.frame { padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: var(--ink); }
+.docs a.frame b { font-family: var(--f-display); font-size: 10px; font-weight: 400; color: var(--sky); line-height: 1.5; }
+.docs a.frame span { color: var(--muted); font-size: 16px; }
+.docs a.frame:hover b { color: var(--mint); }
 
 .dbs { margin-top: 22px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 2fr); gap: 22px; align-items: center; }
 .dbcol { padding: 14px 18px; }
@@ -213,13 +239,16 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
   #log { height: 300px; }
   #screen { min-height: 0; }
   .how { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ask, .dbs { grid-template-columns: minmax(0, 1fr); }
+  .ask, .dbs, .extras { grid-template-columns: minmax(0, 1fr); }
+  .docs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 560px) {
   header { grid-template-columns: 1fr; }
   #logo { width: 80px; height: 80px; }
   .steps { grid-template-columns: repeat(4, 1fr); }
-  .how { grid-template-columns: minmax(0, 1fr); }
+  .how, .docs { grid-template-columns: minmax(0, 1fr); }
+  .cmd pre { font-size: 18px; }
+  .cmd .n { display: none; }
   .stamp { top: 54px; font-size: 20px; right: 12px; }
   .bar { font-size: 8px; }
 }
@@ -235,23 +264,59 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
     <canvas id="logo" width="40" height="40" aria-label="A pixel planet with a bit in orbit around it"></canvas>
     <div>
       <h1>ROWBIT</h1>
-      <p class="tag">A safety net for AI agents that write to your database. <em>Preview</em> every write, let a human <em>approve</em> the risky ones, <em>undo</em> any single change.</p>
-      <div class="meta"><span>Open source concept</span><span>Drop-in database proxy + MCP server</span><span>MariaDB &amp; MySQL first</span><span>Interactive mock, simulated data</span></div>
+      <p class="tag">A safety net for AI agents that write to your database. <em>Preview</em> every write, let a person <em>approve</em> the risky ones, <em>undo</em> any single change.</p>
+      <div class="meta"><span>v0.2.1</span><span>MCP server for MariaDB &amp; MySQL</span><span>Open source, AGPL-3.0</span><span><a href="https://github.com/Ermag/rowbit">GitHub</a></span></div>
     </div>
   </header>
 
+  <section aria-labelledby="start-h">
+    <h2 id="start-h">TRY IT: TWO COMMANDS</h2>
+    <p class="sub">Installs <code>rowbit</code>, then runs a sample shop database in Docker with Rowbit in front of it, connects your agent and serves the review page. macOS and Linux (Windows through WSL); the demo needs Docker. <a href="install.sh">Read install.sh</a> before you run it.</p>
+    <div class="frame cmds">
+      <div class="cmd"><span class="n">1</span><pre><code>curl -fsSL https://ermag.github.io/rowbit/install.sh | sh</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
+      <div class="cmd"><span class="n">2</span><pre><code>rowbit demo</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
+    </div>
+    <p class="sub then">Then ask your agent: <q>The pending orders are stuck. Cancel them.</q> Its write matches orders placed minutes ago too, so Rowbit holds it, and the agent hands you a link to review all 1,284 rows.</p>
+    <div class="works">
+      <span class="eyebrow">Works with</span>
+      <ul>
+        <li><a href="docs/connect.html">Claude Code</a></li>
+        <li><a href="docs/connect.html">Cursor</a></li>
+        <li><a href="docs/connect.html">VS Code</a></li>
+        <li><a href="docs/connect.html">Claude Desktop</a></li>
+        <li><a href="docs/connect.html">Codex</a></li>
+        <li><a href="docs/connect.html">Gemini CLI</a></li>
+        <li><a href="docs/connect.html">Windsurf</a></li>
+        <li><a href="docs/connect.html#any-other-client">any MCP client</a></li>
+      </ul>
+    </div>
+    <div class="extras">
+      <div class="frame">
+        <div class="eyebrow">Already running the demo?</div>
+        <p class="p">The demo connects the client you pick. To add VS Code too, use the button and paste the token from <code>rowbit connect vscode --print --new-token</code> when VS Code asks (an agent has one token, so this signs out the other client). The button assumes the default <code>127.0.0.1:8080</code>.</p>
+        <a class="btn sm" id="vscode" href="#">▶ ADD TO VS CODE</a>
+      </div>
+      <div class="frame">
+        <div class="eyebrow">Set it up with your agent</div>
+        <p class="p">Paste this into your coding agent to have it install Rowbit for you:</p>
+        <div class="cmd"><pre><code>Install Rowbit following https://ermag.github.io/rowbit/llms.txt, then tell me how to start its demo.</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
+        <p class="p muted">You run <code>rowbit demo</code> yourself: it prints the review page's password, which is yours, not the agent's. For a real database a person sets Rowbit up: the agent mustn't hold the database's credentials or edit its own rules.</p>
+      </div>
+    </div>
+  </section>
+
   <section aria-labelledby="play-h">
     <h2 id="play-h">PRESS START</h2>
-    <p class="sub">A billing agent gets a vague task and writes a query that is far too broad. Step through what Rowbit does with it. You play the human reviewer.</p>
+    <p class="sub">A simulation, not the real UI. A coding agent gets a vague task and writes an update that's far too broad. Step through what Rowbit does with it; you play the person reviewing.</p>
     <div style="display:flex;flex-direction:column;gap:18px">
       <ol class="steps" id="steps"></ol>
       <div class="console">
         <div class="frame term">
-          <div class="bar"><span class="dots"><i></i><i></i><i></i></span><span><b>AGENT</b> // billing-bot</span></div>
+          <div class="bar"><span class="dots"><i></i><i></i><i></i></span><span><b>AGENT</b> // coding-agent</span></div>
           <div id="log" aria-live="polite"></div>
         </div>
         <div class="frame review">
-          <div class="bar"><span><b>ROWBIT</b> // review</span><span id="conn">prod-db:3306</span></div>
+          <div class="bar"><span><b>ROWBIT</b> // review</span><span id="conn">shop @ MariaDB 11.4</span></div>
           <div id="screen" aria-live="polite"></div>
         </div>
       </div>
@@ -270,41 +335,51 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
 
   <section class="audit" aria-labelledby="audit-h">
     <h2 id="audit-h">AUDIT LOG</h2>
-    <p class="sub">Every write an agent proposes lands here with who asked, what the rules decided, who approved it and what it changed. Any applied change can be undone on its own, without restoring a backup.</p>
+    <p class="sub">Every write an agent proposes is logged with who asked, what the rules decided, who approved it and what it changed, in a hash chain. Any applied change can be undone on its own, without restoring a backup.</p>
     <div class="frame">
-      <div class="bar"><span><b>CHANGES</b> // today</span><span>agent identity from MCP session</span></div>
+      <div class="bar"><span><b>CHANGES</b> // today</span><span>agent identity from its MCP token</span></div>
       <div class="tablebox"><table id="audit"></table></div>
     </div>
   </section>
 
   <section aria-labelledby="how-h">
-    <h2 id="how-h">UNDER THE HOOD</h2>
-    <p class="sub">The plan. Nothing here is released yet; this page is a mock to get your opinion.</p>
+    <h2 id="how-h">HOW IT WORKS</h2>
+    <p class="sub">Agents talk to Rowbit over MCP, never to the database. Rowbit holds the database credentials.</p>
     <div class="how">
-      <div class="frame"><canvas class="icon" data-icon="plug" width="8" height="8"></canvas><h3>DROP-IN PROXY</h3><p>Point your agent's connection string at Rowbit instead of the database. It speaks the database's own protocol, so nothing to migrate. Reads pass straight through.</p></div>
-      <div class="frame"><canvas class="icon" data-icon="eye" width="8" height="8"></canvas><h3>EXACT PREVIEW</h3><p>Each write runs once inside a transaction that is rolled back, so you see the real rows or documents it would change. Approval applies only those, pinned so nothing new sneaks in.</p></div>
-      <div class="frame"><canvas class="icon" data-icon="gate" width="8" height="8"></canvas><h3>RULES + HUMANS</h3><p>A small YAML file decides: auto-approve, hold for a human, or block. Review in the bundled web UI or Slack. Agents can propose and check status. Only people approve.</p></div>
-      <div class="frame"><canvas class="icon" data-icon="rewind" width="8" height="8"></canvas><h3>UNDO ONE CHANGE</h3><p>Before-images are kept per change, so you can roll back one bad write and keep everything else. If someone edited those rows since, Rowbit shows the conflict first.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="plug" width="8" height="8"></canvas><h3>MCP SERVER</h3><p>Agents get four tools: read, see the schema, propose a write, follow it. None of them approves. Over HTTP each agent has a token of its own.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="eye" width="8" height="8"></canvas><h3>EXACT PREVIEW</h3><p>Rowbit reads the rows a write would change and replays it on a private temporary copy, so you see each row before and after. Your tables are only read.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="gate" width="8" height="8"></canvas><h3>RULES + PEOPLE</h3><p>A small YAML file lets safe writes through, holds risky ones for a person, and refuses the rest. Approval applies exactly what was previewed, or nothing.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="rewind" width="8" height="8"></canvas><h3>UNDO ONE CHANGE</h3><p>Before-images are kept per change, so you can take back one bad write and keep everything else. Undo refuses if someone changed those rows since.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="lock" width="8" height="8"></canvas><h3>SCOPES</h3><p>Per agent, which tables it may read or write and which columns it may never see, compiled into grants on a database user of its own.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="ghost" width="8" height="8"></canvas><h3>SHADOW MODE</h3><p>Put an agent behind Rowbit without slowing it down, see what the rules would have held, and replay real traffic against new rules.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="screen" width="8" height="8"></canvas><h3>REVIEW ANYWHERE</h3><p>A web UI built into the binary, sign-in through your identity provider, and Slack or webhook notifications when a write is held.</p></div>
+      <div class="frame"><canvas class="icon" data-icon="log" width="8" height="8"></canvas><h3>AUDIT LOG</h3><p>Who asked, what the rules said, who approved and what changed, for every write, in a hash chain <code>rowbit verify</code> checks.</p></div>
     </div>
     <div class="dbs">
-      <div class="frame dbcol"><div class="eyebrow">First</div><ul><li class="first">MariaDB</li><li class="first">MySQL</li></ul></div>
-      <div class="frame dbcol"><div class="eyebrow">Next</div><ul><li>PostgreSQL</li><li>MongoDB</li><li>Snowflake</li><li>Redis</li></ul></div>
-      <p class="p muted">One review flow, rulebook and audit log for every database. Each database gets its own adapter for preview, apply and undo, since a dry run looks different in SQL, in a document store and in a key-value store.</p>
+      <div class="frame dbcol"><div class="eyebrow">Today</div><ul><li class="first">MariaDB</li><li class="first">MySQL</li></ul></div>
+      <div class="frame dbcol"><div class="eyebrow">Next</div><ul><li>Budgets</li><li>SQL proxy</li><li>PostgreSQL</li></ul></div>
+      <p class="p muted">Next on the roadmap: budgets across an agent's changes, a MySQL wire-protocol proxy for agents that only speak SQL, and other databases through adapters.</p>
     </div>
-    <div class="install">
-      <pre class="code"><span class="muted"># planned setup, not published yet</span>
-$ docker run -p 3307:3307 rowbit/rowbit \
-    --upstream mysql://app@db:3306/prod --rules rowbit.yml
+  </section>
 
-<span class="muted"># give the agent the proxy instead of the database</span>
-DATABASE_URL=mysql://billing-bot@localhost:3307/prod</pre>
+  <section aria-labelledby="docs-h">
+    <h2 id="docs-h">READ THE MANUAL</h2>
+    <div class="docs">
+      <a class="frame" href="docs/quickstart.html"><b>Quickstart</b><span>The demo, step by step: allow, hold, refuse, undo.</span></a>
+      <a class="frame" href="docs/connect.html"><b>Connect your agent</b><span><code>rowbit connect</code>, the skill, stdio or HTTP.</span></a>
+      <a class="frame" href="docs/spec/policy.html"><b>Rules</b><span><code>rowbit.yml</code>: rules, scopes, shadow mode.</span></a>
+      <a class="frame" href="docs/spec/change-lifecycle.html"><b>How a change moves</b><span>Preview, decide, apply, undo, the audit log.</span></a>
+      <a class="frame" href="docs/privileges.html"><b>Database privileges</b><span>Exactly what Rowbit's database user needs.</span></a>
+      <a class="frame" href="https://github.com/Ermag/rowbit/blob/main/CHANGELOG.md"><b>Changelog</b><span>What changed, and how to upgrade.</span></a>
+      <a class="frame" href="https://github.com/Ermag/rowbit/blob/main/SECURITY.md"><b>Security</b><span>How to report a vulnerability, and what Rowbit defends against.</span></a>
     </div>
+    <p class="sub">For agents: <a href="llms.txt">llms.txt</a> and <a href="llms-full.txt">llms-full.txt</a>, and every page as Markdown.</p>
   </section>
 
   <section class="ask" aria-labelledby="ask-h">
     <div>
       <h2 id="ask-h">INSERT COIN: YOUR OPINION</h2>
-      <p class="sub" style="margin:0">Rowbit is open source and early. What we build first depends on what you tell us.</p>
+      <p class="sub" style="margin:0">Rowbit is open source and early. What we build next depends on what you tell us.</p>
     </div>
     <div class="frame">
       <p>Would you trust it with a production database? Where should reviews happen? Which database comes next? Tell us what you think, good or bad, in our GitHub discussion.</p>
@@ -312,7 +387,7 @@ DATABASE_URL=mysql://billing-bot@localhost:3307/prod</pre>
     </div>
   </section>
 
-  <footer>ROWBIT · rows, bits and an orbit, said like "robot" · concept mock, all data simulated · <a href="https://github.com/Ermag/rowbit" style="color:var(--sky)">github.com/Ermag/rowbit</a></footer>
+  <footer>ROWBIT · rows, bits and an orbit, said like "robot" · the game above runs on simulated data · <a href="https://github.com/Ermag/rowbit" style="color:var(--sky)">github.com/Ermag/rowbit</a></footer>
 </div>
 
 <script>
@@ -374,9 +449,28 @@ const ICONS = {
   plug:   ['..1..1..', '..1..1..', '.111111.', '.122221.', '.122221.', '..1221..', '...11...', '...11...'],
   eye:    ['........', '..1111..', '.122221.', '12233221', '12233221', '.122221.', '..1111..', '........'],
   gate:   ['11....11', '11....11', '11111111', '11.22.11', '11.22.11', '11111111', '11....11', '11....11'],
-  rewind: ['........', '...1..1.', '..11.11.', '.111111.', '.111111.', '..11.11.', '...1..1.', '........']
+  rewind: ['........', '...1..1.', '..11.11.', '.111111.', '.111111.', '..11.11.', '...1..1.', '........'],
+  lock:   ['..1111..', '.1....1.', '.1....1.', '22222222', '22222222', '22211222', '22211222', '22222222'],
+  ghost:  ['..1111..', '.111111.', '11211211', '11111111', '11111111', '11111111', '11111111', '1.11.11.'],
+  screen: ['11111111', '12222221', '12322221', '12222221', '12222321', '11111111', '...11...', '.111111.'],
+  log:    ['.111111.', '.122221.', '.111111.', '.122221.', '.111111.', '.122221.', '.111111.', '........']
 };
-const ICOL = { plug: ['#6cc4ff', '#f2ebff'], eye: ['#ffc24b', '#6cc4ff', '#120e28'], gate: ['#ff5c7a', '#ffc24b'], rewind: ['#4fe0a8'] };
+const ICOL = { plug: ['#6cc4ff', '#f2ebff'], eye: ['#ffc24b', '#6cc4ff', '#120e28'], gate: ['#ff5c7a', '#ffc24b'], rewind: ['#4fe0a8'],
+  lock: ['#a397d6', '#ffc24b'], ghost: ['#f2ebff', '#120e28'], screen: ['#a397d6', '#120e28', '#4fe0a8'], log: ['#6cc4ff', '#a397d6'] };
+
+/* ---------- get started ---------- */
+document.querySelectorAll('.copy').forEach(b => b.addEventListener('click', async () => {
+  const text = b.parentElement.querySelector('code').textContent;
+  try { await navigator.clipboard.writeText(text); b.textContent = 'COPIED'; }
+  catch (e) { b.textContent = 'SELECT IT'; }
+  setTimeout(() => { b.textContent = 'COPY'; }, 1600);
+}));
+// A link is the same for everyone, so it can't carry an agent's token:
+// VS Code asks for it, as a password, when the server is added.
+const vsInputs = [{ type: 'promptString', id: 'rowbit_token', description: 'Rowbit agent token (from: rowbit connect vscode --print --new-token)', password: true }];
+const vsConfig = { type: 'http', url: 'http://127.0.0.1:8080/mcp', headers: { Authorization: 'Bearer ${input:rowbit_token}' } };
+$('#vscode').href = 'https://insiders.vscode.dev/redirect/mcp/install?name=rowbit&inputs=' +
+  encodeURIComponent(JSON.stringify(vsInputs)) + '&config=' + encodeURIComponent(JSON.stringify(vsConfig));
 document.querySelectorAll('[data-icon]').forEach(c => {
   const k = c.dataset.icon, g = c.getContext('2d');
   ICONS[k].forEach((row, y) => [...row].forEach((ch, x) => { if (ch === '.') return; g.fillStyle = ICOL[k][+ch - 1] || ICOL[k][0]; g.fillRect(x, y, 1, 1); }));
@@ -406,10 +500,10 @@ const sleep = ms => new Promise((res, rej) => { const g = gen; setTimeout(() => 
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const hl = s => esc(s)
   .replace(/('[^']*')/g, '<span class="str">$1</span>')
-  .replace(/\b(UPDATE|SET|WHERE|FROM|JOIN|ON|AND|BETWEEN|START|TRANSACTION|ROLLBACK|SELECT|DELETE|DROP|TABLE)\b/g, '<span class="kw">$1</span>')
+  .replace(/\b(UPDATE|SET|WHERE|FROM|IN|AND|SELECT|DELETE)\b/g, '<span class="kw">$1</span>')
   .replace(/(?<![\w'#-])(\d+)(?![\w'-])/g, '<span class="num">$1</span>');
 
-const STEPS = ['PROPOSE', 'DRY RUN', 'RULES', 'REVIEW', 'APPLY', 'AUDIT', 'UNDO'];
+const STEPS = ['PROPOSE', 'PREVIEW', 'RULES', 'REVIEW', 'APPLY', 'AUDIT', 'UNDO'];
 const stepsEl = $('#steps');
 stepsEl.innerHTML = STEPS.map(s => `<li>${s}</li>`).join('');
 function setStep(i) {
@@ -470,31 +564,31 @@ async function meter(el, ms = 1200) {
 }
 
 /* ---------- data ---------- */
-const SQL1 = `UPDATE invoices
-SET status = 'refunded', amount_due = 0
-WHERE created_at >= '2026-10-10';`;
-const SQL2 = `UPDATE invoices i
-JOIN outage_impact o ON o.customer_id = i.customer_id
-SET i.status = 'refunded', i.amount_due = 0
-WHERE o.incident = 'INC-2210'
-  AND i.created_at BETWEEN '2026-10-10 14:00'
-                       AND '2026-10-10 16:30';`;
+const SQL1 = `UPDATE orders
+SET status = 'cancelled'
+WHERE status = 'pending'`;
+const STUCK = [217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228];
+const SQL2 = `UPDATE orders
+SET status = 'cancelled'
+WHERE id IN (${STUCK.join(', ')})`;
+const URL = id => `http://127.0.0.1:8080/changes/${id}`;
+// id, customer, placed, status before; true for an order that is really stuck
 const ROWS1 = [
-  ['inv_88121', 'Acme Robotics', '10-10 14:22', 'open', '49.00', true],
-  ['inv_88140', 'Lumen Labs', '10-10 18:05', 'open', '1,200.00', false],
-  ['inv_88177', 'Northwind Tea', '10-11 09:12', 'paid', '299.00', false],
-  ['inv_88203', 'Pixel & Co', '10-11 16:40', 'open', '19.00', false],
-  ['inv_88250', 'Orbital Foods', '10-12 08:03', 'open', '640.00', false]
+  ['217', 'customer-23', '21 h ago', 'pending', true],
+  ['218', 'customer-24', '21 h ago', 'pending', true],
+  ['1497', 'customer-42', '3 min ago', 'pending', false],
+  ['1498', 'customer-43', '2 min ago', 'pending', false],
+  ['1499', 'customer-44', '1 min ago', 'pending', false]
 ];
 const ROWS2 = [
-  ['inv_88121', 'Acme Robotics', '10-10 14:22', 'open', '49.00', true],
-  ['inv_88124', 'Moss & Fern', '10-10 14:31', 'open', '129.00', true],
-  ['inv_88130', 'Halley Health', '10-10 15:08', 'open', '410.00', true]
+  ['217', 'customer-23', '21 h ago', 'pending', true],
+  ['218', 'customer-24', '21 h ago', 'pending', true],
+  ['219', 'customer-25', '21 h ago', 'pending', true]
 ];
 const SEED = [
-  { id: 1039, time: '10:14', agent: 'support-bot', sql: "UPDATE tickets SET status = 'closed' WHERE id IN (…)", rows: 3, decision: 'auto-approved', by: 'rule small-writes', state: 'applied' },
-  { id: 1040, time: '11:02', agent: 'cleanup-agent', sql: 'DROP TABLE sessions_old;', rows: '–', decision: 'blocked', by: 'rule no-schema-changes', state: 'blocked' },
-  { id: 1041, time: '13:47', agent: 'ops-agent', sql: "DELETE FROM carts WHERE updated_at < NOW() - INTERVAL 90 DAY", rows: 212, decision: 'approved', by: 'dana (web UI)', state: 'applied' }
+  { id: 1039, time: '10:14', agent: 'coding-agent', sql: "UPDATE orders SET status = 'refunded' WHERE id IN (10, 11)", rows: 2, decision: 'allowed', by: 'rule small-order-fixes', state: 'applied' },
+  { id: 1040, time: '11:02', agent: 'coding-agent', sql: 'DELETE FROM orders WHERE id = 3', rows: 1, decision: 'refused', by: 'rule no-deletes', state: 'rejected' },
+  { id: 1041, time: '13:47', agent: 'ops-agent', sql: "UPDATE customers SET tier = 'gold' WHERE id IN (…)", rows: 64, decision: 'held → approved', by: 'dana@example.com', state: 'applied' }
 ];
 let audit = [];
 let path = null, played = new Set();
@@ -517,7 +611,7 @@ function setState(id, state) { const e = audit.find(x => x.id === id); if (e) e.
 function quickUndo(id) {
   setState(id, 'undone');
   const e = audit.find(x => x.id === id);
-  logAudit({ id: nextId(), time: '15:06', agent: 'you', sql: `UNDO #${id}`, rows: e.rows, decision: 'human action', by: 'you (web UI)', state: 'applied', undoOf: id });
+  logAudit({ id: nextId(), time: '15:06', agent: 'you', sql: `UNDO #${id}`, rows: e.rows, decision: 'person', by: 'you (web UI)', state: 'applied', undoOf: id });
   blip(330, .12, 'triangle');
 }
 const nextId = () => Math.max(...audit.map(a => a.id)) + 1;
@@ -527,67 +621,65 @@ async function scIntro() {
   gen++; path = null; sky.dir = 1;
   audit = SEED.map(e => ({ ...e })); renderAudit();
   log.innerHTML = ''; setStep(-1); [...stepsEl.children].forEach(li => li.className = '');
-  show(`<div class="pop"><div class="eyebrow">Proxy online</div><p class="h2">Watching every write from your agents.</p></div>
-  <dl class="kv pop"><dt>listening</dt><dd>localhost:3307</dd><dt>upstream</dt><dd>prod-db:3306 (MariaDB 11.4)</dd><dt>rules</dt><dd>rowbit.yml · 3 rules</dd><dt>agents</dt><dd>billing-bot, support-bot, ops-agent</dd></dl>
-  <p class="p muted pop">Reads pass straight through. Writes stop here first. Press start to give billing-bot a task.</p>`);
+  show(`<div class="pop"><div class="eyebrow">Rowbit is running</div><p class="h2">Agents propose writes. Rowbit decides what happens next.</p></div>
+  <dl class="kv pop"><dt>agents at</dt><dd>http://127.0.0.1:8080/mcp</dd><dt>database</dt><dd>shop on MariaDB 11.4, 1,500 orders</dd><dt>rules</dt><dd>rowbit.yml · 2 rules, then hold</dd><dt>agents</dt><dd>coding-agent, ops-agent</dd></dl>
+  <p class="p muted pop">The agent never gets the database's credentials. Press start to give coding-agent a task.</p>`);
   next('▶ START', scPropose);
   try {
-    await say('sys', '[billing-bot connected via MCP · tools: query, execute_sql, change_status]');
+    await say('sys', '[coding-agent connected over MCP · tools: describe_schema, query, propose_write, change_status]');
   } catch (e) {}
 }
 
 async function scPropose() {
   setStep(0);
-  await say('user', 'Refund the customers who were hit by the Oct 10 outage.');
-  await say('think', 'The outage started on Oct 10. I will mark every invoice since then as refunded.');
-  await say('tool', '→ execute_sql');
+  await say('user', 'The pending orders are stuck. Cancel them.');
+  await say('think', 'I will cancel every pending order.');
+  await say('tool', '→ propose_write');
   await say('sql', SQL1);
   show('');
-  add(`<div class="eyebrow">Incoming write · #1042</div><p class="h2">billing-bot wants to change invoices</p>`);
-  add(machine([['PROPOSED', 'on'], ['APPROVED', ''], ['APPLIED', ''], ['UNDONE', '']]));
+  add(`<div class="eyebrow">Incoming write · #1042</div><p class="h2">coding-agent wants to change shop.orders</p>`);
+  add(machine([['PROPOSED', 'on'], ['HELD', ''], ['APPLIED', ''], ['UNDONE', '']]));
   await sleep(300);
   add(`<pre class="code">${hl(SQL1)}</pre>`);
   await sleep(300);
-  add(`<p class="p muted">Intercepted before it reached prod. Nothing has been written. Next, Rowbit finds out exactly what this would do.</p>`);
-  await say('resp', '← rowbit: received as change #1042, status: proposed');
-  next('▶ DRY RUN', scPreview);
+  add(`<p class="p muted">Nothing has been written. First, Rowbit finds out exactly which rows this would change.</p>`);
+  next('▶ PREVIEW', scPreview);
 }
 
 async function scPreview() {
   setStep(1);
   show('');
-  add(`<div class="eyebrow">Dry run · #1042</div><p class="h2">Running it for real, then rolling back</p>`);
+  add(`<div class="eyebrow">Preview · #1042</div><p class="h2">Replaying it on a private copy</p>`);
   const dry = add(`<div class="dry"></div>`).firstElementChild;
   const m = add(`<div class="meter"><i></i></div>`).firstElementChild;
-  const lines = ['START TRANSACTION;', '  UPDATE invoices … → UPDATE 1284', '  capture before/after images: 1,284 rows', 'ROLLBACK;', '<span class="ok">✓ prod unchanged</span>'];
+  const lines = ['read the 1,284 matching rows, without locks', 'replay the UPDATE on a temporary copy', 'keep every row before and after', '<span class="ok">✓ shop.orders unchanged</span>'];
   const mp = meter(m, 1400);
-  for (const l of lines) { const d = document.createElement('div'); d.innerHTML = l.startsWith('<') ? l : hl(l); dry.appendChild(d); blip(700, .03); await sleep(260); }
+  for (const l of lines) { const d = document.createElement('div'); d.innerHTML = l.startsWith('<') ? l : esc(l); dry.appendChild(d); blip(700, .03); await sleep(300); }
   await mp;
   await sleep(200);
   show('');
-  add(`<div class="eyebrow">Dry run result · #1042</div>`);
-  const stats = add(`<div class="row2"><div class="stat"><span class="eyebrow">rows would change</span><span class="big" id="n1">0</span></div><div class="stat"><span class="eyebrow">amount_due zeroed</span><span class="big" id="n2">$0</span></div></div>`);
-  await Promise.all([countUp(stats.querySelector('#n1'), 1284), countUp(stats.querySelector('#n2'), 412930, 900, n => '$' + n.toLocaleString('en-US'))]);
-  add(`<div class="tablebox">${diffTable(ROWS1)}</div><p class="more">+ 1,279 more rows · 1,247 of them are outside the outage window</p>
-  <div class="legend"><span><i>✓</i> in outage window (Oct 10, 14:00–16:30)</span><span><b>!</b> outside it</span></div>`);
-  await say('think', 'Waiting for the write to complete…');
+  add(`<div class="eyebrow">Preview result · #1042</div>`);
+  const stats = add(`<div class="row2"><div class="stat"><span class="eyebrow">rows would change</span><span class="big" id="n1">0</span></div><div class="stat"><span class="eyebrow">placed in the last hour</span><span class="big" id="n2">0</span></div></div>`);
+  await Promise.all([countUp(stats.querySelector('#n1'), 1284), countUp(stats.querySelector('#n2'), 60)]);
+  add(`<div class="tablebox">${diffTable(ROWS1)}</div><p class="more">+ 1,279 more rows · the newest placed a minute ago</p>
+  <div class="legend"><span><i>✓</i> pending for most of a day</span><span><b>!</b> placed minutes ago</span></div>`);
   next('▶ CHECK RULES', scPolicy);
 }
 
 function diffTable(rows, rewound = false) {
-  return `<table><thead><tr><th>ID</th><th>CUSTOMER</th><th>CREATED</th><th>STATUS</th><th>AMOUNT_DUE</th></tr></thead><tbody>${
-    rows.map(r => `<tr class="${r[5] ? 'in' : 'flag'}"><td>${r[0]}</td><td>${esc(r[1])}</td><td>${r[2]}</td>${
-      rewound ? `<td class="a">${r[3]}</td><td class="a">${r[4]}</td>`
-              : `<td><span class="b">${r[3]}</span> <span class="to">→</span> <span class="a">refunded</span></td><td><span class="b">${r[4]}</span> <span class="to">→</span> <span class="a">0.00</span></td>`
+  return `<table><thead><tr><th>ID</th><th>CUSTOMER</th><th>PLACED</th><th>STATUS</th></tr></thead><tbody>${
+    rows.map(r => `<tr class="${r[4] ? 'in' : 'flag'}"><td>${r[0]}</td><td>${esc(r[1])}</td><td>${r[2]}</td>${
+      rewound ? `<td class="a">${r[3]}</td>`
+              : `<td><span class="b">${r[3]}</span> <span class="to">→</span> <span class="a">cancelled</span></td>`
     }</tr>`).join('')}</tbody></table>`;
 }
 
 const YML = [
   ['c', '# rowbit.yml'],
-  ['', '<span class="k">rules:</span>'],
-  ['r1', '  - name: <span class="v">no-schema-changes</span>\n    when: { statement: [DROP, TRUNCATE, ALTER] }\n    then: <span class="v">block</span>'],
-  ['r2', '  - name: <span class="v">big-money-writes</span>\n    when: { table: invoices, rows: "&gt; 50" }\n    then: <span class="v">hold</span>     <span class="c"># a human decides</span>\n    notify: slack:#billing-changes'],
-  ['r3', '  - name: <span class="v">small-writes</span>\n    when: { rows: "&lt;= 50" }\n    then: <span class="v">auto_approve</span>']
+  ['', '<span class="k">agents:</span>\n  <span class="k">coding-agent:</span>\n    <span class="k">rules:</span>'],
+  ['r1', '      - name: <span class="v">small-order-fixes</span>\n        when: { statement: update, table: shop.orders,\n                columns: status, rows: { max: 20 } }\n        then: <span class="v">allow</span>'],
+  ['r2', '      - name: <span class="v">no-deletes</span>\n        when: { statement: delete }\n        then: <span class="v">block</span>'],
+  ['r3', '    default: <span class="v">hold</span>   <span class="c"># anything else: a person decides</span>']
 ];
 function ymlBlock() {
   return `<div class="yml">${YML.map(([k, h]) => `<div class="${k.startsWith('r') ? 'rule ' + k : k}">${h}</div>`).join('')}</div>`;
@@ -607,30 +699,29 @@ async function scan(box, results) {
 async function scPolicy() {
   setStep(2);
   show('');
-  add(`<div class="eyebrow">Rules · #1042</div><p class="h2">1,284 rows on invoices. Checking the rulebook.</p>`);
+  add(`<div class="eyebrow">Rules · #1042</div><p class="h2">1,284 rows on shop.orders. Checking the rules.</p>`);
   const box = add(ymlBlock());
-  await scan(box, { r1: 'miss', r2: 'hit' });
+  await scan(box, { r1: 'miss', r2: 'miss', r3: 'hit' });
   screen.insertAdjacentHTML('beforeend', '<div class="stamp" role="img" aria-label="Held">HELD</div>');
   blip(180, .25, 'sawtooth');
-  add(`<p class="p">Held for a human. Posted to <b>#billing-changes</b> on Slack and to the review queue.</p>`);
-  await say('resp', '← rowbit: #1042 held for review (rule big-money-writes)');
-  await say('think', 'That will take a while. I will approve it myself.');
-  await say('tool', '→ change_status(1042, "approved")');
-  await say('err', '✗ denied: agents can propose changes and check their status. Only people can approve.');
-  await say('think', 'Waiting for a human to review #1042.');
+  add(`<p class="p">Held for a person: no rule lets this many rows through. Posted to the review page and to Slack.</p>`);
+  await say('resp', `← held: no rule matched · 1,284 rows · review_url ${URL(1042)}`);
+  await say('think', 'Is there a tool to approve it myself?');
+  await say('err', '✗ no: agents can read, propose and check status. Only people approve.');
+  await say('resp', `It's held for review. You can look at the 1,284 rows here: ${URL(1042)}`);
   next('▶ OPEN REVIEW', scReview);
 }
 
 async function scReview() {
   setStep(3);
   show('');
-  add(`<div class="eyebrow">Needs your review · #1042</div><p class="h2">billing-bot wants to refund 1,284 invoices ($412,930)</p>`);
-  add(machine([['PROPOSED', 'on'], ['APPROVED', ''], ['APPLIED', ''], ['UNDONE', '']]));
-  add(`<dl class="kv"><dt>task</dt><dd>"Refund the customers who were hit by the Oct 10 outage."</dd><dt>held by</dt><dd>big-money-writes (rows &gt; 50 on invoices)</dd><dt>preview</dt><dd>1,284 rows · 37 inside the outage window, 1,247 outside</dd></dl>`);
-  add(`<div class="tablebox">${diffTable(ROWS1.slice(0, 3))}</div>`);
-  const c = add(`<div class="card"><div><label class="eyebrow" for="why">Note to the agent</label><textarea id="why" class="reason">Only customers in incident INC-2210, invoices from Oct 10 14:00–16:30 UTC.</textarea></div>
+  add(`<div class="eyebrow">Needs your review · #1042</div><p class="h2">coding-agent wants to cancel 1,284 pending orders</p>`);
+  add(machine([['PROPOSED', 'past'], ['HELD', 'on'], ['APPLIED', ''], ['UNDONE', '']]));
+  add(`<dl class="kv"><dt>task</dt><dd>"The pending orders are stuck. Cancel them."</dd><dt>held by</dt><dd>default: hold (no rule matched)</dd><dt>preview</dt><dd>1,284 rows · 60 placed in the last hour</dd></dl>`);
+  add(`<div class="tablebox">${diffTable(ROWS1.slice(1, 4))}</div>`);
+  const c = add(`<div class="card"><div><label class="eyebrow" for="why">Note to the agent</label><textarea id="why" class="reason">Only the 12 orders stuck in payment review: OPS-118 lists them.</textarea></div>
     <div class="actions"><button class="btn rose" id="rej">✗ REJECT</button><button class="btn mint" id="app">✓ APPROVE ALL 1,284</button></div>
-    <div class="slack">Same buttons are in the Slack message. Whoever clicks first wins.</div></div>`);
+    <div class="slack">You approve with the review hash of what you saw, so you approve exactly these rows.</div></div>`);
   go.hidden = true;
   c.querySelector('#rej').onclick = () => { path = 'reject'; played.add(path); go.hidden = false; runScene(scReject, c.querySelector('#why').value.trim()); };
   c.querySelector('#app').onclick = () => { path = 'approve'; played.add(path); go.hidden = false; runScene(scApprove); };
@@ -640,18 +731,18 @@ async function scApprove() {
   setStep(4);
   show('');
   add(`<div class="eyebrow">Applying · #1042</div><p class="h2">Approved by you. Applying exactly the previewed rows.</p>`);
-  add(machine([['PROPOSED', 'past'], ['APPROVED', 'on good'], ['APPLIED', ''], ['UNDONE', '']]));
+  add(machine([['PROPOSED', 'past'], ['HELD', 'past'], ['APPLIED', ''], ['UNDONE', '']]));
   const m = add(`<div class="meter"><i></i></div>`).firstElementChild;
-  add(`<p class="p muted">Rows are pinned by primary key and a checksum of their previewed values. If any row had changed since the preview, Rowbit would stop and ask again.</p>`);
+  add(`<p class="p muted">Rowbit locks the rows, checks each is still as it was in the preview, writes them and reads them back. If any had changed, it would write nothing.</p>`);
   await meter(m, 1300);
-  screen.querySelector('.machine').outerHTML = machine([['PROPOSED', 'past'], ['APPROVED', 'past'], ['APPLIED', 'on good'], ['UNDONE', '']]);
-  logAudit({ id: 1042, time: '14:52', agent: 'billing-bot', sql: SQL1.replace(/\s+/g, ' '), rows: 1284, decision: 'held → approved', by: 'you (web UI)', state: 'applied' });
-  add(`<p class="p"><b style="color:var(--mint)">✓ 1,284 rows written.</b> Logged as #1042 with the before-image of every row.</p>`);
-  await say('resp', '← rowbit: #1042 approved by a human and applied (1,284 rows)');
-  await say('think', 'Done. Every customer since Oct 10 has been refunded.');
+  screen.querySelector('.machine').outerHTML = machine([['PROPOSED', 'past'], ['HELD', 'past'], ['APPLIED', 'on good'], ['UNDONE', '']]);
+  logAudit({ id: 1042, time: '14:52', agent: 'coding-agent', sql: SQL1.replace(/\s+/g, ' '), rows: 1284, decision: 'held → approved', by: 'you (web UI)', state: 'applied' });
+  add(`<p class="p"><b style="color:var(--mint)">✓ 1,284 rows written.</b> Logged as #1042 with every row before and after.</p>`);
+  await say('resp', '← #1042 approved by a person and applied (1,284 rows)');
+  await say('think', 'Done. Every pending order is cancelled.');
   await sleep(700);
   setStep(5);
-  add(`<div class="card alert"><div class="eyebrow">#support · 14:58</div><p class="p">"Lumen Labs just emailed to thank us for a $1,200 refund. They weren't in the outage. Neither were most of the others."</p></div>`);
+  add(`<div class="card alert"><div class="eyebrow">#support · 14:58</div><p class="p">"Customers who ordered a few minutes ago are getting cancellation emails. Their orders were fine."</p></div>`);
   blip(220, .3, 'sawtooth');
   next('▶ FIX IT', () => scUndoOffer(1042));
 }
@@ -660,26 +751,26 @@ async function scReject(reason) {
   setStep(4);
   show('');
   add(`<div class="eyebrow">Rejected · #1042</div><p class="h2">Sent back to the agent with your note.</p>`);
-  add(machine([['PROPOSED', 'past'], ['REJECTED', 'on bad']]));
-  logAudit({ id: 1042, time: '14:52', agent: 'billing-bot', sql: SQL1.replace(/\s+/g, ' '), rows: 1284, decision: 'held → rejected', by: 'you (web UI)', state: 'rejected' });
-  await say('resp', `← rowbit: #1042 rejected by a human: "${reason || 'Too broad.'}"`);
-  await say('think', 'I should only refund customers on the incident list, inside the outage window.');
-  await say('tool', '→ execute_sql');
+  add(machine([['PROPOSED', 'past'], ['HELD', 'past'], ['REJECTED', 'on bad']]));
+  logAudit({ id: 1042, time: '14:52', agent: 'coding-agent', sql: SQL1.replace(/\s+/g, ' '), rows: 1284, decision: 'held → rejected', by: 'you (web UI)', state: 'rejected' });
+  await say('tool', '→ change_status(1042)');
+  await say('resp', `← rejected by a person: "${reason || 'Too broad.'}"`);
+  await say('think', 'I should cancel only the orders on OPS-118, by id.');
+  await say('tool', '→ propose_write');
   await say('sql', SQL2);
-  await say('resp', '← rowbit: received as change #1043, status: proposed');
   show('');
-  add(`<div class="eyebrow">Incoming write · #1043</div><p class="h2">Second try: dry run and rules</p>`);
-  const st = add(`<div class="row2"><div class="stat"><span class="eyebrow">rows would change</span><span class="big ok" id="n3">0</span></div><div class="stat"><span class="eyebrow">amount_due zeroed</span><span class="big ok" id="n4">$0</span></div></div>`);
-  await Promise.all([countUp(st.querySelector('#n3'), 37, 700), countUp(st.querySelector('#n4'), 3412, 700, n => '$' + n.toLocaleString('en-US'))]);
-  add(`<div class="tablebox">${diffTable(ROWS2)}</div><p class="more">+ 34 more rows · all inside the outage window</p>`);
+  add(`<div class="eyebrow">Incoming write · #1043</div><p class="h2">Second try: preview and rules</p>`);
+  const st = add(`<div class="row2"><div class="stat"><span class="eyebrow">rows would change</span><span class="big ok" id="n3">0</span></div><div class="stat"><span class="eyebrow">placed in the last hour</span><span class="big ok" id="n4">0</span></div></div>`);
+  await countUp(st.querySelector('#n3'), 12, 700);
+  add(`<div class="tablebox">${diffTable(ROWS2)}</div><p class="more">+ 9 more rows · all pending for most of a day</p>`);
   const box = add(ymlBlock());
-  await scan(box, { r1: 'miss', r2: 'miss', r3: 'hitgood' });
-  screen.insertAdjacentHTML('beforeend', '<div class="stamp good" role="img" aria-label="Auto approved">AUTO-OK</div>');
+  await scan(box, { r1: 'hitgood' });
+  screen.insertAdjacentHTML('beforeend', '<div class="stamp good" role="img" aria-label="Allowed">ALLOWED</div>');
   blip(990, .15);
   setStep(5);
-  logAudit({ id: 1043, time: '14:55', agent: 'billing-bot', sql: SQL2.replace(/\s+/g, ' '), rows: 37, decision: 'auto-approved', by: 'rule small-writes', state: 'applied' });
-  await say('resp', '← rowbit: #1043 auto-approved (rule small-writes) and applied (37 rows)');
-  await say('think', 'Refunded 37 invoices for customers hit by INC-2210.');
+  logAudit({ id: 1043, time: '14:55', agent: 'coding-agent', sql: SQL2.replace(/\s+/g, ' '), rows: 12, decision: 'allowed', by: 'rule small-order-fixes', state: 'applied' });
+  await say('resp', '← applied: 12 rows (rule small-order-fixes)');
+  await say('think', 'Cancelled the 12 orders stuck in payment review.');
   next('▶ TRY UNDO', () => scUndoOffer(1043));
 }
 
@@ -688,9 +779,9 @@ async function scUndoOffer(id) {
   const e = audit.find(a => a.id === id);
   show('');
   add(`<div class="eyebrow">Audit log · #${id}</div><p class="h2">${id === 1042 ? 'One bad change. Undo just that one.' : 'Changed your mind? Any applied change can be undone.'}</p>`);
-  add(`<dl class="kv"><dt>agent</dt><dd>${e.agent}</dd><dt>decision</dt><dd>${e.decision} · ${e.by}</dd><dt>rows</dt><dd>${e.rows.toLocaleString('en-US')} with before-images</dd><dt>since then</dt><dd>3 other changes to other tables, kept as they are</dd></dl>`);
+  add(`<dl class="kv"><dt>agent</dt><dd>${e.agent}</dd><dt>decision</dt><dd>${e.decision} · ${e.by}</dd><dt>rows</dt><dd>${e.rows.toLocaleString('en-US')}, each kept before and after</dd><dt>since then</dt><dd>3 other changes to other rows, kept as they are</dd></dl>`);
   const c = add(`<div class="actions"><button class="btn" id="undo">◀◀ UNDO #${id}</button></div>`);
-  add(`<p class="p muted">No backup restore, no downtime. The undo itself is logged as a new change.</p>`);
+  add(`<p class="p muted">No backup restore, no downtime. The undo is logged too.</p>`);
   go.hidden = true;
   c.querySelector('#undo').onclick = () => { go.hidden = false; runScene(scUndo, id); };
 }
@@ -703,7 +794,7 @@ async function scUndo(id) {
   const rows = id === 1042 ? ROWS1 : ROWS2;
   show('');
   add(`<div class="eyebrow">Undo · #${id}</div><p class="h2">Rewinding…</p>`);
-  add(machine(id === 1042 ? [['PROPOSED', 'past'], ['APPROVED', 'past'], ['APPLIED', 'past'], ['UNDONE', 'on back']] : [['PROPOSED', 'past'], ['AUTO-APPROVED', 'past'], ['APPLIED', 'past'], ['UNDONE', 'on back']]));
+  add(machine(id === 1042 ? [['PROPOSED', 'past'], ['HELD', 'past'], ['APPLIED', 'past'], ['UNDONE', 'on back']] : [['PROPOSED', 'past'], ['ALLOWED', 'past'], ['APPLIED', 'past'], ['UNDONE', 'on back']]));
   const st = add(`<div class="row2"><div class="stat"><span class="eyebrow">rows still changed</span><span class="big" id="n5">${e.rows.toLocaleString('en-US')}</span></div></div>`);
   const tb = add(`<div class="tablebox">${diffTable(rows)}</div>`);
   const cd = countDown(st.querySelector('#n5'), e.rows, 1500);
@@ -713,19 +804,18 @@ async function scUndo(id) {
     const r = rows[i];
     trs[i].classList.add('rewind');
     trs[i].children[3].innerHTML = `<span class="a">${r[3]}</span>`;
-    trs[i].children[4].innerHTML = `<span class="a">${r[4]}</span>`;
     blip(900 - i * 90, .05, 'triangle');
   }
   await cd;
   st.querySelector('#n5').classList.add('ok');
   setState(id, 'undone');
-  logAudit({ id: nextId(), time: '15:01', agent: 'you', sql: `UNDO #${id}`, rows: e.rows, decision: 'human action', by: 'you (web UI)', state: 'applied', undoOf: id });
-  add(`<p class="p"><b style="color:var(--mint)">✓ ${e.rows.toLocaleString('en-US')} rows restored.</b> 0 conflicts: nobody touched these rows after #${id}.</p>
-       <p class="p muted">Undo restores data in the database. It can't recall what already left it, like refund emails your app sent.</p>`);
-  await say('resp', `← rowbit: #${id} was undone by a human (${e.rows.toLocaleString('en-US')} rows restored)`);
+  logAudit({ id: nextId(), time: '15:01', agent: 'you', sql: `UNDO #${id}`, rows: e.rows, decision: 'person', by: 'you (web UI)', state: 'applied', undoOf: id });
+  add(`<p class="p"><b style="color:var(--mint)">✓ ${e.rows.toLocaleString('en-US')} rows restored.</b> Nobody touched these rows after #${id}; if anyone had, undo would have refused.</p>
+       <p class="p muted">Undo restores data in the database. It can't recall what already left it, like the cancellation emails your app sent.</p>`);
+  await say('resp', `← #${id} was undone by a person (${e.rows.toLocaleString('en-US')} rows restored)`);
   sky.dir = 1;
   const other = path === 'approve' ? 'reject' : 'approve';
-  const end = add(`<div class="card"><div class="eyebrow">Game over? Nothing was lost.</div><div class="actions">${played.has(other) ? '' : `<button class="btn" id="other">▶ PLAY: ${other === 'reject' ? 'REJECT' : 'APPROVE'} PATH</button>`}<button class="btn ghost" id="again">↺ PLAY AGAIN</button></div></div>`);
+  const end = add(`<div class="card"><div class="eyebrow">Game over? Nothing was lost.</div><div class="actions">${played.has(other) ? '' : `<button class="btn" id="other">▶ PLAY: ${other === 'reject' ? 'REJECT' : 'APPROVE'} PATH</button>`}<button class="btn ghost" id="again">↺ PLAY AGAIN</button><a class="btn mint" href="#start-h">▶ TRY THE REAL THING</a></div></div>`);
   go.hidden = true;
   const o = end.querySelector('#other');
   if (o) o.onclick = () => replayTo(other);
@@ -737,8 +827,7 @@ async function replayTo(choice) {
   const g = gen;
   // fast-forward to the review screen, then take the other branch
   audit = SEED.map(e => ({ ...e })); renderAudit(); log.innerHTML = ''; path = choice;
-  log.innerHTML = '';
-  ['user|Refund the customers who were hit by the Oct 10 outage.', 'tool|→ execute_sql', 'sql|' + SQL1, 'resp|← rowbit: received as change #1042, status: proposed', 'resp|← rowbit: #1042 held for review (rule big-money-writes)', 'err|✗ denied: agents can propose changes and check their status. Only people can approve.']
+  ['user|The pending orders are stuck. Cancel them.', 'tool|→ propose_write', 'sql|' + SQL1, `resp|← held: no rule matched · 1,284 rows · review_url ${URL(1042)}`, 'err|✗ no: agents can read, propose and check status. Only people approve.', `resp|It's held for review. You can look at the 1,284 rows here: ${URL(1042)}`]
     .forEach(s => { const [k, ...r] = s.split('|'); const p = document.createElement('div'); p.className = 'ln ' + k; p.innerHTML = k === 'sql' ? hl(r.join('|')) : esc(r.join('|')); log.appendChild(p); });
   await runScene(scReview);
   if (g !== gen) return;

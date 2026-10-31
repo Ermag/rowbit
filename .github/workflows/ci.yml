@@ -118,6 +118,18 @@ jobs:
       - name: The docs site builds, with no broken links
         run: PATH="$RUNNER_TEMP/bin:$PATH" python3 -I scripts/build-docs.py "$RUNNER_TEMP/site"
 
+  home-page:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The home page says only what's true of a release
+        run: |
+          # Phrases from before the first release, and the proxy that's v0.3.
+          if grep -n -i -E 'concept|not released|not published|nothing here is released|rolled back|docker run|drop-in proxy' site/index.html; then
+            echo "::error file=site/index.html::the home page describes Rowbit as it was before it shipped"
+            exit 1
+          fi
+
   deny:
     runs-on: ubuntu-latest
     steps:

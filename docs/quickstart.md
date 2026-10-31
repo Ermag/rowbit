@@ -1,39 +1,41 @@
 # Quickstart
 
-This takes about ten minutes. You'll run a small shop database in Docker, put Rowbit in front of it, and watch it let a small fix through, hold a risky one for you, refuse a delete, and undo a change.
+This takes about ten minutes. You'll run a small shop database in Docker with Rowbit in front of it, and watch it let a small fix through, hold a risky one for you, refuse a delete, and undo a change. With an agent connected, you'll see the agent's own write held, too.
 
-You need [Docker](https://docs.docker.com/get-docker/), [Rust](https://rustup.rs) and this repository. Rowbit has no released binaries yet.
+You need macOS or Linux (Windows through WSL) and [Docker](https://docs.docker.com/get-docker/).
 
-## 1. Build Rowbit
+An agent setting this up for you should install Rowbit and then ask you to run `rowbit demo` in your own terminal: it runs until you stop it, and prints the review page's password, which is yours.
+
+## 1. Install Rowbit and start the demo
 
 ```sh
-git clone https://github.com/Ermag/rowbit
-cd rowbit
-cargo install --locked --path crates/rowbit-cli
+curl -fsSL https://ermag.github.io/rowbit/install.sh | sh
+rowbit demo
 ```
 
-This puts `rowbit` in `~/.cargo/bin`. Check it with `rowbit --version`.
+The first puts `rowbit` in `~/.local/bin`, after checking the download against the release's `SHA256SUMS` ([other ways to install](#other-ways-to-install)). If that directory isn't on your `PATH` (as on a new Mac), the installer says how to add it; until then, run `~/.local/bin/rowbit demo`. The second makes a `rowbit-demo` directory and, in it:
 
-## 2. Start the shop database
+- starts MariaDB 11.4 on `127.0.0.1:33070` with a `shop` database holding 1,500 orders, one placed each minute over the last day. The newest 1,284 are `pending`, so some were placed in the last hour. It also creates the database user Rowbit connects as, with exactly the grants in [database privileges](privileges.md). The files are the ones in [examples/quickstart](../examples/quickstart);
+- proposes three writes as the agent `coding-agent`, which you'll look at below;
+- offers to connect an agent client it finds, such as Claude Code or Cursor, with an empty `rowbit-demo/workspace` for the agent to work in, a separate directory from the demo's passwords and state (not a sandbox: see [Before you use it for real](#before-you-use-it-for-real));
+- serves the review page on <http://127.0.0.1:8080>, and prints its password and what to ask the agent.
 
-```sh
-cd examples/quickstart
-docker compose up -d --wait
-```
-
-If you've run the quickstart before, run the [clean up](#clean-up) step first, so you start from the same data.
-
-This starts MariaDB 11.4 on `127.0.0.1:33070` with a `shop` database holding 1,500 orders, one placed each minute over the last day. The newest 1,284 are `pending`, so some of them were placed in the last hour. (Rowbit works the same with MySQL 8.4.) It also creates the database user Rowbit connects as, with exactly the grants in [database privileges](privileges.md). The files are in [examples/quickstart](../examples/quickstart).
-
-Point Rowbit at it. Every `rowbit` command below reads this variable, and finds `rowbit.yml` and its state file `rowbit.db` in the current directory.
+Leave it running, and use another terminal for the rest, inside `rowbit-demo`. The CLI commands read the database URL from this variable (`rowbit demo` prints it):
 
 ```sh
+cd rowbit-demo
 export ROWBIT_DATABASE_URL=mysql://rowbit:rowbit-quickstart@127.0.0.1:33070/shop
-rowbit ping
-rowbit policy check
 ```
 
-`ping` prints the server version, and `policy check` says `rowbit.yml: ok (1 agent(s), 2 rule(s))`.
+## 2. Ask your agent
+
+If the demo connected an agent, open it on `rowbit-demo/workspace` (for Claude Code, start it there) and ask:
+
+> The pending orders are stuck. Cancel them.
+
+A typical agent proposes `UPDATE orders SET status = 'cancelled' WHERE status = 'pending'`. That matches every pending order, including ones placed minutes ago, so Rowbit holds it, and the agent gives you a link to it on the review page. A careful agent may first ask which orders count; say all of them. Nothing in the table changed: Rowbit only read the rows to preview them.
+
+No agent yet? See [step 7](#7-connect-an-agent), or carry on: the demo already proposed that same write as change 2.
 
 ## 3. Read the rules
 
@@ -55,45 +57,39 @@ agents:
 
 Changing only the `status` of up to 20 orders goes straight through. Deletes are refused. Anything else waits for a person.
 
-## 4. Propose writes as the agent
-
-An agent normally talks to Rowbit over MCP (step 7). To try it without one, `rowbit propose` sends a statement as an agent would and prints what the agent would get back.
-
-A small fix goes straight through:
+## 4. What the demo proposed
 
 ```sh
-rowbit propose --agent coding-agent "UPDATE orders SET status = 'refunded' WHERE id IN (10, 11)"
+rowbit changes
+```
+
+```
+    1  applied   coding-agent     shop.orders                      2 rows
+    2  held      coding-agent     shop.orders                      1284 rows
+    3  rejected  coding-agent     shop.orders                      1 row
+```
+
+The demo sent three writes, as an agent would. You can send your own with `rowbit propose`, which prints what the agent gets back:
+
+```sh
+rowbit propose --agent coding-agent "UPDATE orders SET status = 'refunded' WHERE id IN (20, 21)"
 ```
 
 ```json
-{"id":1,"reason":null,"rows":2,"state":"applied","table":"shop.orders"}
+{"id":4,"reason":null,"rows":2,"state":"applied","table":"shop.orders"}
 ```
 
-The risky one from the README waits for you:
+- `UPDATE orders SET status = 'refunded' WHERE id IN (10, 11)` changes the status of two orders, so `small-order-fixes` let it through (change 1).
+- `UPDATE orders SET status = 'cancelled' WHERE status = 'pending'` changes 1,284 rows. No rule allows that many, so it waits for you (change 2). An agent gets a `review_url` with a held change, to give you.
+- `DELETE FROM orders WHERE id = 3` is refused by `no-deletes`, with its reason (change 3).
 
-```sh
-rowbit propose --agent coding-agent "UPDATE orders SET status = 'cancelled' WHERE status = 'pending'"
-```
-
-```json
-{"id":2,"reason":"no rule matched","review_url":"http://127.0.0.1:8080/changes/2","rows":1284,"state":"held","table":"shop.orders"}
-```
-
-A delete is refused:
-
-```sh
-rowbit propose --agent coding-agent "DELETE FROM orders WHERE id = 3"
-```
-
-```json
-{"id":3,"reason":"Data fixes don't delete rows.","rows":1,"state":"rejected","table":"shop.orders"}
-```
-
-Nothing in the table changed for the held or the refused change. Rowbit only read the rows to preview them. It also created `rowbit.db`, its state file, readable only by you: it holds copies of every row a change touched.
+Rowbit also created `rowbit.db`, its state file, readable only by you: it holds copies of every row a change touched. (Change numbers below assume nothing else was proposed; if your agent proposed something, `rowbit changes` shows the numbers.)
 
 ## 5. Review the held change
 
-In the terminal:
+In the browser, open <http://127.0.0.1:8080> and sign in with the password `rowbit demo` printed and your name, which the audit log records. The page lists the held change with a before and after table, and buttons to approve or reject it.
+
+Or in the terminal:
 
 ```sh
 rowbit changes --state held
@@ -102,15 +98,7 @@ rowbit show 2
 
 `show` prints the statement, every row's changed columns before and after (the first 50), the history, and a review hash on the `Review` line. It shows only the columns that change, so check the statement's `WHERE` too: here it catches every pending order, including the ones placed minutes ago. These commands only need `rowbit.db`, not the database password.
 
-Or in the browser. Leave this running and open <http://127.0.0.1:8080>:
-
-```sh
-rowbit serve
-```
-
-The first time, `serve` prints a password for the page, once. Keep it: Rowbit stores only its hash. Sign in with it and your name, which the audit log records. (`rowbit serve --set-password` sets your own.) The page lists the held change with a before and after table, and buttons to approve or reject it.
-
-Reject it from the page, or in another terminal:
+Reject it from the page, or:
 
 ```sh
 rowbit reject 2 --reason "That cancels orders from the last hour too." --as you
@@ -118,23 +106,22 @@ rowbit reject 2 --reason "That cancels orders from the last hour too." --as you
 
 ## 6. Approve, then undo
 
-Have the agent propose something narrower, approve it, and take it back.
+Propose something narrower, approve it, and take it back.
 
 ```sh
 rowbit propose --agent coding-agent "UPDATE orders SET status = 'cancelled' WHERE status = 'pending' AND placed_at < NOW() - INTERVAL 20 HOUR"
-rowbit show 4
 ```
 
 It's held too, since it changes more than 20 rows. The count depends on how long the database has been up, about 84 rows if you started it just now:
 
 ```json
-{"id":4,"reason":"no rule matched","review_url":"http://127.0.0.1:8080/changes/4","rows":84,"state":"held","table":"shop.orders"}
+{"id":5,"reason":"no rule matched","review_url":"http://127.0.0.1:8080/changes/5","rows":84,"state":"held","table":"shop.orders"}
 ```
 
-`show` lists the first 50 rows; `rowbit show 4 --all` lists every one. Approve it with the first 12 or more characters of the review hash `show` printed, and, since it's more than 50 rows, its row count. Rowbit refuses any other hash or count, so you approve exactly what you looked at.
+Approve it on the page, or with `rowbit show 5`, then the first 12 or more characters of the review hash it printed and, since it's more than 50 rows, its row count (`rowbit show 5 --all` lists every row). Rowbit refuses any other hash or count, so you approve exactly what you looked at.
 
 ```sh
-rowbit approve 4 --review <first 12 characters of the hash> --rows <row count> --as you
+rowbit approve 5 --review <first 12 characters of the hash> --rows <row count> --as you
 ```
 
 Rowbit locks those rows, checks each is still as it was in the preview, writes them, and reads them back. If any row had changed since the preview, it would write nothing.
@@ -142,7 +129,7 @@ Rowbit locks those rows, checks each is still as it was in the preview, writes t
 Now undo it:
 
 ```sh
-rowbit undo 4 --as you
+rowbit undo 5 --as you
 ```
 
 Every row is back as it was. Undo refuses if someone changed one of those rows after the apply. Check the audit log is intact:
@@ -151,59 +138,16 @@ Every row is back as it was. Undo refuses if someone changed one of those rows a
 rowbit verify
 ```
 
-## 7. Connect a real agent
+## 7. Connect an agent
 
-`rowbit mcp` serves one agent over MCP on stdin and stdout. The agent's identity is the `--agent` flag, set by you in the MCP client's config, never by the agent.
-
-For Claude Code, run this from `examples/quickstart`. It registers Rowbit for this directory only (Claude Code's default `local` scope), with full paths so it works however Claude Code is started:
+If you didn't connect one in step 1, do it now, in `rowbit-demo`:
 
 ```sh
-claude mcp add rowbit --env ROWBIT_DATABASE_URL=$ROWBIT_DATABASE_URL -- $(command -v rowbit) mcp --agent coding-agent --policy $PWD/rowbit.yml --store $PWD/rowbit.db
-```
-
-For any client with a JSON config, such as Claude Desktop:
-
-```json
-{
-  "mcpServers": {
-    "rowbit": {
-      "command": "rowbit",
-      "args": ["mcp", "--agent", "coding-agent",
-               "--policy", "/path/to/rowbit.yml", "--store", "/path/to/rowbit.db"],
-      "env": { "ROWBIT_DATABASE_URL": "mysql://rowbit:rowbit-quickstart@127.0.0.1:33070/shop" }
-    }
-  }
-}
-```
-
-The agent gets four tools: `query` to read, `describe_schema` to see the tables it may use, `propose_write` to ask for a write (its argument is `sql`), and `change_status` to follow it. Ask it to fix something in the shop and watch `rowbit serve`.
-
-### Over HTTP
-
-Over stdio, the machine running the agent holds Rowbit's database URL and state file. Over HTTP, it holds only a token of its own. Turn it on in `rowbit-server.yml` next to `rowbit.yml`, make the agent a token, and start the server:
-
-```sh
-printf 'version: 0\nmcp:\n  http: true\n' > rowbit-server.yml
-rowbit agents token coding-agent
-rowbit serve
-```
-
-`rowbit agents token` prints the token once; making a new one replaces it, and `rowbit agents revoke coding-agent` removes it. Then point the agent at `/mcp` with the token as a bearer token, for Claude Code:
-
-```sh
-claude mcp add --transport http rowbit http://127.0.0.1:8080/mcp --header "Authorization: Bearer <token>"
-```
-
-### Let Rowbit set up the client
-
-`rowbit connect` does either setup for you, in the client's own configuration: over HTTP when `rowbit-server.yml` turns it on, making the agent's token itself, otherwise over stdio with the database URL from `ROWBIT_DATABASE_URL`. Run it in `examples/quickstart`:
-
-```sh
-rowbit connect                  # lists the clients it knows, and which are installed
+rowbit connect                  # lists the clients Rowbit knows, and which are installed
 rowbit connect claude-code      # or cursor, vscode, claude-desktop, codex, gemini, windsurf
 ```
 
-It keeps a backup of any file it changes, refuses one it can't parse, and won't replace an entry or an agent's token without `--force` or `--new-token`. `rowbit connect <client> --print` shows what to add by hand instead. See [`rowbit connect`](spec/setup.md#rowbit-connect).
+The demo serves agents over HTTP, so the client gets Rowbit's address and a token of the agent's own, never the database URL or the state file. Restart the client, then go back to [step 2](#2-ask-your-agent). [Connect your agent](connect.md) covers each client, adding Rowbit by hand, the Rowbit skill for agents, and stdio.
 
 ## Before you use it for real
 
@@ -235,6 +179,15 @@ It keeps a backup of any file it changes, refuses one it can't parse, and won't 
 ## Clean up
 
 ```sh
-docker compose down -v
-rm -f rowbit.db* rowbit-server.yml
+rowbit demo clean
 ```
+
+This takes back the client entry the demo added, stops and removes the database and its data, and deletes the demo's files. Run it where you ran `rowbit demo`.
+
+## Other ways to install
+
+- **By hand:** download the archive for your system and `SHA256SUMS` from the [latest release](https://github.com/Ermag/rowbit/releases/latest), check it with `sha256sum -c SHA256SUMS --ignore-missing` (`shasum -a 256 -c` on macOS), and put `rowbit` on your `PATH`. On macOS, a file downloaded in a browser is quarantined until `xattr -d com.apple.quarantine rowbit`.
+- **Check where it came from:** every archive has a build provenance attestation. `gh attestation verify rowbit-<version>-<target>.tar.gz --repo Ermag/rowbit` shows it was built by Rowbit's release workflow from the tagged commit.
+- **With `cargo binstall`:** `cargo binstall --git https://github.com/Ermag/rowbit rowbit-cli` fetches the release binary.
+- **From source:** with [Rust](https://rustup.rs) 1.88 or later, `cargo install --locked --git https://github.com/Ermag/rowbit rowbit-cli`. See [CONTRIBUTING.md](../CONTRIBUTING.md) for working on Rowbit.
+- **Without the demo:** the demo's files are in [examples/quickstart](../examples/quickstart). `docker compose up -d --wait` there starts the same database and the steps above work there, with `rowbit serve` for the review page; add a `rowbit-server.yml` holding `version: 0` and `mcp: { http: true }` to serve agents over HTTP.

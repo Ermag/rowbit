@@ -1,32 +1,45 @@
+# Rowbit
+
+A safety net for AI agents that write to your database. Preview every write, approve the risky ones, undo any single change. MariaDB and MySQL, over MCP.
+
+[![Release](https://img.shields.io/github/v/release/Ermag/rowbit?sort=semver)](https://github.com/Ermag/rowbit/releases)
+[![CI](https://github.com/Ermag/rowbit/actions/workflows/ci.yml/badge.svg)](https://github.com/Ermag/rowbit/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+
 <p align="center">
   <a href="https://ermag.github.io/rowbit/"><img src="site/social/social-preview.png" alt="Rowbit: a safety net for AI agents that write to your database. Preview, approve, undo." width="100%"></a>
 </p>
 
-<p align="center">
-  <a href="https://ermag.github.io/rowbit/"><b>Try the demo</b></a> ·
-  <a href="docs/quickstart.md"><b>Quickstart</b></a> ·
-  <a href="https://github.com/Ermag/rowbit/discussions/2"><b>Tell us what you think</b></a> ·
-  <a href="docs/spec/change-lifecycle.md">Read the spec</a>
-</p>
+## Try it
 
-# Rowbit
+```sh
+curl -fsSL https://ermag.github.io/rowbit/install.sh | sh
+rowbit demo
+```
+
+macOS and Linux (Windows through WSL); the demo needs Docker. If `~/.local/bin` isn't on your `PATH`, the installer says so: run `~/.local/bin/rowbit demo` instead. It runs a sample shop database with Rowbit in front of it, connects your agent and serves the review page. Then ask the agent:
+
+> The pending orders are stuck. Cancel them.
+
+**Works with** [Claude Code](docs/connect.md), [Cursor](docs/connect.md), [VS Code](docs/connect.md), [Claude Desktop](docs/connect.md), [Codex](docs/connect.md), [Gemini CLI](docs/connect.md), [Windsurf](docs/connect.md) and [any MCP client](docs/connect.md#any-other-client).
+
+[**Docs**](https://ermag.github.io/rowbit/docs/) · [Quickstart](docs/quickstart.md) · [Interactive demo](https://ermag.github.io/rowbit/) · [Tell us what you think](https://github.com/Ermag/rowbit/discussions/2)
+
+## What it does
 
 You ask a coding agent to fix the orders stuck in pending, and it writes `UPDATE shop.orders SET status = 'cancelled' WHERE status = 'pending'`. That also matches every order placed in the last hour. Rowbit catches it before it touches a row, shows a person exactly which 1,284 rows would change, and waits. If something bad does get through, you undo that one change without restoring a backup.
 
-**Status:** early and open source; the latest release is v0.2.0 (see the [changelog](CHANGELOG.md)). The [quickstart](docs/quickstart.md) runs Rowbit in front of a sample MariaDB database in about ten minutes, the [interactive demo](https://ermag.github.io/rowbit/) shows the idea on simulated data, and what we build first depends on what you tell us in the [feedback discussion](https://github.com/Ermag/rowbit/discussions/2).
+**Status:** early and open source; see the [changelog](CHANGELOG.md) for each release. What we build next depends on what you tell us in the [feedback discussion](https://github.com/Ermag/rowbit/discussions/2).
 
 ## How it works
 
-Rowbit sits between your agents and your database. Agents talk to Rowbit, never to the database directly.
+Rowbit sits between your agents and your database. Agents talk to Rowbit over MCP, never to the database directly.
 
 - **Exact preview.** Rowbit reads the rows a write would change and replays it on a private temporary copy, so you see each row before and after, exactly as the table would store it. Your tables are only read.
-- **Rules and humans.** A small YAML file decides whether a write is auto-approved, held for a person, or blocked. Agents can propose changes and check their status. Only people approve.
-- **Apply what you approved.** If the rows changed between preview and approval, nothing is written.
-- **Undo one change.** Before-images are kept per change, so you can roll back one bad write and keep everything else.
-- **Scopes the database enforces.** Per agent, which tables it may read or write at all, and which tables and columns it may never read. Rowbit compiles them into native grants on a database user of the agent's own, so `SELECT *` and subqueries can't get around them, and views only lend their definer's rights when you name them.
-- **Shadow mode.** Put an agent in front of Rowbit without slowing it down: writes the rules would hold go through, and the log says what would have happened. `rowbit policy test` replays real traffic against new rules before you enforce them.
-- **Review where you are.** A web UI built into the binary, sign-in through your identity provider (OIDC), and Slack or webhook notifications when a change is held.
-- **Audit log.** Every proposed write is recorded with who asked, what the rules decided, who approved it (by verified email) and what it changed, in a hash chain.
+- **Rules, then people.** A small YAML file lets safe writes through, holds risky ones for a person, and refuses the rest. Only people approve, and approval applies exactly what was previewed, or nothing. See [rules](docs/spec/policy.md).
+- **Undo one change.** Rowbit keeps every row a change touched, so you can take back one bad write and keep everything else.
+- **Scopes and shadow mode.** Per agent, which tables it may read or write and which columns it may never see, enforced by the database with a user of the agent's own. Shadow mode shows what the rules would hold before you enforce them.
+- **Review where you are.** A web UI in the binary, sign-in through your identity provider, Slack or webhook notifications, and an audit log in a hash chain. See [how a change moves](docs/spec/change-lifecycle.md).
 
 ```yaml
 # rowbit.yml
@@ -48,6 +61,71 @@ Here the agent can change the `status` of up to 20 orders on its own. An update 
 
 See [examples/rowbit.yml](examples/rowbit.yml) and the [rowbit.yml spec](docs/spec/policy.md) for the full schema.
 
+## Connect your agent
+
+`rowbit connect <client>` sets up a client in one command, with a token of the agent's own. The demo runs it for you. See [Connect your agent](docs/connect.md).
+
+<details>
+<summary><b>Claude Code</b></summary>
+
+```sh
+rowbit connect claude-code
+```
+
+Adds Rowbit with `claude mcp add`, for this directory (`--scope user` for everywhere). Add the skill that teaches the agent to use Rowbit well:
+
+```
+/plugin marketplace add Ermag/rowbit
+/plugin install rowbit@rowbit
+```
+
+</details>
+
+<details>
+<summary><b>Cursor</b></summary>
+
+```sh
+rowbit connect cursor
+```
+
+Adds Rowbit to `~/.cursor/mcp.json`. Restart Cursor.
+
+</details>
+
+<details>
+<summary><b>VS Code</b></summary>
+
+```sh
+rowbit connect vscode
+```
+
+Or, with `rowbit demo` or `rowbit serve` running, [add it to VS Code](https://insiders.vscode.dev/redirect/mcp/install?name=rowbit&inputs=%5B%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22rowbit_token%22%2C%22description%22%3A%22Rowbit%20agent%20token%20%28from%3A%20rowbit%20connect%20vscode%20--print%20--new-token%29%22%2C%22password%22%3Atrue%7D%5D&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22http%3A%2F%2F127.0.0.1%3A8080%2Fmcp%22%2C%22headers%22%3A%7B%22Authorization%22%3A%22Bearer%20%24%7Binput%3Arowbit_token%7D%22%7D%7D) and paste the token from `rowbit connect vscode --print --new-token` when VS Code asks (an agent has one token, so this signs out a client the demo connected).
+
+</details>
+
+<details>
+<summary><b>Claude Desktop, Codex, Gemini CLI, Windsurf</b></summary>
+
+```sh
+rowbit connect claude-desktop   # macOS; starts rowbit mcp itself
+rowbit connect codex
+rowbit connect gemini
+rowbit connect windsurf
+```
+
+</details>
+
+<details>
+<summary><b>Any other MCP client</b></summary>
+
+```sh
+rowbit connect --print
+```
+
+prints the address (`http://127.0.0.1:8080/mcp`) and a token to send as `Authorization: Bearer <token>`.
+
+</details>
+
 ## Why not just migrations?
 
 Having an agent write a migration file that goes through code review and CI is the right answer for a coding agent changing your schema, and Rowbit doesn't compete there: it holds every schema change for a person and leaves the real workflow to your migration tool. It works badly for fixing data:
@@ -66,25 +144,8 @@ The well-known incidents of coding agents wiping production databases are a cred
 - **Undo restores rows, not the world.** It puts the data back, but it can't take back an email that was sent or a refund that was paid because of it.
 - **Preview never writes to your tables.** It reads the affected rows without taking locks and replays the write on a temporary copy that only Rowbit's connection can see. Tables with triggers or cascading foreign keys are refused, because their side effects wouldn't show in the preview or be undone. So are tables Rowbit's database user can't fully inspect: it needs the `TRIGGER` and `PROCESS` privileges. See [database privileges](docs/privileges.md) for the exact grants.
 - **Where data lives.** Change state, previews (including before and after copies of affected rows) and the audit log are stored in a local SQLite file next to Rowbit. Protect it like a replica of the database ([how](docs/privileges.md#the-sqlite-file)).
+- **The CLI trusts whoever runs it.** Anyone who can read `rowbit.db` and has the database URL can run `rowbit approve`, under any `--as` name. Keep both from agents, and run Rowbit as a user they can't act as; see [Before you use it for real](docs/quickstart.md#before-you-use-it-for-real).
 - **Fail closed.** Anything Rowbit can't evaluate, it refuses. See the [change lifecycle](docs/spec/change-lifecycle.md) and [SECURITY.md](SECURITY.md).
-
-## Plan
-
-- Rust core, Svelte review UI built into the binary.
-- MCP server first, MySQL wire-protocol proxy second.
-- MariaDB and MySQL first, other databases through adapters later.
-
-## Repository layout
-
-| Path | What |
-|---|---|
-| `crates/` | Rust workspace: `rowbit-core`, `rowbit-policy`, `rowbit-mysql`, `rowbit-store`, `rowbit-engine`, `rowbit-mcp`, `rowbit-web`, `rowbit-cli`. See [ARCHITECTURE.md](ARCHITECTURE.md) |
-| `docs/spec/` | [Change lifecycle](docs/spec/change-lifecycle.md), [rowbit.yml](docs/spec/policy.md) and [rowbit-server.yml](docs/spec/server.md) specs, and [installing and setting up](docs/spec/setup.md) |
-| `docs/operating.md` | [Running Rowbit](docs/operating.md): outages, upgrades, retention |
-| `examples/` | Example `rowbit.yml` and `rowbit-server.yml`, and the [quickstart](docs/quickstart.md)'s sample database |
-| `web/` | The review UI's source (Svelte), built into `crates/rowbit-web/dist` |
-| `compose.yaml` | MariaDB 11.4 and MySQL 8.4 for integration tests |
-| `site/` | The demo page, deployed to GitHub Pages on every push to `main` |
 
 ## Contributing
 
