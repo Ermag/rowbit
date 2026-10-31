@@ -6,6 +6,9 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 
 ### New
 
+- Prebuilt binaries for Linux (x86-64 and ARM64, static) and macOS (Intel and Apple silicon) on each GitHub release, with `SHA256SUMS` and build provenance attestations (`gh attestation verify`).
+- An install script: `curl -fsSL https://ermag.github.io/rowbit/install.sh | sh` installs the latest release to `~/.local/bin`, checking it against `SHA256SUMS`, without `sudo`.
+- `cargo binstall --git https://github.com/Ermag/rowbit rowbit-cli` installs the release binary without compiling.
 - A held change's result now carries `review_url`, its page on the review UI, from `propose_write`, `change_status` and `rowbit propose`. The server's instructions tell the agent to give the person that link and stop, not to retry the write in another form. `rowbit serve` records its address in the state file, so agents over stdio get the same link. The link (`/changes/<id>`, now also in notifications) opens that change, through sign-in if needed; it used to land on the queue.
 
 ## 0.2.0 (2026-10-30)
