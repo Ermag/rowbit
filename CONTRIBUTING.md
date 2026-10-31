@@ -79,7 +79,7 @@ The UI inserts values only as text (no `{@html}`), and the server sends them wit
 
 ## Releasing
 
-1. In one pull request: set `version` in `Cargo.toml` (and `Cargo.lock`, with `cargo check`), and turn the changelog's `Unreleased` into `## <version> (<date>)`.
+1. In one pull request: set `version` in `Cargo.toml` (and `Cargo.lock`, with `cargo check`) and in `plugins/rowbit/.claude-plugin/plugin.json`, and turn the changelog's `Unreleased` into `## <version> (<date>)`.
 2. After it is merged, tag `main` with `v<version>`, its message the notes from `gh api repos/Ermag/rowbit/releases/generate-notes -f tag_name=v<version>`, and push the tag.
 3. The [release workflow](.github/workflows/release.yml) builds the binaries, checks the install script against them, and publishes the GitHub Release. If any step fails nothing is published: fix it, delete the tag, and tag again.
 
