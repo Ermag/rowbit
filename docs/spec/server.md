@@ -99,7 +99,7 @@ What a notification carries is the change's id, agent, database, table, statemen
     "table": "billing.refunds", "statement": "update", "rows": 37,
     "rule": "refunds-need-a-person",
     "reason": "Large or unusual refund batches are reviewed by billing.",
-    "url": "https://rowbit.internal.example.com/#/changes/42"
+    "url": "https://rowbit.internal.example.com/changes/42"
   }
 }
 ```

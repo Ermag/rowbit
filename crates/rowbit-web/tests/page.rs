@@ -388,6 +388,86 @@ async fn other_hosts_are_refused_and_the_ui_needs_a_session() {
     assert!(!js.is_empty());
 }
 
+/// Where a link to change `path` sends this request, if it redirects.
+async fn location(page: &Page, request: Request<Body>) -> Option<String> {
+    let response = page.router.clone().oneshot(request).await.unwrap();
+    response
+        .headers()
+        .get(header::LOCATION)
+        .map(|l| l.to_str().unwrap().to_owned())
+}
+
+// Found in review: a held change's link landed on the queue after sign-in,
+// since the browser never sends the `#/changes/<id>` part.
+#[tokio::test]
+async fn a_change_link_opens_that_change_after_sign_in() {
+    let engine = Arc::new(Engine::new(
+        MySqlAdapter::new("mysql://nobody@127.0.0.1:1/none").unwrap(),
+        PolicyFile::from_yaml(POLICY).unwrap(),
+        Store::open_in_memory().unwrap(),
+    ));
+    let mut page = Page::new(engine);
+    let get = |path: &str| {
+        Request::get(path)
+            .header(header::HOST, HOST)
+            .body(Body::empty())
+            .unwrap()
+    };
+    assert_eq!(
+        location(&page, get("/changes/42")).await.as_deref(),
+        Some("/login?next=42")
+    );
+    let (_, html) = page.get_path(HOST, "/login?next=42").await;
+    assert!(
+        html.contains("<input type=hidden name=next value=42>"),
+        "{html}"
+    );
+    // Only a change number is carried: anything else is dropped.
+    for bad in [
+        "/login?next=//evil.example",
+        "/login?next=4%202",
+        "/login?next=-1",
+    ] {
+        let (_, html) = page.get_path(HOST, bad).await;
+        assert!(!html.contains("name=next"), "{bad}: {html}");
+    }
+
+    let sign_in = |next: &str| {
+        Request::post("/login")
+            .header(header::HOST, HOST)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(format!(
+                "name=philip&password={}&next={next}",
+                password().replace(' ', "+")
+            )))
+            .unwrap()
+    };
+    assert_eq!(
+        location(&page, sign_in("42")).await.as_deref(),
+        Some("/#/changes/42")
+    );
+    assert_eq!(
+        location(&page, sign_in("https%3A%2F%2Fevil.example"))
+            .await
+            .as_deref(),
+        Some("/")
+    );
+
+    assert_eq!(
+        page.sign_in("philip", password()).await,
+        StatusCode::SEE_OTHER
+    );
+    let request = Request::get("/changes/42")
+        .header(header::HOST, HOST)
+        .header(header::COOKIE, page.cookie.clone().unwrap())
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        location(&page, request).await.as_deref(),
+        Some("/#/changes/42")
+    );
+}
+
 // Found in review: any local user could fetch the page, take the form token
 // and approve. Reaching the port is no longer enough.
 on_both!(reaching_the_port_is_not_enough_to_approve);

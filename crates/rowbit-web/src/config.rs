@@ -164,6 +164,33 @@ pub struct ServerConfig {
     pub agent_users_host: Option<String>,
 }
 
+/// Where `rowbit serve` is, from [`ServerConfig::address`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Address {
+    pub public_url: Option<String>,
+    pub listen: SocketAddr,
+    pub mcp_http: bool,
+}
+
+impl Default for Address {
+    fn default() -> Self {
+        Address {
+            public_url: None,
+            listen: DEFAULT_LISTEN.parse().expect("a valid address"),
+            mcp_http: false,
+        }
+    }
+}
+
+impl Address {
+    /// The review UI's address, as people and agents reach it.
+    pub fn base(&self) -> String {
+        self.public_url
+            .clone()
+            .unwrap_or_else(|| format!("http://{}", self.listen))
+    }
+}
+
 impl ServerConfig {
     /// Parses and checks the file, reading `${VAR}` secrets with `env`.
     pub fn from_yaml(
@@ -287,6 +314,28 @@ impl ServerConfig {
             .and_then(|a| a.get("host"))
             .and_then(|h| h.as_str())
             .map(str::to_owned))
+    }
+
+    /// Just where `rowbit serve` serves and whether agents may use HTTP,
+    /// for `rowbit connect`, which shouldn't need the file's secrets.
+    pub fn address(src: &str) -> Result<Address, ConfigError> {
+        let v: serde_norway::Value = serde_norway::from_str(src)?;
+        let text = |key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_owned);
+        let listen = match text("listen") {
+            Some(l) => l
+                .parse()
+                .map_err(|_| ConfigError::Invalid(format!("listen: {l:?} is not an address")))?,
+            None => DEFAULT_LISTEN.parse().expect("a valid address"),
+        };
+        Ok(Address {
+            public_url: text("public_url").map(|u| u.trim_end_matches('/').to_owned()),
+            listen,
+            mcp_http: v
+                .get("mcp")
+                .and_then(|m| m.get("http"))
+                .and_then(|h| h.as_bool())
+                .unwrap_or(false),
+        })
     }
 
     /// Where to listen: `flag` if given, else the file's, else the default.

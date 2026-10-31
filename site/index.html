@@ -570,7 +570,7 @@ const STUCK = [217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228];
 const SQL2 = `UPDATE orders
 SET status = 'cancelled'
 WHERE id IN (${STUCK.join(', ')})`;
-const URL = id => `http://127.0.0.1:8080/#/changes/${id}`;
+const URL = id => `http://127.0.0.1:8080/changes/${id}`;
 // id, customer, placed, status before; true for an order that is really stuck
 const ROWS1 = [
   ['217', 'customer-23', '21 h ago', 'pending', true],

@@ -115,7 +115,7 @@ rowbit propose --agent coding-agent "UPDATE orders SET status = 'cancelled' WHER
 It's held too, since it changes more than 20 rows. The count depends on how long the database has been up, about 84 rows if you started it just now:
 
 ```json
-{"id":5,"reason":"no rule matched","review_url":"http://127.0.0.1:8080/#/changes/5","rows":84,"state":"held","table":"shop.orders"}
+{"id":5,"reason":"no rule matched","review_url":"http://127.0.0.1:8080/changes/5","rows":84,"state":"held","table":"shop.orders"}
 ```
 
 Approve it on the page, or with `rowbit show 5`, then the first 12 or more characters of the review hash it printed and, since it's more than 50 rows, its row count (`rowbit show 5 --all` lists every row). Rowbit refuses any other hash or count, so you approve exactly what you looked at.
@@ -148,6 +148,17 @@ rowbit connect claude-code      # or cursor, vscode, claude-desktop, codex, gemi
 ```
 
 The demo serves agents over HTTP, so the client gets Rowbit's address and a token of the agent's own, never the database URL or the state file. Restart the client, then go back to [step 2](#2-ask-your-agent). [Connect your agent](connect.md) covers each client, adding Rowbit by hand, the Rowbit skill for agents, and stdio.
+
+### Let Rowbit set up the client
+
+`rowbit connect` does either setup for you, in the client's own configuration: over HTTP when `rowbit-server.yml` turns it on, making the agent's token itself, otherwise over stdio with the database URL from `ROWBIT_DATABASE_URL`. Run it in `examples/quickstart`:
+
+```sh
+rowbit connect                  # lists the clients it knows, and which are installed
+rowbit connect claude-code      # or cursor, vscode, claude-desktop, codex, gemini, windsurf
+```
+
+It keeps a backup of any file it changes, refuses one it can't parse, and won't replace an entry or an agent's token without `--force` or `--new-token`. `rowbit connect <client> --print` shows what to add by hand instead. See [`rowbit connect`](spec/setup.md#rowbit-connect).
 
 ## Before you use it for real
 
