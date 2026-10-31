@@ -6,7 +6,7 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 
 ### New
 
-- A Rowbit skill for coding agents, as a Claude Code plugin from this repository (`/plugin install rowbit --marketplace Ermag/rowbit`): read the schema first, propose one narrow write at a time, give the person the review link when a write is held, never work around a rule. The `SKILL.md` works in other agents that read skills. Apache-2.0.
+- A Rowbit skill for coding agents, as a Claude Code plugin from this repository (`/plugin marketplace add Ermag/rowbit`, then `/plugin install rowbit@rowbit`): read the schema first, propose one narrow write at a time, give the person the review link when a write is held, never work around a rule. The `SKILL.md` works in other agents that read skills. Apache-2.0.
 
 ## 0.2.0 (2026-10-30)
 

@@ -7,10 +7,11 @@ The plugin holds the skill only. Connect Rowbit itself with `rowbit connect <cli
 ## Claude Code
 
 ```
-/plugin install rowbit --marketplace Ermag/rowbit
+/plugin marketplace add Ermag/rowbit
+/plugin install rowbit@rowbit
 ```
 
-On Claude Code before 2.1.275: `/plugin marketplace add Ermag/rowbit`, then `/plugin install rowbit@rowbit`.
+Or from a terminal, in one step: `claude plugin install rowbit --marketplace Ermag/rowbit`.
 
 ## Other agents
 
