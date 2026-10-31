@@ -79,6 +79,27 @@ impl Client {
         }
     }
 
+    /// Whether the client is started in a directory, so where matters.
+    pub fn uses_dir(self) -> bool {
+        matches!(self, Client::ClaudeCode | Client::Codex | Client::Gemini)
+    }
+
+    /// How to start the client so it works in `dir`: a line to paste into a
+    /// terminal where the client has a command for that.
+    pub fn open_in(self, dir: &Path, env: &Env) -> String {
+        let shown = shell_quote(&dir.display().to_string());
+        match self {
+            Client::ClaudeCode => format!("cd {shown} && claude"),
+            Client::Codex => format!("cd {shown} && codex"),
+            Client::Gemini => format!("cd {shown} && gemini"),
+            Client::ClaudeDesktop => "restart Claude Desktop".into(),
+            _ => match self.command() {
+                Some(cmd) if env.on_path(cmd) => format!("{cmd} {shown}"),
+                _ => format!("open {} in {}", dir.display(), self.label()),
+            },
+        }
+    }
+
     /// The file Rowbit edits, for every client but Claude Code.
     pub fn config_file(self, env: &Env) -> Option<PathBuf> {
         let home = &env.home;
@@ -751,6 +772,10 @@ pub struct ConnectArgs {
     /// Change nothing in the client: print what to add, with the token
     #[arg(long)]
     print: bool,
+    /// Change nothing: say whether the client has the entry from here, and
+    /// whether Rowbit answers
+    #[arg(long, conflicts_with_all = ["print", "force", "new_token", "stdio"])]
+    check: bool,
     /// For stdio: mysql://user:password@host:port/database
     #[arg(long, env = "ROWBIT_DATABASE_URL", hide_env_values = true)]
     url: Option<String>,
@@ -783,6 +808,7 @@ impl ConnectArgs {
             new_token: false,
             force: false,
             print: false,
+            check: false,
             url: None,
             policy: dir.join("rowbit.yml"),
             store: super::StoreArgs {
@@ -845,6 +871,10 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
     );
     if client.config_file(&env).is_none() && client != Client::ClaudeCode {
         anyhow::bail!("{} isn't available on this system", client.label());
+    }
+    if a.check {
+        check(client, &env, &a)?;
+        return Ok(None);
     }
     let agent = pick_agent(&a)?;
     let address = a.server.address()?;
@@ -934,9 +964,11 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
     match client {
         // `rowbit demo` says where to open the client itself.
         _ if a.dir.is_some() => {}
-        Client::ClaudeCode if a.scope == Scope::Local => {
-            println!("Start Claude Code in {} to use it.", env.cwd.display())
-        }
+        Client::ClaudeCode if a.scope == Scope::Local => println!(
+            "It applies only in {}. Start Claude Code there: {}",
+            env.cwd.display(),
+            client.open_in(&env.cwd, &env)
+        ),
         Client::ClaudeCode | Client::Gemini | Client::Codex => {}
         _ => println!("Restart {} to load it.", client.label()),
     }
@@ -953,6 +985,52 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
             Server::Stdio { .. } => None,
         },
     }))
+}
+
+/// `--check`: whether the client has the entry where the agent works, and
+/// whether Rowbit answers at the address the entry points to.
+fn check(client: Client, env: &Env, a: &ConnectArgs) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        client.installed(env),
+        "{} doesn't look installed here",
+        client.label()
+    );
+    let place = match client.config_file(env) {
+        Some(file) => format!("in {}", file.display()),
+        None => format!("when started in {}", env.cwd.display()),
+    };
+    anyhow::ensure!(
+        exists(client, env, &a.name)?,
+        "{} has no server called {} {place}; run `rowbit connect {}` here to add it",
+        client.label(),
+        a.name,
+        client.id()
+    );
+    println!("{} has {} {place}.", client.label(), a.name);
+    let address = a.server.address()?;
+    if address.mcp_http && !client.stdio_only() && address.public_url.is_none() {
+        anyhow::ensure!(
+            std::net::TcpStream::connect_timeout(
+                &address.listen,
+                std::time::Duration::from_millis(500)
+            )
+            .is_ok(),
+            "Nothing answers at {}: start `rowbit serve`, or `rowbit demo` in a demo directory",
+            address.base()
+        );
+        println!("Rowbit answers at {}/mcp.", address.base());
+    }
+    match client {
+        Client::ClaudeCode => println!(
+            "Start Claude Code there, or restart it if it's open there: {}",
+            client.open_in(&env.cwd, env)
+        ),
+        _ => println!(
+            "Restart {} if it's open, so it loads the entry.",
+            client.label()
+        ),
+    }
+    Ok(())
 }
 
 fn pick_agent(a: &ConnectArgs) -> anyhow::Result<String> {
@@ -1351,6 +1429,24 @@ mod tests {
             Removal::Removed
         );
         assert!(!exists(Client::Codex, &e, "rowbit").unwrap());
+    }
+
+    #[test]
+    fn open_lines_can_be_pasted() {
+        let e = env(&home("open"), true);
+        let dir = Path::new("/tmp/my demo/workspace");
+        assert_eq!(
+            Client::ClaudeCode.open_in(dir, &e),
+            "cd '/tmp/my demo/workspace' && claude"
+        );
+        assert_eq!(
+            Client::Codex.open_in(Path::new("/tmp/w"), &e),
+            "cd /tmp/w && codex"
+        );
+        assert_eq!(
+            Client::Cursor.open_in(Path::new("/tmp/w"), &e),
+            "open /tmp/w in Cursor"
+        );
     }
 
     #[test]
