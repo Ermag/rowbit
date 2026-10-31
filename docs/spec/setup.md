@@ -29,7 +29,7 @@ Each target is built with `cargo build --release --locked`; the web UI is alread
 - A build provenance attestation for each archive, so `gh attestation verify rowbit-<version>-<target>.tar.gz --repo Ermag/rowbit` shows it was built by this workflow from the tagged commit.
 - Notes generated from pull request labels (see `.github/release.yml`), under a link to the changelog entry.
 
-The release is published only after every build, the checksums and the attestations succeeded; until then nothing about it is public. Running the workflow by hand (`workflow_dispatch`) does everything except publish, leaving the archives as workflow artifacts.
+The release is published only after every build, the checksums and the attestations succeeded; until then nothing about it is public. Its actions are pinned to commits, since it publishes what the install script downloads. Running the workflow by hand (`workflow_dispatch`), or a pull request that changes the build or the install script, does everything except attest and publish, leaving the archives as workflow artifacts. Before publishing, every run installs the builds with the install script on Linux (x86-64 and ARM64, with `curl` and with only `wget`) and macOS (Apple silicon and Intel), and checks it refuses an archive that doesn't match `SHA256SUMS`.
 
 `crates/rowbit-cli/Cargo.toml` carries `cargo binstall` metadata pointing at these archives, so `cargo binstall --git https://github.com/Ermag/rowbit rowbit-cli` installs the release binary without compiling.
 
@@ -40,21 +40,21 @@ macOS binaries are not signed or notarized. A binary fetched with `curl`, as the
 `site/install.sh`, served at `https://ermag.github.io/rowbit/install.sh`. It is a POSIX `sh` script needing `curl` or `wget`, `tar`, and `sha256sum` or `shasum`. The whole script is one function called on its last line, so a download cut off halfway runs nothing.
 
 1. Picks the target from `uname -s` and `uname -m` (`x86_64`/`amd64`, `aarch64`/`arm64`), and on macOS asks `sysctl hw.optional.arm64` so a shell under Rosetta still gets the Apple silicon build. Any other system is refused with a link to building from source.
-2. Downloads `SHA256SUMS` from the latest release, or from `v$ROWBIT_VERSION` if that is set, and takes the archive name for the target from it.
+2. Downloads `SHA256SUMS` from the latest release, or from `v$ROWBIT_VERSION` if that is set, and takes the archive name for the target from it. Downloads are HTTPS only, redirects included. `ROWBIT_DOWNLOAD_URL` replaces the release's address, for a mirror or for testing a local build, and then also allows HTTP.
 3. Downloads the archive into a new temporary directory, checks it against `SHA256SUMS`, and refuses on any mismatch. This catches a broken download, not a compromised release: both files come from the same place. The quickstart says how to check provenance with `gh attestation verify`.
 4. Installs `rowbit` to `$ROWBIT_INSTALL_DIR`, by default `~/.local/bin`, creating the directory, replacing a `rowbit` already there and never using `sudo`. If the directory isn't on `PATH`, it prints the line to add to the shell's profile and changes no profile itself.
-5. Prints `rowbit --version` from the installed binary, the next command (`rowbit demo`), and removes the temporary directory.
+5. Prints `rowbit --version` from the installed binary and the next command, and removes the temporary directory. The next command is `rowbit demo` when the installed binary is the one `PATH` finds; when the directory isn't on `PATH` yet, it is the full path (`~/.local/bin/rowbit demo`), which works before the profile is changed; and when another `rowbit` comes first on `PATH` (an older `cargo install`), the script says which and how to remove it.
 
 Upgrading is running it again, after stopping every Rowbit process and backing up `rowbit.db` (see [Running Rowbit](../operating.md#upgrading)).
 
 ## `rowbit demo`
 
-`rowbit demo [--dir <path>] [--port <port>] [--connect <client> | --no-connect]` runs the [quickstart](../quickstart.md)'s shop database in Docker and Rowbit in front of it, in a directory of its own, `rowbit-demo` by default, and connects an agent to it. It needs Docker with Compose v2; without `docker compose`, or with the Docker daemon not running, it says which and stops.
+`rowbit demo [--dir <path>] [--port <port>] [--listen <address>] [--connect <client> | --no-connect]` runs the [quickstart](../quickstart.md)'s shop database in Docker and Rowbit in front of it, in a directory of its own, `rowbit-demo` by default, and connects an agent to it. It needs Docker with Compose v2; without `docker compose`, with the Docker daemon not running, or without permission to reach it, it says which and stops. It runs until stopped and prints the review page's password, so it's for a person's terminal: without one, it refuses unless `--connect` or `--no-connect` says what to do, and the docs tell agents to ask the person to run it. Before writing anything it checks that the review page's address (`--listen`, `127.0.0.1:8080` by default) is free.
 
-1. **The directory.** If it doesn't exist, Rowbit creates it and writes the quickstart's `compose.yaml`, `shop.sql` and `rowbit.yml` (built into the binary from `examples/quickstart`, with `--port` in place of `33070`), a `rowbit-server.yml` with `mcp.http: true`, and `.rowbit-demo`, which marks the directory as the demo's and records the database URL and which client entries the demo added. If it exists with `.rowbit-demo` in it, Rowbit keeps every file as it is, so changes to `rowbit.yml` survive a restart. If it exists without one, Rowbit refuses, so it never writes into a directory of yours.
+1. **The directory.** If it doesn't exist, Rowbit creates it and writes the quickstart's `compose.yaml`, `shop.sql` and `rowbit.yml` (built into the binary from `examples/quickstart`, with `--port` in place of `33070`), a `rowbit-server.yml` with `mcp.http: true` and the `--listen` address, `.rowbit-demo`, which marks the directory as the demo's and records the database URL and which client entries the demo added, and an empty `workspace/` for the agent. The agent works there, not next to the files that say how to reach the database around Rowbit (`compose.yaml` holds the database's root password). If it exists with `.rowbit-demo` in it, Rowbit keeps every file as it is, so changes to `rowbit.yml` survive a restart. If it exists without one, Rowbit refuses, so it never writes into a directory of yours.
 2. **The database.** `docker compose up -d --wait` in that directory. MariaDB listens on `127.0.0.1:<port>` only, with the quickstart's fixed passwords, which is why the demo is for trying Rowbit and nothing else.
 3. **Something to review.** If the state file has no changes yet, Rowbit proposes the README's three writes as `coding-agent`, as `rowbit propose` would: a small fix that is applied (change 1), the risky update that is held (change 2) and a delete that is refused (change 3). The review page has something on it before any agent connects, and the quickstart's walkthrough carries on from there.
-4. **An agent.** On first start, Rowbit lists the [clients](#rowbit-connect) it finds (the client's command on `PATH`, or its configuration directory present) and asks which to connect, the first found by default, or none. Then it does what `rowbit connect <client>` does, inside the demo directory. One client, because the demo has one agent and an agent has one token; `rowbit connect <other client> --new-token` in the directory moves it. `--connect <client>` picks one without asking, `--no-connect` skips this, and without a terminal Rowbit skips it unless `--connect` is given. On a restart with a client already connected, it skips this.
+4. **An agent.** On first start, Rowbit lists the [clients](#rowbit-connect) it finds (the client's command on `PATH`, or its configuration directory present) and asks which to connect, the first found by default, or none. Then it does what `rowbit connect <client>` does, inside the demo directory, with Claude Code's local scope on `workspace/`. If that fails (a client file Rowbit can't parse, an entry by that name already there), it says why and how to connect later, and carries on without a client. One client, because the demo has one agent and an agent has one token; `rowbit connect <other client> --new-token` in the directory moves it. `--connect <client>` picks one without asking, `--no-connect` skips this, and without a terminal Rowbit skips it unless `--connect` is given. On a restart with a client already connected, it skips this.
 5. **The review page.** Rowbit makes a new page password, then runs `rowbit serve` in that directory in the foreground, with `/mcp` on. A new password each start, since the directory is throwaway and a lost password would otherwise mean `--set-password`.
 6. **What to try.** Before serving, it prints the review page's address and password, and what to ask the agent:
 
@@ -62,20 +62,21 @@ Upgrading is running it again, after stopping every Rowbit process and backing u
    Rowbit is guarding the demo shop database.
    Review page: http://127.0.0.1:8080    password: 7Kq…    name: anything
 
-   Claude Code is connected as coding-agent. Open it in rowbit-demo/ and ask:
+   Claude Code is connected as coding-agent. Open Claude Code in rowbit-demo/workspace/ and ask:
 
      Some orders are stuck in pending. Cancel them.
 
-   Rowbit will hold its write and it will give you a link to review it.
+   Rowbit will hold its write, and the agent will give you a link to review it.
+   (Change 2 on the review page is the demo's own example of that write.)
    ```
 
-   Where a client's entry only applies in one directory (Claude Code's local scope), it says to open the client there. Without a connected client, it prints how to connect one and the `rowbit propose` line from the quickstart instead. Then the `export ROWBIT_DATABASE_URL=...` line for the CLI, and `rowbit demo clean`.
+   It says to open the client on `workspace/`, which matters for Claude Code, whose entry applies only there. Without a connected client, it prints how to connect one and the `rowbit propose` line from the quickstart instead. Then the `export ROWBIT_DATABASE_URL=...` line for the CLI, and `rowbit demo clean`.
 
 The suggested prompt is picked so that a typical agent writes the too-broad `UPDATE` and Rowbit holds it; the release's Sam pass checks it with each client.
 
 Stopping it with Ctrl-C stops `rowbit serve` and leaves the database running, so the next `rowbit demo` starts at once.
 
-`rowbit demo clean [--dir <path>]` works only on a directory marked `.rowbit-demo`. It removes the client entries the demo added (with the client's own remove command, or by editing its file as below; an entry changed since, or a client with no remove command, such as VS Code, is left and named, with how to remove it), runs `docker compose down -v`, which removes the container and its data, deletes the files the demo wrote, `rowbit.db` and its side files, and the directory if nothing else is left in it.
+`rowbit demo clean [--dir <path>]` works only on a directory marked `.rowbit-demo`. It removes the client entries the demo added (with `claude mcp remove` for Claude Code, otherwise by editing the client's file as below; an entry that no longer points at the demo, or holds another token, is left, and named), runs `docker compose down -v`, which removes the container and its data, deletes the files the demo wrote, `rowbit.db` and its side files, `workspace/` if it's empty, and the directory if nothing else is left in it.
 
 Compose names the project after the directory, so two demo directories with the same name share a database. Run one demo at a time.
 
@@ -93,19 +94,21 @@ Compose names the project after the directory, so two demo directories with the 
 |---|---|
 | `claude-code` | Runs `claude mcp add` with `--scope local` (this directory, the default) or `--scope user`. `--scope project` is refused: it writes `.mcp.json`, which is meant to be committed, and would commit the token or database URL. |
 | `cursor` | Edits `~/.cursor/mcp.json`, adding the server under `mcpServers` with `url` and `headers`, or `command`, `args` and `env`. |
-| `vscode` | Runs `code --add-mcp` with an `http` or `stdio` server, which adds it to the user's VS Code profile. |
+| `vscode` | Edits the user profile's `mcp.json` (`~/Library/Application Support/Code/User/` on macOS, `$XDG_CONFIG_HOME/Code/User/` or `~/.config/Code/User/` on Linux), adding the server under `servers` with `type: http`, `url` and `headers`, or `type: stdio`, `command`, `args` and `env`. |
 | `claude-desktop` | Edits `claude_desktop_config.json` (`~/Library/Application Support/Claude/` on macOS), adding a stdio server under `mcpServers`; Claude Desktop's file takes no HTTP servers. Restart Claude Desktop to load it. macOS only. |
-| `codex` | Edits `~/.codex/config.toml`, adding `[mcp_servers.<name>]` with `url` and the `Authorization` header in `http_headers`, or `command`, `args` and `env`, and keeping the rest of the file, comments included. If the installed Codex takes no static headers, it writes `bearer_token_env_var = "ROWBIT_TOKEN"` instead and prints the `export` line. |
-| `gemini` | Runs `gemini mcp add --scope user` with `--transport http` and the header, or the stdio command. |
+| `codex` | Edits `~/.codex/config.toml`, adding `[mcp_servers.<name>]` with `url` and the `Authorization` header in `http_headers`, or `command`, `args` and `env`, and keeping the rest of the file, comments included. |
+| `gemini` | Edits `~/.gemini/settings.json`, adding the server under `mcpServers` with `httpUrl` and `headers`, or `command`, `args` and `env`. |
 | `windsurf` | Edits `~/.codeium/windsurf/mcp_config.json`, adding the server under `mcpServers` with `serverUrl` and `headers`, or `command`, `args` and `env`. |
 
-A client's own command must be on `PATH`; if it isn't, Rowbit says so and changes nothing. Those commands take the token or URL as an argument, so other users on the same machine could see it in the process list while the command runs; on a shared machine, use `--print` and add it by hand.
+A client must look installed (its command on `PATH`, or its configuration directory present); if it doesn't, Rowbit says so and changes nothing. Claude Code must have `claude` on `PATH`. `claude mcp add` takes the token or URL as an argument, so other users on the same machine could see it in the process list while it runs; on a shared machine, use `--print` and add it by hand. Every other client's file is edited directly, so the token never goes on a command line.
+
+The checks (the client, an entry by that name, a file Rowbit can parse, the agent's existing token) all run before Rowbit makes a token, so a refusal costs nothing. If writing the client's configuration then fails, Rowbit revokes the token it just made.
 
 When Rowbit edits a client's file itself, it:
 
 - reads it as strict JSON, or TOML for Codex, and refuses a file it can't parse (for JSON, comments and trailing commas), printing the entry to add by hand instead;
 - keeps every other key and server as it was;
-- copies the old file to `<file>.rowbit-backup` before writing, and writes through a temporary file and a rename, keeping its permissions; a new file is made readable by its owner only, since it holds a token or a database URL.
+- copies the old file to `<file>.rowbit-backup` before writing, and writes through a temporary file and a rename. The file then holds a token or a database URL, so it is made readable by its owner only, and Rowbit says so if it wasn't; a new file starts that way. A symlinked file (a dotfile manager's) is followed and its target written, so the link stays.
 
 Every run prints what it changed and where, with the token shortened to `rbt_` and its last four characters, and says to restart the client if it only reads its configuration on start.
 
@@ -117,7 +120,7 @@ The home page and the README also offer install links for VS Code (`https://insi
 
 ## Review links
 
-So that a held write ends with the person knowing where to look, `propose_write` and `change_status` return `review_url` for a held change: `<public_url>/#/changes/<id>`, or `http://<listen>/#/changes/<id>` without a `public_url`, the same link notifications use. `rowbit mcp` over stdio reads `rowbit-server.yml` as `rowbit serve` does (current directory or `--config`) and falls back to `http://127.0.0.1:8080`. The server's instructions tell the agent to give the person that link and not to retry the write in another form. The link reveals nothing: the page needs sign-in, and the agent could reach its address already. See [Agent tools](change-lifecycle.md#agent-tools-mcp).
+So that a held write ends with the person knowing where to look, `propose_write` and `change_status` return `review_url` for a held change: `<public_url>/changes/<id>`, or `http://<listen>/changes/<id>` without a `public_url`, the same link notifications use. `rowbit serve` records that address in the state file when it starts, so `rowbit mcp` over stdio, which shares the file, links to the same place; before `rowbit serve` has ever run, the link uses `http://127.0.0.1:8080`. The server's instructions tell the agent to give the person that link and not to retry the write in another form. The link reveals nothing: the page needs sign-in, and the agent could reach its address already. Opened signed out, it goes through sign-in (carrying only the change's number) and then to that change. See [Agent tools](change-lifecycle.md#agent-tools-mcp).
 
 ## The skill
 
@@ -127,6 +130,8 @@ A skill teaches an agent how to work with Rowbit, which the MCP tools' descripti
 /plugin marketplace add Ermag/rowbit
 /plugin install rowbit@rowbit
 ```
+
+or from a terminal, `claude plugin install rowbit --marketplace Ermag/rowbit`. The skill is Apache-2.0, like `rowbit.yml`'s schema, so other tools can carry it.
 
 `SKILL.md` is the format Codex, Cursor and Gemini CLI read too; the docs say where to copy it for each. It tells the agent to:
 

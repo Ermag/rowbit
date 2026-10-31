@@ -65,6 +65,14 @@ npm run build
 
 The UI inserts values only as text (no `{@html}`), and the server sends them with hidden characters already made visible. Its content security policy allows no inline scripts or styles, so no `style=` attributes either.
 
+## Releasing
+
+1. In one pull request: set `version` in `Cargo.toml` (and `Cargo.lock`, with `cargo check`), and turn the changelog's `Unreleased` into `## <version> (<date>)`.
+2. After it is merged, tag `main` with `v<version>`, its message the notes from `gh api repos/Ermag/rowbit/releases/generate-notes -f tag_name=v<version>`, and push the tag.
+3. The [release workflow](.github/workflows/release.yml) builds the binaries, checks the install script against them, and publishes the GitHub Release. If any step fails nothing is published: fix it, delete the tag, and tag again.
+
+To try the builds without releasing, run the workflow from the Actions tab; the archives are left as artifacts.
+
 ## Docs
 
 `docs/` is the docs site's source, rendered with [mdBook](https://rust-lang.github.io/mdBook/) into `https://ermag.github.io/rowbit/docs/` on every push to `main`. `docs/SUMMARY.md` is the sidebar. To build it as CI does, with `mdbook` 0.5 on `PATH`:
