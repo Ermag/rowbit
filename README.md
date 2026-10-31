@@ -17,7 +17,7 @@ curl -fsSL https://ermag.github.io/rowbit/install.sh | sh
 rowbit demo
 ```
 
-macOS and Linux (Windows through WSL); the demo needs Docker. It runs a sample shop database with Rowbit in front of it, connects your agent and serves the review page. Then ask the agent:
+macOS and Linux (Windows through WSL); the demo needs Docker. If `~/.local/bin` isn't on your `PATH`, the installer says so: run `~/.local/bin/rowbit demo` instead. It runs a sample shop database with Rowbit in front of it, connects your agent and serves the review page. Then ask the agent:
 
 > Some orders are stuck in pending. Cancel them.
 
@@ -75,7 +75,8 @@ rowbit connect claude-code
 Adds Rowbit with `claude mcp add`, for this directory (`--scope user` for everywhere). Add the skill that teaches the agent to use Rowbit well:
 
 ```
-/plugin install rowbit --marketplace Ermag/rowbit
+/plugin marketplace add Ermag/rowbit
+/plugin install rowbit@rowbit
 ```
 
 </details>

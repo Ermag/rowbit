@@ -4,6 +4,8 @@ This takes about ten minutes. You'll run a small shop database in Docker with Ro
 
 You need macOS or Linux (Windows through WSL) and [Docker](https://docs.docker.com/get-docker/).
 
+An agent setting this up for you should install Rowbit and then ask you to run `rowbit demo` in your own terminal: it runs until you stop it, and prints the review page's password, which is yours.
+
 ## 1. Install Rowbit and start the demo
 
 ```sh
@@ -11,11 +13,11 @@ curl -fsSL https://ermag.github.io/rowbit/install.sh | sh
 rowbit demo
 ```
 
-The first puts `rowbit` in `~/.local/bin`, after checking the download against the release's `SHA256SUMS` ([other ways to install](#other-ways-to-install)). The second makes a `rowbit-demo` directory and, in it:
+The first puts `rowbit` in `~/.local/bin`, after checking the download against the release's `SHA256SUMS` ([other ways to install](#other-ways-to-install)). If that directory isn't on your `PATH` (as on a new Mac), the installer says how to add it; until then, run `~/.local/bin/rowbit demo`. The second makes a `rowbit-demo` directory and, in it:
 
 - starts MariaDB 11.4 on `127.0.0.1:33070` with a `shop` database holding 1,500 orders, one placed each minute over the last day. The newest 1,284 are `pending`, so some were placed in the last hour. It also creates the database user Rowbit connects as, with exactly the grants in [database privileges](privileges.md). The files are the ones in [examples/quickstart](../examples/quickstart);
 - proposes three writes as the agent `coding-agent`, which you'll look at below;
-- offers to connect an agent client it finds, such as Claude Code or Cursor;
+- offers to connect an agent client it finds, such as Claude Code or Cursor, with an empty `rowbit-demo/workspace` for the agent to work in, away from the demo's passwords and state;
 - serves the review page on <http://127.0.0.1:8080>, and prints its password and what to ask the agent.
 
 Leave it running, and use another terminal for the rest, inside `rowbit-demo`. The CLI commands read the database URL from this variable (`rowbit demo` prints it):
@@ -27,7 +29,7 @@ export ROWBIT_DATABASE_URL=mysql://rowbit:rowbit-quickstart@127.0.0.1:33070/shop
 
 ## 2. Ask your agent
 
-If the demo connected an agent, open it (for Claude Code, in `rowbit-demo`) and ask:
+If the demo connected an agent, open it on `rowbit-demo/workspace` (for Claude Code, start it there) and ask:
 
 > Some orders are stuck in pending. Cancel them.
 
