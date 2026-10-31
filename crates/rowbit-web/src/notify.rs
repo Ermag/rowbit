@@ -206,7 +206,7 @@ mod tests {
     fn slack_text_cant_link_or_mention() {
         let payload = json!({ "change": {
             "id": 7, "agent": "bot", "table": "db.<!channel>", "statement": "update",
-            "rows": 37, "rule": "big", "reason": "a & b", "url": "https://r.example.com/#/changes/7",
+            "rows": 37, "rule": "big", "reason": "a & b", "url": "https://r.example.com/changes/7",
         }});
         let m = slack_message(&payload);
         let text = m.to_string();
@@ -216,7 +216,7 @@ mod tests {
         assert!(text.contains("a &amp; b"), "{text}");
         assert_eq!(
             m["blocks"][2]["elements"][0]["url"],
-            "https://r.example.com/#/changes/7"
+            "https://r.example.com/changes/7"
         );
     }
 }

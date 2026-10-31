@@ -112,6 +112,7 @@ async fn small_batch_is_approved_large_one_is_held(var: &str, table: &str) {
         Some(format!("rowbit_test.{t}").as_str())
     );
     assert_eq!(s.reason, None);
+    assert_eq!(s.review_url, None, "only a held change links to review");
 
     let s = propose(
         &engine,
@@ -124,6 +125,18 @@ async fn small_batch_is_approved_large_one_is_held(var: &str, table: &str) {
     assert_eq!(
         s.reason.as_deref(),
         Some("Large or unusual refund batches are reviewed by billing.")
+    );
+    // Before `rowbit serve` has said where it is, the default address.
+    assert_eq!(
+        s.review_url,
+        Some(format!("http://127.0.0.1:8080/changes/{}", s.id))
+    );
+    engine
+        .set_review_address("https://rowbit.example.com/")
+        .unwrap();
+    assert_eq!(
+        engine.status("refund-bot", s.id).unwrap().review_url,
+        Some(format!("https://rowbit.example.com/changes/{}", s.id))
     );
 }
 

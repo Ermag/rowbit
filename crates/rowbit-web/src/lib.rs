@@ -49,6 +49,8 @@ const SESSION: Duration = Duration::from_secs(12 * 60 * 60);
 const COOKIE: &str = "rowbit_session";
 /// Brings the browser back from the provider to the login it started.
 const LOGIN_COOKIE: &str = "rowbit_login";
+/// The change to open once an identity provider sign-in finishes.
+const NEXT_COOKIE: &str = "rowbit_next";
 
 /// How reviewers sign in.
 pub enum SignIn {
@@ -113,6 +115,7 @@ pub fn router(engine: Arc<Engine>, web: Web) -> Router {
         .route("/", get(index))
         .route("/assets/app.js", get(app_js))
         .route("/assets/app.css", get(app_css))
+        .route("/changes/{id}", get(change_page))
         .route("/login", get(login_page).post(login))
         .route("/auth/start", get(auth_start))
         .route("/auth/callback", get(auth_callback))
@@ -295,28 +298,76 @@ fn same_origin(app: &App, headers: &HeaderMap) -> bool {
 struct LoginForm {
     name: String,
     password: String,
+    next: Option<String>,
 }
 
-async fn login_page(State(app): State<App>) -> Response {
+/// The change to open after signing in: only a change id, so the redirect
+/// can't be pointed anywhere else.
+#[derive(Deserialize)]
+struct Next {
+    next: Option<String>,
+}
+
+fn next_change(next: Option<&str>) -> Option<u64> {
+    next.filter(|n| !n.is_empty() && n.len() <= 19 && n.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|n| n.parse().ok())
+}
+
+/// Where a signed-in browser goes: the change, or the queue.
+fn landing(next: Option<u64>) -> String {
+    match next {
+        Some(id) => format!("/#/changes/{id}"),
+        None => "/".to_owned(),
+    }
+}
+
+/// A change's link, as agents and notifications give it: the change in the
+/// UI, by way of sign-in if needed. (A `#` fragment alone would be lost at
+/// sign-in, since the browser doesn't send it.)
+async fn change_page(
+    State(app): State<App>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<u64>,
+) -> Response {
+    if session(&app, &headers).is_some() {
+        return Redirect::to(&landing(Some(id))).into_response();
+    }
+    Redirect::to(&format!("/login?next={id}")).into_response()
+}
+
+async fn login_page(
+    State(app): State<App>,
+    axum::extract::Query(q): axum::extract::Query<Next>,
+) -> Response {
+    let next = next_change(q.next.as_deref());
     if let SignIn::Oidc(login) = &*app.sign_in {
+        let start = match next {
+            Some(id) => format!("/auth/start?next={id}"),
+            None => "/auth/start".to_owned(),
+        };
         return Html(page(
             "Sign in to Rowbit",
             &format!(
-                "<h1>Sign in</h1><p><a class=button href=\"/auth/start\">Sign in with {}</a></p>",
+                "<h1>Sign in</h1><p><a class=button href=\"{start}\">Sign in with {}</a></p>",
                 esc(&login.provider)
             ),
         ))
         .into_response();
     }
+    let hidden = next
+        .map(|id| format!("<input type=hidden name=next value={id}>"))
+        .unwrap_or_default();
     Html(page(
         "Sign in to Rowbit",
-        "<h1>Sign in</h1>\
-         <form method=post action=\"/login\" class=login>\
-           <label>Your name <input name=name autocomplete=username required maxlength=64></label>\
-           <label>Page password <input name=password type=password autocomplete=current-password required></label>\
-           <button class=approve>Sign in</button></form>\
-         <p class=muted>The password was printed when <code>rowbit serve</code> first started, \
-         or set with <code>rowbit serve --set-password</code>.</p>",
+        &format!(
+            "<h1>Sign in</h1>\
+             <form method=post action=\"/login\" class=login>{hidden}\
+               <label>Your name <input name=name autocomplete=username required maxlength=64></label>\
+               <label>Page password <input name=password type=password autocomplete=current-password required></label>\
+               <button class=approve>Sign in</button></form>\
+             <p class=muted>The password was printed when <code>rowbit serve</code> first started, \
+             or set with <code>rowbit serve --set-password</code>.</p>"
+        ),
     ))
     .into_response()
 }
@@ -366,7 +417,7 @@ async fn login(
     }
     *failures = 0;
     drop(failures);
-    let mut response = Redirect::to("/").into_response();
+    let mut response = Redirect::to(&landing(next_change(form.next.as_deref()))).into_response();
     start_session(&app, name, &mut response);
     response
 }
@@ -409,20 +460,32 @@ fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 
 /// Sends the browser to the provider, with a cookie that brings it back to
 /// this login. `SameSite=Lax`, since coming back is a cross-site navigation.
-async fn auth_start(State(app): State<App>) -> Response {
+async fn auth_start(
+    State(app): State<App>,
+    axum::extract::Query(q): axum::extract::Query<Next>,
+) -> Response {
     let SignIn::Oidc(login) = &*app.sign_in else {
         return Redirect::to("/login").into_response();
     };
     let id = random_token();
     let url = login.start(id.clone());
     let mut response = Redirect::to(&url).into_response();
+    let secure = if app.secure { "; Secure" } else { "" };
+    let window = oidc::LOGIN_WINDOW.as_secs();
     let cookie = format!(
-        "{LOGIN_COOKIE}={id}; HttpOnly; SameSite=Lax; Path=/auth; Max-Age={}{}",
-        oidc::LOGIN_WINDOW.as_secs(),
-        if app.secure { "; Secure" } else { "" }
+        "{LOGIN_COOKIE}={id}; HttpOnly; SameSite=Lax; Path=/auth; Max-Age={window}{secure}"
     );
     if let Ok(value) = HeaderValue::from_str(&cookie) {
-        response.headers_mut().insert(header::SET_COOKIE, value);
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    // The change to open afterwards: digits only, so nothing to inject.
+    if let Some(next) = next_change(q.next.as_deref()) {
+        let cookie = format!(
+            "{NEXT_COOKIE}={next}; HttpOnly; SameSite=Lax; Path=/auth; Max-Age={window}{secure}"
+        );
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            response.headers_mut().append(header::SET_COOKIE, value);
+        }
     }
     response
 }
@@ -477,12 +540,21 @@ async fn auth_callback(
     match login.finish(&id, &state, &code).await {
         Err(why) => refused(&why),
         Ok(reviewer) => {
+            let to = landing(next_change(cookie(&headers, NEXT_COOKIE).as_deref()));
             let mut response = Html(page(
                 "Signed in",
-                "<meta http-equiv=refresh content=\"0;url=/\"><p>Signed in. <a href=\"/\">Continue</a></p>",
+                &format!(
+                    "<meta http-equiv=refresh content=\"0;url={to}\"><p>Signed in. <a href=\"{to}\">Continue</a></p>"
+                ),
             ))
             .into_response();
-            response.headers_mut().insert(
+            response.headers_mut().append(
+                header::SET_COOKIE,
+                HeaderValue::from_static(
+                    "rowbit_next=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0",
+                ),
+            );
+            response.headers_mut().append(
                 header::SET_COOKIE,
                 HeaderValue::from_static(
                     "rowbit_login=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0",
