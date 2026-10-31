@@ -83,7 +83,8 @@ jobs:
           grep -Eq '^ +1 +applied' changes.txt
           grep -Eq '^ +2 +held' changes.txt
           grep -Eq '^ +3 +rejected' changes.txt
-          kill -INT "$demo"; wait "$demo" || true
+          # A background job in a script ignores SIGINT, so stop it with TERM.
+          kill "$demo"; wait "$demo" || true
           "$bin" demo clean
           test ! -e rowbit-demo
           test -z "$(docker ps -aq --filter name=rowbit-demo)"
