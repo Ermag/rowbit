@@ -109,6 +109,15 @@ jobs:
           git status --porcelain -- ../crates/rowbit-web/dist
           test -z "$(git status --porcelain -- ../crates/rowbit-web/dist)"
 
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: mdbook
+        run: scripts/install-mdbook.sh "$RUNNER_TEMP/bin"
+      - name: The docs site builds, with no broken links
+        run: PATH="$RUNNER_TEMP/bin:$PATH" python3 -I scripts/build-docs.py "$RUNNER_TEMP/site"
+
   deny:
     runs-on: ubuntu-latest
     steps:

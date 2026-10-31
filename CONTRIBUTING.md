@@ -73,6 +73,16 @@ The UI inserts values only as text (no `{@html}`), and the server sends them wit
 
 To try the builds without releasing, run the workflow from the Actions tab; the archives are left as artifacts.
 
+## Docs
+
+`docs/` is the docs site's source, rendered with [mdBook](https://rust-lang.github.io/mdBook/) into `https://ermag.github.io/rowbit/docs/` on every push to `main`. `docs/SUMMARY.md` is the sidebar. To build it as CI does, with `mdbook` 0.5 on `PATH`:
+
+```sh
+python3 scripts/build-docs.py /tmp/rowbit-site
+```
+
+It fails on a link to a file or heading that doesn't exist.
+
 ## Licenses
 
 The server crates are AGPL-3.0-only. `rowbit-policy` (the `rowbit.yml` schema) and future client SDKs are Apache-2.0. Contributions are accepted under the license of the crate they touch.
