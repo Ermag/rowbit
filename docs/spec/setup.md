@@ -107,7 +107,7 @@ When Rowbit edits a client's file itself, it:
 
 - reads it as strict JSON, or TOML for Codex, and refuses a file it can't parse (for JSON, comments and trailing commas), printing the entry to add by hand instead;
 - keeps every other key and server as it was;
-- copies the old file to `<file>.rowbit-backup` before writing, and writes through a temporary file and a rename, keeping its permissions; a new file is made readable by its owner only, since it holds a token or a database URL.
+- copies the old file to `<file>.rowbit-backup` before writing, and writes through a temporary file and a rename. The file then holds a token or a database URL, so it is made readable by its owner only, and Rowbit says so if it wasn't; a new file starts that way. A symlinked file (a dotfile manager's) is followed and its target written, so the link stays.
 
 Every run prints what it changed and where, with the token shortened to `rbt_` and its last four characters, and says to restart the client if it only reads its configuration on start.
 

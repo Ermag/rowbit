@@ -248,6 +248,8 @@ enum Json {
 #[derive(Debug)]
 pub struct Applied {
     pub place: String,
+    /// Whether Rowbit took away group and other access to the file.
+    pub tightened: bool,
 }
 
 /// Refuses an entry name a client would trip on.
@@ -337,6 +339,7 @@ pub fn apply(
                 Scope::User => "Claude Code (user settings)".into(),
                 _ => "Claude Code (this directory)".into(),
             },
+            tightened: false,
         });
     }
     let file = client
@@ -352,9 +355,10 @@ pub fn apply(
         std::fs::copy(&file, backup_path(&file))
             .with_context(|| format!("backing up {}", file.display()))?;
     }
-    write_private(&file, &new)?;
+    let tightened = write_private(&file, &new)?;
     Ok(Applied {
         place: file.display().to_string(),
+        tightened,
     })
 }
 
@@ -637,14 +641,27 @@ fn backup_path(file: &Path) -> PathBuf {
 /// Writes through a temporary file and a rename, keeping an existing file's
 /// permissions; a new file is its owner's only, since it holds a token or a
 /// database URL.
-fn write_private(file: &Path, contents: &str) -> anyhow::Result<()> {
+///
+/// The file holds a token or a database URL, so group and others lose
+/// access to it; returns whether they had any. A symlink (a dotfile
+/// manager's) is followed, and the file it points to is written.
+fn write_private(file: &Path, contents: &str) -> anyhow::Result<bool> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let target;
+    let file = if std::fs::symlink_metadata(file).is_ok_and(|m| m.file_type().is_symlink()) {
+        target = std::fs::canonicalize(file)
+            .with_context(|| format!("{} is a symlink to nothing", file.display()))?;
+        target.as_path()
+    } else {
+        file
+    };
     let dir = file.parent().context("a file has a directory")?;
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    let mode = std::fs::metadata(file)
+    let old = std::fs::metadata(file)
         .map(|m| m.permissions().mode() & 0o7777)
         .unwrap_or(0o600);
+    let mode = old & !0o077;
     let mut tmp_name = std::ffi::OsString::from(".");
     tmp_name.push(file.file_name().unwrap_or_default());
     tmp_name.push(format!(".rowbit-{}", std::process::id()));
@@ -664,7 +681,8 @@ fn write_private(file: &Path, contents: &str) -> anyhow::Result<()> {
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
-    result.with_context(|| format!("writing {}", file.display()))
+    result.with_context(|| format!("writing {}", file.display()))?;
+    Ok(old != mode)
 }
 
 /// `rowbit connect`'s arguments.
@@ -822,6 +840,12 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
             return Err(e);
         }
     };
+    if applied.tightened {
+        println!(
+            "{} was readable by other users; it is now yours only, since it holds the agent's credentials.",
+            applied.place
+        );
+    }
     match &server {
         Server::Http { url, token } => {
             println!(
@@ -1098,7 +1122,11 @@ mod tests {
         let mode = std::os::unix::fs::PermissionsExt::mode(
             &std::fs::metadata(&file).unwrap().permissions(),
         );
-        assert_eq!(mode & 0o777, 0o640);
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "it holds a token now: no longer readable by the group"
+        );
         assert!(exists(Client::Cursor, &e, "rowbit").unwrap());
 
         // A second time is refused without --force, and changes nothing.
@@ -1111,6 +1139,25 @@ mod tests {
                 .unwrap()
                 .contains("ROWBIT_DATABASE_URL")
         );
+    }
+
+    #[test]
+    fn symlinked_files_stay_symlinks() {
+        let h = home("symlink");
+        let e = env(&h, false);
+        let file = Client::Cursor.config_file(&e).unwrap();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let real = h.join("dotfiles-mcp.json");
+        std::fs::write(&real, "{}").unwrap();
+        std::os::unix::fs::symlink(&real, &file).unwrap();
+        apply(Client::Cursor, &e, "rowbit", &http(), Scope::Local, false).unwrap();
+        assert!(
+            std::fs::symlink_metadata(&file)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(std::fs::read_to_string(&real).unwrap().contains("rbt_test"));
     }
 
     #[test]
