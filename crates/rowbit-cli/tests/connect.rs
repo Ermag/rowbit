@@ -153,7 +153,8 @@ fn claude_code_is_set_up_with_its_own_command() {
     assert!(!ok && out.contains("committed"), "{out}");
     let (ok, out) = c.run(&["connect", "claude-code"]);
     assert!(ok, "{out}");
-    assert!(out.contains("Start Claude Code in this directory"), "{out}");
+    assert!(out.contains("Start Claude Code in "), "{out}");
+    assert!(!out.contains("workspace"), "{out}");
     let calls = std::fs::read_to_string(&log).unwrap();
     assert!(calls.starts_with("mcp get rowbit\n"), "{calls}");
     assert!(

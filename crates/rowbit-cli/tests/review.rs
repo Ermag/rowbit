@@ -240,3 +240,55 @@ async fn big_changes_and_hostile_text(var: &str, table: &str) {
     assert!(ok && out.contains("applied"), "{out}");
     cleanup(&s.dir);
 }
+
+// Found in review: `rowbit serve` must record where it listens, so an agent
+// over stdio gets links to that address, not the default one.
+on_both!(review_links_follow_where_serve_listens);
+async fn review_links_follow_where_serve_listens(var: &str, table: &str) {
+    let table = format!("{table}_link");
+    let Some(s) = setup(var, &table).await else {
+        return;
+    };
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut serve = Command::new(env!("CARGO_BIN_EXE_rowbit"))
+        .args(["serve", "--listen", &format!("127.0.0.1:{port}")])
+        .current_dir(&s.dir)
+        .env("ROWBIT_DATABASE_URL", &s.url)
+        .env("ROWBIT_POLICY", s.dir.join("rowbit.yml"))
+        .env("ROWBIT_STORE", s.dir.join("rowbit.db"))
+        .env_remove("ROWBIT_SERVER_CONFIG")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut up = false;
+    for _ in 0..100 {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            up = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    serve.kill().unwrap();
+    serve.wait().unwrap();
+    assert!(up, "rowbit serve didn't start");
+
+    let (ok, out) = s.rowbit(&[
+        "propose",
+        "--agent",
+        "refund-bot",
+        &format!("UPDATE {table} SET status = 'refunded'"),
+    ]);
+    assert!(ok, "{out}");
+    let held: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(held["state"], "held", "{out}");
+    assert_eq!(
+        held["review_url"],
+        format!("http://127.0.0.1:{port}/changes/{}", held["id"])
+    );
+    cleanup(&s.dir);
+}

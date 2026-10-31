@@ -70,6 +70,24 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           ./e2e/run.sh
+      - name: rowbit demo, end to end
+        run: |
+          cargo build --locked -q -p rowbit-cli
+          bin=$PWD/target/debug/rowbit
+          cd "$RUNNER_TEMP"
+          "$bin" demo --port 33090 --no-connect > demo.log 2>&1 &
+          demo=$!
+          for _ in $(seq 120); do curl -fs -o /dev/null http://127.0.0.1:8080/ && break; sleep 1; done
+          cat demo.log
+          (cd rowbit-demo && "$bin" changes) | tee changes.txt
+          grep -Eq '^ +1 +applied' changes.txt
+          grep -Eq '^ +2 +held' changes.txt
+          grep -Eq '^ +3 +rejected' changes.txt
+          # A background job in a script ignores SIGINT, so stop it with TERM.
+          kill "$demo"; wait "$demo" || true
+          "$bin" demo clean
+          test ! -e rowbit-demo
+          test -z "$(docker ps -aq --filter name=rowbit-demo)"
       - name: Database logs
         if: failure()
         run: docker compose logs
