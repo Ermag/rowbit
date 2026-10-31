@@ -99,7 +99,7 @@ Adds Rowbit to `~/.cursor/mcp.json`. Restart Cursor.
 rowbit connect vscode
 ```
 
-Or, with `rowbit demo` or `rowbit serve` running, [add it to VS Code](https://insiders.vscode.dev/redirect/mcp/install?name=rowbit&inputs=%5B%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22rowbit_token%22%2C%22description%22%3A%22Rowbit%20agent%20token%20%28from%3A%20rowbit%20connect%20vscode%20--print%29%22%2C%22password%22%3Atrue%7D%5D&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22http%3A%2F%2F127.0.0.1%3A8080%2Fmcp%22%2C%22headers%22%3A%7B%22Authorization%22%3A%22Bearer%20%24%7Binput%3Arowbit_token%7D%22%7D%7D) and paste the token from `rowbit connect vscode --print` when VS Code asks.
+Or, with `rowbit demo` or `rowbit serve` running, [add it to VS Code](https://insiders.vscode.dev/redirect/mcp/install?name=rowbit&inputs=%5B%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22rowbit_token%22%2C%22description%22%3A%22Rowbit%20agent%20token%20%28from%3A%20rowbit%20connect%20vscode%20--print%20--new-token%29%22%2C%22password%22%3Atrue%7D%5D&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22http%3A%2F%2F127.0.0.1%3A8080%2Fmcp%22%2C%22headers%22%3A%7B%22Authorization%22%3A%22Bearer%20%24%7Binput%3Arowbit_token%7D%22%7D%7D) and paste the token from `rowbit connect vscode --print --new-token` when VS Code asks (an agent has one token, so this signs out a client the demo connected).
 
 </details>
 
@@ -144,6 +144,7 @@ The well-known incidents of coding agents wiping production databases are a cred
 - **Undo restores rows, not the world.** It puts the data back, but it can't take back an email that was sent or a refund that was paid because of it.
 - **Preview never writes to your tables.** It reads the affected rows without taking locks and replays the write on a temporary copy that only Rowbit's connection can see. Tables with triggers or cascading foreign keys are refused, because their side effects wouldn't show in the preview or be undone. So are tables Rowbit's database user can't fully inspect: it needs the `TRIGGER` and `PROCESS` privileges. See [database privileges](docs/privileges.md) for the exact grants.
 - **Where data lives.** Change state, previews (including before and after copies of affected rows) and the audit log are stored in a local SQLite file next to Rowbit. Protect it like a replica of the database ([how](docs/privileges.md#the-sqlite-file)).
+- **The CLI trusts whoever runs it.** Anyone who can read `rowbit.db` and has the database URL can run `rowbit approve`, under any `--as` name. Keep both from agents, and run Rowbit as a user they can't act as; see [Before you use it for real](docs/quickstart.md#before-you-use-it-for-real).
 - **Fail closed.** Anything Rowbit can't evaluate, it refuses. See the [change lifecycle](docs/spec/change-lifecycle.md) and [SECURITY.md](SECURITY.md).
 
 ## Contributing

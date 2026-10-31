@@ -271,7 +271,7 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
 
   <section aria-labelledby="start-h">
     <h2 id="start-h">TRY IT: TWO COMMANDS</h2>
-    <p class="sub">Installs <code>rowbit</code>, then runs a sample shop database in Docker with Rowbit in front of it, connects your agent and opens the review page. macOS and Linux (Windows through WSL); the demo needs Docker. <a href="install.sh">Read install.sh</a> before you run it.</p>
+    <p class="sub">Installs <code>rowbit</code>, then runs a sample shop database in Docker with Rowbit in front of it, connects your agent and serves the review page. macOS and Linux (Windows through WSL); the demo needs Docker. <a href="install.sh">Read install.sh</a> before you run it.</p>
     <div class="frame cmds">
       <div class="cmd"><span class="n">1</span><pre><code>curl -fsSL https://ermag.github.io/rowbit/install.sh | sh</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
       <div class="cmd"><span class="n">2</span><pre><code>rowbit demo</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
@@ -293,7 +293,7 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
     <div class="extras">
       <div class="frame">
         <div class="eyebrow">Already running the demo?</div>
-        <p class="p">The demo connects the client you pick. To add VS Code yourself, use the button, and paste the token from <code>rowbit connect vscode --print</code> when VS Code asks.</p>
+        <p class="p">The demo connects the client you pick. To add VS Code too, use the button and paste the token from <code>rowbit connect vscode --print --new-token</code> when VS Code asks (an agent has one token, so this signs out the other client). The button assumes the default <code>127.0.0.1:8080</code>.</p>
         <a class="btn sm" id="vscode" href="#">▶ ADD TO VS CODE</a>
       </div>
       <div class="frame">
@@ -371,6 +371,7 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
       <a class="frame" href="docs/spec/change-lifecycle.html"><b>How a change moves</b><span>Preview, decide, apply, undo, the audit log.</span></a>
       <a class="frame" href="docs/privileges.html"><b>Database privileges</b><span>Exactly what Rowbit's database user needs.</span></a>
       <a class="frame" href="https://github.com/Ermag/rowbit/blob/main/CHANGELOG.md"><b>Changelog</b><span>What changed, and how to upgrade.</span></a>
+      <a class="frame" href="https://github.com/Ermag/rowbit/blob/main/SECURITY.md"><b>Security</b><span>How to report a vulnerability, and what Rowbit defends against.</span></a>
     </div>
     <p class="sub">For agents: <a href="llms.txt">llms.txt</a> and <a href="llms-full.txt">llms-full.txt</a>, and every page as Markdown.</p>
   </section>
@@ -466,7 +467,7 @@ document.querySelectorAll('.copy').forEach(b => b.addEventListener('click', asyn
 }));
 // A link is the same for everyone, so it can't carry an agent's token:
 // VS Code asks for it, as a password, when the server is added.
-const vsInputs = [{ type: 'promptString', id: 'rowbit_token', description: 'Rowbit agent token (from: rowbit connect vscode --print)', password: true }];
+const vsInputs = [{ type: 'promptString', id: 'rowbit_token', description: 'Rowbit agent token (from: rowbit connect vscode --print --new-token)', password: true }];
 const vsConfig = { type: 'http', url: 'http://127.0.0.1:8080/mcp', headers: { Authorization: 'Bearer ${input:rowbit_token}' } };
 $('#vscode').href = 'https://insiders.vscode.dev/redirect/mcp/install?name=rowbit&inputs=' +
   encodeURIComponent(JSON.stringify(vsInputs)) + '&config=' + encodeURIComponent(JSON.stringify(vsConfig));

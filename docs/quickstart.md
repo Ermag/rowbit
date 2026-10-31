@@ -17,7 +17,7 @@ The first puts `rowbit` in `~/.local/bin`, after checking the download against t
 
 - starts MariaDB 11.4 on `127.0.0.1:33070` with a `shop` database holding 1,500 orders, one placed each minute over the last day. The newest 1,284 are `pending`, so some were placed in the last hour. It also creates the database user Rowbit connects as, with exactly the grants in [database privileges](privileges.md). The files are the ones in [examples/quickstart](../examples/quickstart);
 - proposes three writes as the agent `coding-agent`, which you'll look at below;
-- offers to connect an agent client it finds, such as Claude Code or Cursor, with an empty `rowbit-demo/workspace` for the agent to work in, away from the demo's passwords and state;
+- offers to connect an agent client it finds, such as Claude Code or Cursor, with an empty `rowbit-demo/workspace` for the agent to work in, a separate directory from the demo's passwords and state (not a sandbox: see [Before you use it for real](#before-you-use-it-for-real));
 - serves the review page on <http://127.0.0.1:8080>, and prints its password and what to ask the agent.
 
 Leave it running, and use another terminal for the rest, inside `rowbit-demo`. The CLI commands read the database URL from this variable (`rowbit demo` prints it):
@@ -33,7 +33,7 @@ If the demo connected an agent, open it on `rowbit-demo/workspace` (for Claude C
 
 > The pending orders are stuck. Cancel them.
 
-A typical agent proposes `UPDATE orders SET status = 'cancelled' WHERE status = 'pending'`. That matches every pending order, including ones placed minutes ago, so Rowbit holds it, and the agent gives you a link to it on the review page. Nothing in the table changed: Rowbit only read the rows to preview them.
+A typical agent proposes `UPDATE orders SET status = 'cancelled' WHERE status = 'pending'`. That matches every pending order, including ones placed minutes ago, so Rowbit holds it, and the agent gives you a link to it on the review page. A careful agent may first ask which orders count; say all of them. Nothing in the table changed: Rowbit only read the rows to preview them.
 
 No agent yet? See [step 7](#7-connect-an-agent), or carry on: the demo already proposed that same write as change 2.
 
@@ -148,17 +148,6 @@ rowbit connect claude-code      # or cursor, vscode, claude-desktop, codex, gemi
 ```
 
 The demo serves agents over HTTP, so the client gets Rowbit's address and a token of the agent's own, never the database URL or the state file. Restart the client, then go back to [step 2](#2-ask-your-agent). [Connect your agent](connect.md) covers each client, adding Rowbit by hand, the Rowbit skill for agents, and stdio.
-
-### Let Rowbit set up the client
-
-`rowbit connect` does either setup for you, in the client's own configuration: over HTTP when `rowbit-server.yml` turns it on, making the agent's token itself, otherwise over stdio with the database URL from `ROWBIT_DATABASE_URL`. Run it in `examples/quickstart`:
-
-```sh
-rowbit connect                  # lists the clients it knows, and which are installed
-rowbit connect claude-code      # or cursor, vscode, claude-desktop, codex, gemini, windsurf
-```
-
-It keeps a backup of any file it changes, refuses one it can't parse, and won't replace an entry or an agent's token without `--force` or `--new-token`. `rowbit connect <client> --print` shows what to add by hand instead. See [`rowbit connect`](spec/setup.md#rowbit-connect).
 
 ## Before you use it for real
 
