@@ -276,7 +276,7 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
       <div class="cmd"><span class="n">1</span><pre><code>curl -fsSL https://ermag.github.io/rowbit/install.sh | sh</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
       <div class="cmd"><span class="n">2</span><pre><code>rowbit demo</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
     </div>
-    <p class="sub then">Then ask your agent: <q>Some orders are stuck in pending. Cancel them.</q> Its write matches orders placed minutes ago too, so Rowbit holds it, and the agent hands you a link to review all 1,284 rows.</p>
+    <p class="sub then">Then ask your agent: <q>The pending orders are stuck. Cancel them.</q> Its write matches orders placed minutes ago too, so Rowbit holds it, and the agent hands you a link to review all 1,284 rows.</p>
     <div class="works">
       <span class="eyebrow">Works with</span>
       <ul>
@@ -631,7 +631,7 @@ async function scIntro() {
 
 async function scPropose() {
   setStep(0);
-  await say('user', 'Some orders are stuck in pending. Cancel them.');
+  await say('user', 'The pending orders are stuck. Cancel them.');
   await say('think', 'I will cancel every pending order.');
   await say('tool', '→ propose_write');
   await say('sql', SQL1);
@@ -716,7 +716,7 @@ async function scReview() {
   show('');
   add(`<div class="eyebrow">Needs your review · #1042</div><p class="h2">coding-agent wants to cancel 1,284 pending orders</p>`);
   add(machine([['PROPOSED', 'past'], ['HELD', 'on'], ['APPLIED', ''], ['UNDONE', '']]));
-  add(`<dl class="kv"><dt>task</dt><dd>"Some orders are stuck in pending. Cancel them."</dd><dt>held by</dt><dd>default: hold (no rule matched)</dd><dt>preview</dt><dd>1,284 rows · 60 placed in the last hour</dd></dl>`);
+  add(`<dl class="kv"><dt>task</dt><dd>"The pending orders are stuck. Cancel them."</dd><dt>held by</dt><dd>default: hold (no rule matched)</dd><dt>preview</dt><dd>1,284 rows · 60 placed in the last hour</dd></dl>`);
   add(`<div class="tablebox">${diffTable(ROWS1.slice(1, 4))}</div>`);
   const c = add(`<div class="card"><div><label class="eyebrow" for="why">Note to the agent</label><textarea id="why" class="reason">Only the 12 orders stuck in payment review: OPS-118 lists them.</textarea></div>
     <div class="actions"><button class="btn rose" id="rej">✗ REJECT</button><button class="btn mint" id="app">✓ APPROVE ALL 1,284</button></div>
@@ -826,7 +826,7 @@ async function replayTo(choice) {
   const g = gen;
   // fast-forward to the review screen, then take the other branch
   audit = SEED.map(e => ({ ...e })); renderAudit(); log.innerHTML = ''; path = choice;
-  ['user|Some orders are stuck in pending. Cancel them.', 'tool|→ propose_write', 'sql|' + SQL1, `resp|← held: no rule matched · 1,284 rows · review_url ${URL(1042)}`, 'err|✗ no: agents can read, propose and check status. Only people approve.', `resp|It's held for review. You can look at the 1,284 rows here: ${URL(1042)}`]
+  ['user|The pending orders are stuck. Cancel them.', 'tool|→ propose_write', 'sql|' + SQL1, `resp|← held: no rule matched · 1,284 rows · review_url ${URL(1042)}`, 'err|✗ no: agents can read, propose and check status. Only people approve.', `resp|It's held for review. You can look at the 1,284 rows here: ${URL(1042)}`]
     .forEach(s => { const [k, ...r] = s.split('|'); const p = document.createElement('div'); p.className = 'ln ' + k; p.innerHTML = k === 'sql' ? hl(r.join('|')) : esc(r.join('|')); log.appendChild(p); });
   await runScene(scReview);
   if (g !== gen) return;

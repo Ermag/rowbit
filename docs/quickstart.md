@@ -31,7 +31,7 @@ export ROWBIT_DATABASE_URL=mysql://rowbit:rowbit-quickstart@127.0.0.1:33070/shop
 
 If the demo connected an agent, open it on `rowbit-demo/workspace` (for Claude Code, start it there) and ask:
 
-> Some orders are stuck in pending. Cancel them.
+> The pending orders are stuck. Cancel them.
 
 A typical agent proposes `UPDATE orders SET status = 'cancelled' WHERE status = 'pending'`. That matches every pending order, including ones placed minutes ago, so Rowbit holds it, and the agent gives you a link to it on the review page. Nothing in the table changed: Rowbit only read the rows to preview them.
 

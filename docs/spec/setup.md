@@ -64,7 +64,7 @@ Upgrading is running it again, after stopping every Rowbit process and backing u
 
    Claude Code is connected as coding-agent. Open Claude Code in rowbit-demo/workspace/ and ask:
 
-     Some orders are stuck in pending. Cancel them.
+     The pending orders are stuck. Cancel them.
 
    Rowbit will hold its write, and the agent will give you a link to review it.
    (Change 2 on the review page is the demo's own example of that write.)

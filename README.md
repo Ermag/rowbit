@@ -19,7 +19,7 @@ rowbit demo
 
 macOS and Linux (Windows through WSL); the demo needs Docker. If `~/.local/bin` isn't on your `PATH`, the installer says so: run `~/.local/bin/rowbit demo` instead. It runs a sample shop database with Rowbit in front of it, connects your agent and serves the review page. Then ask the agent:
 
-> Some orders are stuck in pending. Cancel them.
+> The pending orders are stuck. Cancel them.
 
 **Works with** [Claude Code](docs/connect.md), [Cursor](docs/connect.md), [VS Code](docs/connect.md), [Claude Desktop](docs/connect.md), [Codex](docs/connect.md), [Gemini CLI](docs/connect.md), [Windsurf](docs/connect.md) and [any MCP client](docs/connect.md#any-other-client).
 
