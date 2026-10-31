@@ -22,10 +22,10 @@ fn rowbit(root: &Path, args: &[&str]) -> (bool, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_rowbit"))
         .args(args)
         .current_dir(root)
-        .env(
-            "PATH",
-            format!("{}:/usr/bin:/bin", root.join("bin").display()),
-        )
+        // Only the fake docker: a real one (in /usr/bin on CI runners)
+        // would start the demo for real, and it runs until stopped.
+        .env("PATH", root.join("bin"))
+        .stdin(std::process::Stdio::null())
         .output()
         .unwrap();
     let text = format!(
