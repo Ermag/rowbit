@@ -29,7 +29,7 @@ Each target is built with `cargo build --release --locked`; the web UI is alread
 - A build provenance attestation for each archive, so `gh attestation verify rowbit-<version>-<target>.tar.gz --repo Ermag/rowbit` shows it was built by this workflow from the tagged commit.
 - Notes generated from pull request labels (see `.github/release.yml`), under a link to the changelog entry.
 
-The release is published only after every build, the checksums and the attestations succeeded; until then nothing about it is public. Running the workflow by hand (`workflow_dispatch`) does everything except publish, leaving the archives as workflow artifacts.
+The release is published only after every build, the checksums and the attestations succeeded; until then nothing about it is public. Its actions are pinned to commits, since it publishes what the install script downloads. Running the workflow by hand (`workflow_dispatch`), or a pull request that changes the build or the install script, does everything except attest and publish, leaving the archives as workflow artifacts. Before publishing, every run installs the builds with the install script on Linux (x86-64 and ARM64, with `curl` and with only `wget`) and macOS (Apple silicon and Intel), and checks it refuses an archive that doesn't match `SHA256SUMS`.
 
 `crates/rowbit-cli/Cargo.toml` carries `cargo binstall` metadata pointing at these archives, so `cargo binstall --git https://github.com/Ermag/rowbit rowbit-cli` installs the release binary without compiling.
 
@@ -40,10 +40,10 @@ macOS binaries are not signed or notarized. A binary fetched with `curl`, as the
 `site/install.sh`, served at `https://ermag.github.io/rowbit/install.sh`. It is a POSIX `sh` script needing `curl` or `wget`, `tar`, and `sha256sum` or `shasum`. The whole script is one function called on its last line, so a download cut off halfway runs nothing.
 
 1. Picks the target from `uname -s` and `uname -m` (`x86_64`/`amd64`, `aarch64`/`arm64`), and on macOS asks `sysctl hw.optional.arm64` so a shell under Rosetta still gets the Apple silicon build. Any other system is refused with a link to building from source.
-2. Downloads `SHA256SUMS` from the latest release, or from `v$ROWBIT_VERSION` if that is set, and takes the archive name for the target from it.
+2. Downloads `SHA256SUMS` from the latest release, or from `v$ROWBIT_VERSION` if that is set, and takes the archive name for the target from it. Downloads are HTTPS only, redirects included. `ROWBIT_DOWNLOAD_URL` replaces the release's address, for a mirror or for testing a local build, and then also allows HTTP.
 3. Downloads the archive into a new temporary directory, checks it against `SHA256SUMS`, and refuses on any mismatch. This catches a broken download, not a compromised release: both files come from the same place. The quickstart says how to check provenance with `gh attestation verify`.
 4. Installs `rowbit` to `$ROWBIT_INSTALL_DIR`, by default `~/.local/bin`, creating the directory, replacing a `rowbit` already there and never using `sudo`. If the directory isn't on `PATH`, it prints the line to add to the shell's profile and changes no profile itself.
-5. Prints `rowbit --version` from the installed binary, the next command (`rowbit demo`), and removes the temporary directory.
+5. Prints `rowbit --version` from the installed binary and the next command, and removes the temporary directory. The next command is `rowbit demo` when the installed binary is the one `PATH` finds; when the directory isn't on `PATH` yet, it is the full path (`~/.local/bin/rowbit demo`), which works before the profile is changed; and when another `rowbit` comes first on `PATH` (an older `cargo install`), the script says which and how to remove it.
 
 Upgrading is running it again, after stopping every Rowbit process and backing up `rowbit.db` (see [Running Rowbit](../operating.md#upgrading)).
 
@@ -120,7 +120,7 @@ The home page and the README also offer install links for VS Code (`https://insi
 
 ## Review links
 
-So that a held write ends with the person knowing where to look, `propose_write` and `change_status` return `review_url` for a held change: `<public_url>/#/changes/<id>`, or `http://<listen>/#/changes/<id>` without a `public_url`, the same link notifications use. `rowbit mcp` over stdio reads `rowbit-server.yml` as `rowbit serve` does (current directory or `--config`) and falls back to `http://127.0.0.1:8080`. The server's instructions tell the agent to give the person that link and not to retry the write in another form. The link reveals nothing: the page needs sign-in, and the agent could reach its address already. See [Agent tools](change-lifecycle.md#agent-tools-mcp).
+So that a held write ends with the person knowing where to look, `propose_write` and `change_status` return `review_url` for a held change: `<public_url>/changes/<id>`, or `http://<listen>/changes/<id>` without a `public_url`, the same link notifications use. `rowbit serve` records that address in the state file when it starts, so `rowbit mcp` over stdio, which shares the file, links to the same place; before `rowbit serve` has ever run, the link uses `http://127.0.0.1:8080`. The server's instructions tell the agent to give the person that link and not to retry the write in another form. The link reveals nothing: the page needs sign-in, and the agent could reach its address already. Opened signed out, it goes through sign-in (carrying only the change's number) and then to that change. See [Agent tools](change-lifecycle.md#agent-tools-mcp).
 
 ## The skill
 

@@ -8,6 +8,13 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# `cargo binstall --git https://github.com/Ermag/rowbit rowbit-cli` fetches
+# the release archive instead of compiling. See docs/spec/setup.md.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/rowbit-{ version }-{ target }.tar.gz"
+bin-dir = "rowbit-{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
 [[bin]]
 name = "rowbit"
 path = "src/main.rs"
