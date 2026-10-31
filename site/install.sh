@@ -67,24 +67,40 @@ main() {
     version=$("$dir/rowbit" --version) || die "the installed $dir/rowbit doesn't run"
     say "Installed $version to $dir/rowbit"
 
+    # How to run it now: by name if this rowbit is the one PATH finds,
+    # otherwise by its full path, which works before PATH is fixed.
+    shown=$dir/rowbit
+    case "$shown" in
+        "$HOME"/*) shown="~${shown#"$HOME"}" ;;
+    esac
+    run=rowbit
+    found=$(command -v rowbit 2>/dev/null || true)
     case ":$PATH:" in
-        *":$dir:"*) ;;
+        *":$dir:"*)
+            if [ -n "$found" ] && [ "$found" != "$dir/rowbit" ]; then
+                say ""
+                say "Another rowbit, $found, comes first on your PATH, so \`rowbit\` runs that one."
+                say "Remove it (for one from cargo install: cargo uninstall rowbit-cli), or use $shown."
+                run=$shown
+            fi
+            ;;
         *)
+            run=$shown
             say ""
-            say "$dir isn't on your PATH. Add it with:"
+            say "$dir isn't on your PATH yet, so run it as $shown for now. To run it as rowbit, add it with:"
             case "${SHELL:-}" in
                 */fish) say "  fish_add_path $dir" ;;
                 */zsh) say "  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.zshrc" ;;
                 */bash) say "  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.bashrc" ;;
                 *) say "  export PATH=\"$dir:\$PATH\"   (in your shell's profile)" ;;
             esac
-            say "then open a new terminal."
+            say "and open a new terminal."
             ;;
     esac
 
     say ""
     say "Next, try it on a sample database (needs Docker):"
-    say "  rowbit demo"
+    say "  $run demo"
 }
 
 detect_target() {
@@ -113,6 +129,8 @@ fetch() {
         curl -fsSL --proto "$proto" --proto-redir "$proto" -o "$2" "$1"
     elif command -v wget >/dev/null 2>&1; then
         case "$proto:$1" in
+            # --https-only binds only recursive downloads, so wget could
+            # still follow a redirect to HTTP; the checksum still applies.
             =https:https://*) wget -q --https-only -O "$2" "$1" ;;
             =https:*) die "refusing $1: not HTTPS" ;;
             *) wget -q -O "$2" "$1" ;;

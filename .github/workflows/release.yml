@@ -4,7 +4,8 @@ name: Release
 # builds, then publish a GitHub Release with the archives, SHA256SUMS and
 # build provenance attestations. Run by hand, or on a pull request that
 # touches the build or the install script, it does everything but publish.
-# See docs/spec/setup.md.
+# See docs/spec/setup.md. Actions are pinned to commits: this workflow
+# publishes what install.sh downloads.
 
 on:
   push:
@@ -34,7 +35,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - id: version
         name: The tag is the workspace version
         run: |
@@ -64,7 +65,7 @@ jobs:
     env:
       NAME: rowbit-${{ needs.version.outputs.version }}-${{ matrix.target }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: musl C toolchain
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -93,7 +94,7 @@ jobs:
           mkdir "$NAME"
           cp target/${{ matrix.target }}/release/rowbit LICENSE README.md CHANGELOG.md "$NAME/"
           tar -czf "$NAME.tar.gz" "$NAME"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ env.NAME }}
           path: ${{ env.NAME }}.tar.gz
@@ -103,7 +104,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
@@ -112,7 +113,7 @@ jobs:
         run: |
           sha256sum rowbit-*.tar.gz > SHA256SUMS
           cat SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist
           path: dist
@@ -122,11 +123,13 @@ jobs:
     needs: [version, sums]
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+        # macos-15-intel installs the x86_64 build, which the Apple silicon
+        # runners can't always run.
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dist
           path: dist
@@ -163,7 +166,10 @@ jobs:
           ROWBIT_INSTALL_DIR: ${{ runner.temp }}/bin-bad
         run: |
           cp dist/SHA256SUMS sums.good
-          sed 's/^./0/' sums.good > dist/SHA256SUMS
+          # Change every hash's first digit, whatever it was.
+          awk '{ c = substr($1, 1, 1); printf "%s%s  %s\n", (c == "0" ? "1" : "0"), substr($1, 2), $2 }' sums.good > dist/SHA256SUMS
+          ! cmp -s sums.good dist/SHA256SUMS
+          ! grep -qxFf sums.good dist/SHA256SUMS
           if sh site/install.sh; then echo "installed despite a bad checksum"; exit 1; fi
           test ! -e "$ROWBIT_INSTALL_DIR/rowbit"
           cp sums.good dist/SHA256SUMS
@@ -181,14 +187,14 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dist
           path: dist
       - name: The archives are the ones SHA256SUMS lists
         working-directory: dist
         run: sha256sum -c SHA256SUMS
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: dist/rowbit-*.tar.gz
       - name: Notes

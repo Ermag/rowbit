@@ -29,7 +29,7 @@ Each target is built with `cargo build --release --locked`; the web UI is alread
 - A build provenance attestation for each archive, so `gh attestation verify rowbit-<version>-<target>.tar.gz --repo Ermag/rowbit` shows it was built by this workflow from the tagged commit.
 - Notes generated from pull request labels (see `.github/release.yml`), under a link to the changelog entry.
 
-The release is published only after every build, the checksums and the attestations succeeded; until then nothing about it is public. Running the workflow by hand (`workflow_dispatch`), or a pull request that changes the build or the install script, does everything except attest and publish, leaving the archives as workflow artifacts. Before publishing, every run installs the builds with the install script on Linux (x86-64 and ARM64, with `curl` and with only `wget`) and macOS, and checks it refuses an archive that doesn't match `SHA256SUMS`.
+The release is published only after every build, the checksums and the attestations succeeded; until then nothing about it is public. Its actions are pinned to commits, since it publishes what the install script downloads. Running the workflow by hand (`workflow_dispatch`), or a pull request that changes the build or the install script, does everything except attest and publish, leaving the archives as workflow artifacts. Before publishing, every run installs the builds with the install script on Linux (x86-64 and ARM64, with `curl` and with only `wget`) and macOS (Apple silicon and Intel), and checks it refuses an archive that doesn't match `SHA256SUMS`.
 
 `crates/rowbit-cli/Cargo.toml` carries `cargo binstall` metadata pointing at these archives, so `cargo binstall --git https://github.com/Ermag/rowbit rowbit-cli` installs the release binary without compiling.
 
@@ -43,7 +43,7 @@ macOS binaries are not signed or notarized. A binary fetched with `curl`, as the
 2. Downloads `SHA256SUMS` from the latest release, or from `v$ROWBIT_VERSION` if that is set, and takes the archive name for the target from it. Downloads are HTTPS only, redirects included. `ROWBIT_DOWNLOAD_URL` replaces the release's address, for a mirror or for testing a local build, and then also allows HTTP.
 3. Downloads the archive into a new temporary directory, checks it against `SHA256SUMS`, and refuses on any mismatch. This catches a broken download, not a compromised release: both files come from the same place. The quickstart says how to check provenance with `gh attestation verify`.
 4. Installs `rowbit` to `$ROWBIT_INSTALL_DIR`, by default `~/.local/bin`, creating the directory, replacing a `rowbit` already there and never using `sudo`. If the directory isn't on `PATH`, it prints the line to add to the shell's profile and changes no profile itself.
-5. Prints `rowbit --version` from the installed binary, the next command (`rowbit demo`), and removes the temporary directory.
+5. Prints `rowbit --version` from the installed binary and the next command, and removes the temporary directory. The next command is `rowbit demo` when the installed binary is the one `PATH` finds; when the directory isn't on `PATH` yet, it is the full path (`~/.local/bin/rowbit demo`), which works before the profile is changed; and when another `rowbit` comes first on `PATH` (an older `cargo install`), the script says which and how to remove it.
 
 Upgrading is running it again, after stopping every Rowbit process and backing up `rowbit.db` (see [Running Rowbit](../operating.md#upgrading)).
 
