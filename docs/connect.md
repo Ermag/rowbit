@@ -41,7 +41,8 @@ A typical agent proposes `UPDATE orders SET status = 'cancelled' WHERE status = 
 The Rowbit skill tells an agent how to work with Rowbit well: read the schema first, propose one narrow write at a time, hand over the review link when a write is held, and never work around a rule. In Claude Code:
 
 ```
-/plugin install rowbit --marketplace Ermag/rowbit
+/plugin marketplace add Ermag/rowbit
+/plugin install rowbit@rowbit
 ```
 
 For other agents, copy [`SKILL.md`](https://github.com/Ermag/rowbit/blob/main/plugins/rowbit/skills/rowbit/SKILL.md) into `.agents/skills/rowbit/`, or paste it into the agent's rules. See the [plugin's README](https://github.com/Ermag/rowbit/tree/main/plugins/rowbit).
@@ -65,4 +66,4 @@ Over **stdio**, the client starts `rowbit mcp`, so its settings hold the databas
 
 ## Who sets Rowbit up
 
-For the demo, an agent can install Rowbit and start it for you. For a real database, a person sets Rowbit up: the agent must not hold the database's credentials or Rowbit's state, and must not edit `rowbit.yml`, the rules it is held to. Give the agent its Rowbit connection and nothing else.
+For the demo, an agent can install Rowbit for you, then you run `rowbit demo` yourself: it runs until you stop it and prints the review page's password, which is yours. For a real database, a person sets Rowbit up: the agent must not hold the database's credentials or Rowbit's state, and must not edit `rowbit.yml`, the rules it is held to. Give the agent its Rowbit connection and nothing else.

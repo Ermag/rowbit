@@ -50,7 +50,8 @@ def pages():
 
 
 def slug(text):
-    text = re.sub(r"`|\*|_(?=\w)|(?<=\w)_|\[|\]\([^)]*\)", "", text)
+    # Emphasis marks go; an underscore inside a word (`public_url`) stays.
+    text = re.sub(r"`|\*|(?<!\w)_|_(?!\w)|\[|\]\([^)]*\)", "", text)
     text = text.strip().lower()
     text = re.sub(r"[^\w\- ]", "", text)
     return text.replace(" ", "-")
@@ -182,9 +183,16 @@ def main():
         "or refuses it by the rules in rowbit.yml, and can undo any single change. "
         "MariaDB and MySQL. Open source (AGPL-3.0).",
         "",
-        "Try it with Docker: `curl -fsSL https://ermag.github.io/rowbit/install.sh | sh`, "
-        "then `rowbit demo`. For a real database, a person sets Rowbit up: an agent must "
-        "not hold the database's credentials or edit its own rules.",
+        "To try it: `curl -fsSL https://ermag.github.io/rowbit/install.sh | sh` installs "
+        "`rowbit` (macOS and Linux), and `rowbit demo` starts a sample database with Rowbit "
+        "in front of it (needs Docker).",
+        "",
+        "If you are an agent setting Rowbit up for a person: install it, then ask the person "
+        "to run `rowbit demo` in a terminal of their own, and don't run it yourself. It runs "
+        "until stopped, offers to connect you, and prints the review page's password, which "
+        "is the person's: only people approve. For a real database a person sets Rowbit up; "
+        "an agent must not hold the database's credentials, Rowbit's state file or the "
+        "review password, or edit rowbit.yml, the rules it is held to.",
         "",
         "## Docs",
         "",
