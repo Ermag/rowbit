@@ -131,6 +131,8 @@ A skill teaches an agent how to work with Rowbit, which the MCP tools' descripti
 /plugin install rowbit@rowbit
 ```
 
+or from a terminal, `claude plugin install rowbit --marketplace Ermag/rowbit`. The skill is Apache-2.0, like `rowbit.yml`'s schema, so other tools can carry it.
+
 `SKILL.md` is the format Codex, Cursor and Gemini CLI read too; the docs say where to copy it for each. It tells the agent to:
 
 - look at `describe_schema` before writing, and read with `query` to check what a write would match;
