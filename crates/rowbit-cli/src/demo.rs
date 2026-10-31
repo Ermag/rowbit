@@ -42,7 +42,7 @@ const SEED: [&str; 3] = [
 
 /// What to ask the agent: written so a typical agent proposes the too-broad
 /// update, which Rowbit holds.
-pub const PROMPT: &str = "Some orders are stuck in pending. Cancel them.";
+pub const PROMPT: &str = "The pending orders are stuck. Cancel them.";
 
 #[derive(clap::Args)]
 pub struct DemoArgs {

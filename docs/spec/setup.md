@@ -1,6 +1,6 @@
 # Installing and setting up
 
-Status: draft for v0.2.1.
+Status: v0.2.1.
 
 How Rowbit gets onto a machine and in front of an agent: the release and its install script, `rowbit demo` for trying it, `rowbit connect` for pointing an agent client at it, the skill that teaches agents to use it, and the home page and docs site that explain it. None of this changes [`rowbit.yml`](policy.md), [`rowbit-server.yml`](server.md) or the state file. The one change to the [change lifecycle](change-lifecycle.md) is the review link in held results (see [Agent tools](change-lifecycle.md#agent-tools-mcp)).
 
@@ -64,7 +64,7 @@ Upgrading is running it again, after stopping every Rowbit process and backing u
 
    Claude Code is connected as coding-agent. Open Claude Code in rowbit-demo/workspace/ and ask:
 
-     Some orders are stuck in pending. Cancel them.
+     The pending orders are stuck. Cancel them.
 
    Rowbit will hold its write, and the agent will give you a link to review it.
    (Change 2 on the review page is the demo's own example of that write.)
