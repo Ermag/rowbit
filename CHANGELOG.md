@@ -14,10 +14,6 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 - A Rowbit skill for coding agents, as a Claude Code plugin from this repository (`/plugin marketplace add Ermag/rowbit`, then `/plugin install rowbit@rowbit`): read the schema first, propose one narrow write at a time, give the person the review link when a write is held, never work around a rule. The `SKILL.md` works in other agents that read skills. Apache-2.0.
 - `rowbit demo` runs the quickstart's shop database in Docker with Rowbit in front of it, in a `rowbit-demo` directory: it proposes three example writes, offers to connect an agent client it finds, prints what to ask the agent, and serves the review page. The agent works in an empty `rowbit-demo/workspace/`, away from the demo's database passwords and state. `rowbit demo clean` removes the client entry, the database and the files. Needs Docker; nothing else.
 
-### Docs
-
-- The docs are on the web at https://ermag.github.io/rowbit/docs/, rendered from `docs/`, with each page's Markdown next to it and `llms.txt` and `llms-full.txt` for agents. A new page, [Connect your agent](docs/connect.md), covers `rowbit connect`, the skill, and stdio versus HTTP.
-
 ## 0.2.0 (2026-10-30)
 
 Scopes the database enforces, shadow mode, a built-in review UI with sign-in through your identity provider, notifications for held changes, and MCP over HTTP.

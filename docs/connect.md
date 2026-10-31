@@ -22,7 +22,7 @@ With `mcp.http: true` in `rowbit-server.yml` (the demo has it), the client gets 
 `rowbit connect` keeps a backup of any file it changes (`<file>.rowbit-backup`), refuses a file it can't parse, and replaces nothing without being told:
 
 - `--force` replaces an entry of the same name; `--name <name>` adds another.
-- `--new-token` replaces the agent's token. An agent has one token, so this signs out the client that had the old one. To connect two clients at once, give each its own agent in `rowbit.yml`.
+- `--new-token` replaces the agent's token. An agent has one token, so this signs out the client that had the old one. After `rowbit demo` connected a client, adding another (or using an install button) takes `--print --new-token`. To connect two clients at once, give each its own agent in `rowbit.yml`.
 - `--agent <id>` picks the agent when `rowbit.yml` lists more than one.
 - `--print` changes nothing in the client and prints what to add by hand, with the token.
 
@@ -34,7 +34,7 @@ Ask the agent to fix something in the data. In the demo:
 
 > The pending orders are stuck. Cancel them.
 
-A typical agent proposes `UPDATE orders SET status = 'cancelled' WHERE status = 'pending'`, which also matches orders placed minutes ago. Rowbit holds it, and the agent hands you a link to the change on the review page, where you see all 1,284 rows before and after.
+A typical agent proposes `UPDATE orders SET status = 'cancelled' WHERE status = 'pending'`, which also matches orders placed minutes ago. Rowbit holds it, and the agent hands you a link to the change on the review page, where you see all 1,284 rows before and after. A careful agent may first ask which orders count; say all of them.
 
 ## Teach the agent with the skill
 
