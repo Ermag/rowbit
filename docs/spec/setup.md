@@ -1,6 +1,6 @@
 # Installing and setting up
 
-Status: draft for v0.2.1.
+Status: v0.2.1.
 
 How Rowbit gets onto a machine and in front of an agent: the release and its install script, `rowbit demo` for trying it, `rowbit connect` for pointing an agent client at it, the skill that teaches agents to use it, and the home page and docs site that explain it. None of this changes [`rowbit.yml`](policy.md), [`rowbit-server.yml`](server.md) or the state file. The one change to the [change lifecycle](change-lifecycle.md) is the review link in held results (see [Agent tools](change-lifecycle.md#agent-tools-mcp)).
 
@@ -51,7 +51,7 @@ Upgrading is running it again, after stopping every Rowbit process and backing u
 
 `rowbit demo [--dir <path>] [--port <port>] [--listen <address>] [--connect <client> | --no-connect]` runs the [quickstart](../quickstart.md)'s shop database in Docker and Rowbit in front of it, in a directory of its own, `rowbit-demo` by default, and connects an agent to it. It needs Docker with Compose v2; without `docker compose`, with the Docker daemon not running, or without permission to reach it, it says which and stops. It runs until stopped and prints the review page's password, so it's for a person's terminal: without one, it refuses unless `--connect` or `--no-connect` says what to do, and the docs tell agents to ask the person to run it. Before writing anything it checks that the review page's address (`--listen`, `127.0.0.1:8080` by default) is free.
 
-1. **The directory.** If it doesn't exist, Rowbit creates it and writes the quickstart's `compose.yaml`, `shop.sql` and `rowbit.yml` (built into the binary from `examples/quickstart`, with `--port` in place of `33070`), a `rowbit-server.yml` with `mcp.http: true` and the `--listen` address, `.rowbit-demo`, which marks the directory as the demo's and records the database URL and which client entries the demo added, and an empty `workspace/` for the agent. The agent works there, not next to the files that say how to reach the database around Rowbit (`compose.yaml` holds the database's root password). If it exists with `.rowbit-demo` in it, Rowbit keeps every file as it is, so changes to `rowbit.yml` survive a restart. If it exists without one, Rowbit refuses, so it never writes into a directory of yours.
+1. **The directory.** If it doesn't exist, Rowbit creates it and writes the quickstart's `compose.yaml`, `shop.sql` and `rowbit.yml` (built into the binary from `examples/quickstart`, with `--port` in place of `33070`), a `rowbit-server.yml` with `mcp.http: true` and the `--listen` address, `.rowbit-demo`, which marks the directory as the demo's and records the database URL and which client entries the demo added, and an empty `workspace/` for the agent. The agent works there, not beside the files that say how to reach the database around Rowbit (`compose.yaml` holds the database's root password). If it exists with `.rowbit-demo` in it, Rowbit keeps every file as it is, so changes to `rowbit.yml` survive a restart. If it exists, isn't empty and has no marker, Rowbit refuses, so it never writes into a directory of yours.
 2. **The database.** `docker compose up -d --wait` in that directory. MariaDB listens on `127.0.0.1:<port>` only, with the quickstart's fixed passwords, which is why the demo is for trying Rowbit and nothing else.
 3. **Something to review.** If the state file has no changes yet, Rowbit proposes the README's three writes as `coding-agent`, as `rowbit propose` would: a small fix that is applied (change 1), the risky update that is held (change 2) and a delete that is refused (change 3). The review page has something on it before any agent connects, and the quickstart's walkthrough carries on from there.
 4. **An agent.** On first start, Rowbit lists the [clients](#rowbit-connect) it finds (the client's command on `PATH`, or its configuration directory present) and asks which to connect, the first found by default, or none. Then it does what `rowbit connect <client>` does, inside the demo directory, with Claude Code's local scope on `workspace/`. If that fails (a client file Rowbit can't parse, an entry by that name already there), it says why and how to connect later, and carries on without a client. One client, because the demo has one agent and an agent has one token; `rowbit connect <other client> --new-token` in the directory moves it. `--connect <client>` picks one without asking, `--no-connect` skips this, and without a terminal Rowbit skips it unless `--connect` is given. On a restart with a client already connected, it skips this.
@@ -64,15 +64,16 @@ Upgrading is running it again, after stopping every Rowbit process and backing u
 
    Claude Code is connected as coding-agent. Open Claude Code in rowbit-demo/workspace/ and ask:
 
-     Some orders are stuck in pending. Cancel them.
+     The pending orders are stuck. Cancel them.
 
-   Rowbit will hold its write, and the agent will give you a link to review it.
+   A typical agent proposes cancelling every pending order; Rowbit holds it, and the
+   agent gives you a link to review it. If it asks first which orders, say all of them.
    (Change 2 on the review page is the demo's own example of that write.)
    ```
 
    It says to open the client on `workspace/`, which matters for Claude Code, whose entry applies only there. Without a connected client, it prints how to connect one and the `rowbit propose` line from the quickstart instead. Then the `export ROWBIT_DATABASE_URL=...` line for the CLI, and `rowbit demo clean`.
 
-The suggested prompt is picked so that a typical agent writes the too-broad `UPDATE` and Rowbit holds it; the release's Sam pass checks it with each client.
+The suggested prompt is picked so that a typical agent writes the too-broad `UPDATE` and Rowbit holds it; a careful agent may ask first which orders count, and the person says all of them. `workspace/` is a separate working directory, not a sandbox: an agent with a shell can still reach `..`, so for anything beyond the demo, run Rowbit as a user the agent can't act as (see [Before you use it for real](../quickstart.md#before-you-use-it-for-real)).
 
 Stopping it with Ctrl-C stops `rowbit serve` and leaves the database running, so the next `rowbit demo` starts at once.
 
@@ -146,18 +147,17 @@ The plugin holds the skill only, not an MCP entry: `rowbit connect` sets up the 
 
 `site/index.html`, at `https://ermag.github.io/rowbit/`, describes v0.2.1 as it ships, and every claim on it matches the README. From the top:
 
-1. The logo, one sentence ("A safety net for AI agents that write to your database: preview every write, approve the risky ones, undo any single change."), and a status line: the version, MariaDB and MySQL, open source under AGPL.
+1. The logo, one sentence ("A safety net for AI agents that write to your database. Preview every write, let a person approve the risky ones, undo any single change."), and a status line: the version, MariaDB and MySQL, open source under AGPL.
 2. The two commands, each copyable, noting macOS and Linux (Windows through WSL) and linking to `install.sh` so it can be read before it is run.
 3. The clients Rowbit connects to, linking to their part of the docs, with the install buttons.
-4. A recording of the real flow, from the agent's prompt to the held write on the review page to the person approving a narrower one. It is made by a script in the repository (VHS for the terminal, Playwright for the review page), so it can be made again when the UI changes. The README uses the same recording.
-5. "Set it up with your agent": a prompt that has an agent install Rowbit and start the demo by following `llms.txt`. Next to it: for a real database, a person sets Rowbit up, because the agent must not hold the database's credentials or edit its own rules.
-6. The interactive demo, on simulated data and labelled so, telling the README's orders story.
-7. How it works, matching what ships: MCP server, exact preview on a temporary copy, rules and people, applying what was approved, undo, scopes, shadow mode, the review UI. What's next (budgets, the MySQL wire protocol proxy, other databases) under its own heading.
-8. Links to the docs, the changelog, the spec and the feedback discussion.
+4. "Set it up with your agent": a prompt that has an agent install Rowbit and start the demo by following `llms.txt`. Next to it: for a real database, a person sets Rowbit up, because the agent must not hold the database's credentials or edit its own rules.
+5. The interactive demo, on simulated data and labelled so, telling the README's orders story.
+6. How it works, matching what ships: MCP server, exact preview on a temporary copy, rules and people, applying what was approved, undo, scopes, shadow mode, the review UI. What's next (budgets, the MySQL wire protocol proxy, other databases) under its own heading.
+7. Links to the docs, the changelog, the spec and the feedback discussion.
 
 CI fails if the page contains phrases that described Rowbit before its first release ("concept", "not released", "rolled back", `docker run`), so the page doesn't drift again.
 
-The README's first screen follows the same order: the name, the sentence, badges (release, CI, license), the recording, the two commands and the clients. Then the orders story, how it works in five points with links, a collapsible section per client with `rowbit connect <client>`, its button where it has one and the entry to add by hand, and "Good to know". The plan and the repository layout move to ARCHITECTURE.md and CONTRIBUTING.md.
+The README's first screen follows the same order: the name, the sentence, badges (release, CI, license), the social card, the two commands and the clients. Then the orders story, how it works in five points with links, a collapsible section per client with `rowbit connect <client>`, its button where it has one and the entry to add by hand, and "Good to know". The plan and the repository layout move to ARCHITECTURE.md and CONTRIBUTING.md.
 
 ## The docs site
 
@@ -171,4 +171,4 @@ For agents, next to the pages:
 
 ## Not in v0.2.1
 
-Windows binaries, signed and notarized macOS binaries, a Homebrew tap, a container image and an MCP Registry listing, more than one token per agent, upgrading from inside Rowbit, handing out agent tokens from the web UI, a Claude Desktop `.mcpb` bundle, clients beyond the seven above (`--print` covers the rest), and a demo without Docker.
+A recording of the real flow on the home page and in the README, Windows binaries, signed and notarized macOS binaries, a Homebrew tap, a container image and an MCP Registry listing, more than one token per agent, upgrading from inside Rowbit, handing out agent tokens from the web UI, a Claude Desktop `.mcpb` bundle, clients beyond the seven above (`--print` covers the rest), and a demo without Docker.
