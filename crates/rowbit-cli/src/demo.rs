@@ -42,7 +42,7 @@ const SEED: [&str; 3] = [
 
 /// What to ask the agent: written so a typical agent proposes the too-broad
 /// update, which Rowbit holds.
-pub const PROMPT: &str = "Some orders are stuck in pending. Cancel them.";
+pub const PROMPT: &str = "The pending orders are stuck. Cancel them.";
 
 #[derive(clap::Args)]
 pub struct DemoArgs {
@@ -244,7 +244,12 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
             println!();
             say(&format!("  {PROMPT}"));
             println!();
-            say("Rowbit will hold its write, and the agent will give you a link to review it.");
+            say(
+                "A typical agent proposes cancelling every pending order; Rowbit holds it, and the",
+            );
+            say(
+                "agent gives you a link to review it. If it asks first which orders, say all of them.",
+            );
             say("(Change 2 on the review page is the demo's own example of that write.)");
         }
         None => {
