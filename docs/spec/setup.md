@@ -49,12 +49,12 @@ Upgrading is running it again, after stopping every Rowbit process and backing u
 
 ## `rowbit demo`
 
-`rowbit demo [--dir <path>] [--port <port>] [--connect <client> | --no-connect]` runs the [quickstart](../quickstart.md)'s shop database in Docker and Rowbit in front of it, in a directory of its own, `rowbit-demo` by default, and connects an agent to it. It needs Docker with Compose v2; without `docker compose`, or with the Docker daemon not running, it says which and stops.
+`rowbit demo [--dir <path>] [--port <port>] [--listen <address>] [--connect <client> | --no-connect]` runs the [quickstart](../quickstart.md)'s shop database in Docker and Rowbit in front of it, in a directory of its own, `rowbit-demo` by default, and connects an agent to it. It needs Docker with Compose v2; without `docker compose`, with the Docker daemon not running, or without permission to reach it, it says which and stops. It runs until stopped and prints the review page's password, so it's for a person's terminal: without one, it refuses unless `--connect` or `--no-connect` says what to do, and the docs tell agents to ask the person to run it. Before writing anything it checks that the review page's address (`--listen`, `127.0.0.1:8080` by default) is free.
 
-1. **The directory.** If it doesn't exist, Rowbit creates it and writes the quickstart's `compose.yaml`, `shop.sql` and `rowbit.yml` (built into the binary from `examples/quickstart`, with `--port` in place of `33070`), a `rowbit-server.yml` with `mcp.http: true`, and `.rowbit-demo`, which marks the directory as the demo's and records the database URL and which client entries the demo added. If it exists with `.rowbit-demo` in it, Rowbit keeps every file as it is, so changes to `rowbit.yml` survive a restart. If it exists without one, Rowbit refuses, so it never writes into a directory of yours.
+1. **The directory.** If it doesn't exist, Rowbit creates it and writes the quickstart's `compose.yaml`, `shop.sql` and `rowbit.yml` (built into the binary from `examples/quickstart`, with `--port` in place of `33070`), a `rowbit-server.yml` with `mcp.http: true` and the `--listen` address, `.rowbit-demo`, which marks the directory as the demo's and records the database URL and which client entries the demo added, and an empty `workspace/` for the agent. The agent works there, not next to the files that say how to reach the database around Rowbit (`compose.yaml` holds the database's root password). If it exists with `.rowbit-demo` in it, Rowbit keeps every file as it is, so changes to `rowbit.yml` survive a restart. If it exists without one, Rowbit refuses, so it never writes into a directory of yours.
 2. **The database.** `docker compose up -d --wait` in that directory. MariaDB listens on `127.0.0.1:<port>` only, with the quickstart's fixed passwords, which is why the demo is for trying Rowbit and nothing else.
 3. **Something to review.** If the state file has no changes yet, Rowbit proposes the README's three writes as `coding-agent`, as `rowbit propose` would: a small fix that is applied (change 1), the risky update that is held (change 2) and a delete that is refused (change 3). The review page has something on it before any agent connects, and the quickstart's walkthrough carries on from there.
-4. **An agent.** On first start, Rowbit lists the [clients](#rowbit-connect) it finds (the client's command on `PATH`, or its configuration directory present) and asks which to connect, the first found by default, or none. Then it does what `rowbit connect <client>` does, inside the demo directory. One client, because the demo has one agent and an agent has one token; `rowbit connect <other client> --new-token` in the directory moves it. `--connect <client>` picks one without asking, `--no-connect` skips this, and without a terminal Rowbit skips it unless `--connect` is given. On a restart with a client already connected, it skips this.
+4. **An agent.** On first start, Rowbit lists the [clients](#rowbit-connect) it finds (the client's command on `PATH`, or its configuration directory present) and asks which to connect, the first found by default, or none. Then it does what `rowbit connect <client>` does, inside the demo directory, with Claude Code's local scope on `workspace/`. If that fails (a client file Rowbit can't parse, an entry by that name already there), it says why and how to connect later, and carries on without a client. One client, because the demo has one agent and an agent has one token; `rowbit connect <other client> --new-token` in the directory moves it. `--connect <client>` picks one without asking, `--no-connect` skips this, and without a terminal Rowbit skips it unless `--connect` is given. On a restart with a client already connected, it skips this.
 5. **The review page.** Rowbit makes a new page password, then runs `rowbit serve` in that directory in the foreground, with `/mcp` on. A new password each start, since the directory is throwaway and a lost password would otherwise mean `--set-password`.
 6. **What to try.** Before serving, it prints the review page's address and password, and what to ask the agent:
 
@@ -62,20 +62,21 @@ Upgrading is running it again, after stopping every Rowbit process and backing u
    Rowbit is guarding the demo shop database.
    Review page: http://127.0.0.1:8080    password: 7Kq…    name: anything
 
-   Claude Code is connected as coding-agent. Open it in rowbit-demo/ and ask:
+   Claude Code is connected as coding-agent. Open Claude Code in rowbit-demo/workspace/ and ask:
 
      Some orders are stuck in pending. Cancel them.
 
-   Rowbit will hold its write and it will give you a link to review it.
+   Rowbit will hold its write, and the agent will give you a link to review it.
+   (Change 2 on the review page is the demo's own example of that write.)
    ```
 
-   Where a client's entry only applies in one directory (Claude Code's local scope), it says to open the client there. Without a connected client, it prints how to connect one and the `rowbit propose` line from the quickstart instead. Then the `export ROWBIT_DATABASE_URL=...` line for the CLI, and `rowbit demo clean`.
+   It says to open the client on `workspace/`, which matters for Claude Code, whose entry applies only there. Without a connected client, it prints how to connect one and the `rowbit propose` line from the quickstart instead. Then the `export ROWBIT_DATABASE_URL=...` line for the CLI, and `rowbit demo clean`.
 
 The suggested prompt is picked so that a typical agent writes the too-broad `UPDATE` and Rowbit holds it; the release's Sam pass checks it with each client.
 
 Stopping it with Ctrl-C stops `rowbit serve` and leaves the database running, so the next `rowbit demo` starts at once.
 
-`rowbit demo clean [--dir <path>]` works only on a directory marked `.rowbit-demo`. It removes the client entries the demo added (with `claude mcp remove` for Claude Code, otherwise by editing the client's file as below; an entry that no longer points at the demo is left, and named), runs `docker compose down -v`, which removes the container and its data, deletes the files the demo wrote, `rowbit.db` and its side files, and the directory if nothing else is left in it.
+`rowbit demo clean [--dir <path>]` works only on a directory marked `.rowbit-demo`. It removes the client entries the demo added (with `claude mcp remove` for Claude Code, otherwise by editing the client's file as below; an entry that no longer points at the demo, or holds another token, is left, and named), runs `docker compose down -v`, which removes the container and its data, deletes the files the demo wrote, `rowbit.db` and its side files, `workspace/` if it's empty, and the directory if nothing else is left in it.
 
 Compose names the project after the directory, so two demo directories with the same name share a database. Run one demo at a time.
 

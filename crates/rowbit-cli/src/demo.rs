@@ -14,7 +14,9 @@ use crate::connect::{self, Client, Env};
 const COMPOSE: &str = include_str!("../../../examples/quickstart/compose.yaml");
 const SHOP_SQL: &str = include_str!("../../../examples/quickstart/shop.sql");
 const POLICY: &str = include_str!("../../../examples/quickstart/rowbit.yml");
-const SERVER: &str = "version: 0\nmcp:\n  http: true\n";
+/// Where the agent works: empty, apart from Rowbit's files, so nothing in
+/// its directory says how to reach the database around Rowbit.
+const WORKSPACE: &str = "workspace";
 const MARKER: &str = ".rowbit-demo";
 const QUICKSTART_PORT: u16 = 33070;
 
@@ -51,6 +53,9 @@ pub struct DemoArgs {
     /// The port MariaDB listens on, on 127.0.0.1
     #[arg(long, default_value_t = QUICKSTART_PORT)]
     port: u16,
+    /// Where the review page and agents' /mcp listen, on a new demo
+    #[arg(long, default_value = rowbit_web::config::DEFAULT_LISTEN)]
+    listen: std::net::SocketAddr,
     /// Connect this client without asking
     #[arg(long, value_enum, conflicts_with = "no_connect")]
     connect: Option<Client>,
@@ -91,6 +96,10 @@ struct Entry {
     name: String,
     agent: String,
     url: Option<String>,
+    /// The token's last four characters, so `clean` takes back only this
+    /// entry and not a later one of the same name.
+    #[serde(default)]
+    token_end: Option<String>,
 }
 
 /// The database URL a demo directory records, for `rowbit connect`.
@@ -118,12 +127,43 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
     if let Some(DemoCommand::Clean { dir }) = a.command {
         return clean(&dir.dir);
     }
+    // The demo runs until stopped and prints the review page's password:
+    // a person's terminal, not an agent's shell.
+    anyhow::ensure!(
+        std::io::stdin().is_terminal() || a.connect.is_some() || a.no_connect,
+        "rowbit demo serves the review page until you stop it, and prints its password; \
+         run it in a terminal of your own (an agent setting it up should ask you to), \
+         or pass --connect <client> or --no-connect to run it without one"
+    );
     check_docker()?;
     let dir = a.dir.dir;
-    let mut marker = prepare(&dir, a.port)?;
+    // Where the page will listen: a running demo's own setting, or --listen.
+    let listen = match read_marker(&dir) {
+        Ok(Some(_)) => {
+            crate::ServerArgs {
+                config: dir.join("rowbit-server.yml"),
+            }
+            .address()?
+            .listen
+        }
+        _ => a.listen,
+    };
+    // Before writing anything, connecting a client to it, or printing it.
+    if let Err(e) = std::net::TcpListener::bind(listen) {
+        anyhow::bail!(
+            "{listen} is taken ({e}); stop what uses it, or start a new demo elsewhere with --dir <dir> --listen 127.0.0.1:<port>"
+        );
+    }
+    let mut marker = prepare(&dir, a.port, a.listen)?;
     let dir = dir
         .canonicalize()
         .with_context(|| format!("finding {}", dir.display()))?;
+    let workspace = dir.join(WORKSPACE);
+    std::fs::create_dir_all(&workspace).context("creating the agent's workspace")?;
+    let address = crate::ServerArgs {
+        config: dir.join("rowbit-server.yml"),
+    }
+    .address()?;
 
     say("Starting the shop database (MariaDB 11.4 in Docker)...");
     compose(&dir, &["up", "-d", "--wait"]).context(
@@ -140,13 +180,24 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
     if !marker.asked {
         if let Some(client) = pick_client(a.connect, a.no_connect)? {
             println!();
-            if let Some(c) = connect::run(connect::ConnectArgs::in_dir(&dir, client))? {
-                marker.connected.push(Entry {
+            // A client that can't be set up shouldn't stop the demo.
+            match connect::run(connect::ConnectArgs::in_dir(&dir, &workspace, client)) {
+                Ok(Some(c)) => marker.connected.push(Entry {
                     client: c.client.id().into(),
                     name: c.name,
                     agent: c.agent,
                     url: c.url,
-                });
+                    token_end: c.token_end,
+                }),
+                Ok(None) => {}
+                Err(e) => {
+                    say(&format!("Couldn't connect {}: {e:#}", client.label()));
+                    say(&format!(
+                        "Carrying on without it. Later, in {}: rowbit connect {} (--print shows what to add by hand).",
+                        shown_dir(&dir),
+                        client.id()
+                    ));
+                }
             }
         }
         marker.asked = true;
@@ -162,13 +213,9 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
         let mut store = rowbit_store::Store::open(&setup.store)?;
         store.set_setting("web.password", &rowbit_web::hash_password(&password))?;
     }
-    let address = crate::ServerArgs {
-        config: dir.join("rowbit-server.yml"),
-    }
-    .address()?
-    .base();
-
+    let address = address.base();
     let shown = shown_dir(&dir);
+    let shown_workspace = shown_dir(&workspace);
     println!();
     say("Rowbit is guarding the demo shop database.");
     say(&format!(
@@ -178,9 +225,11 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
     match connected {
         Some((client, agent)) => {
             let open = match client {
-                Client::ClaudeCode => format!("Open Claude Code in {shown}"),
-                Client::Codex | Client::Gemini => format!("Start {}", client.label()),
-                _ => format!("Open {}", client.label()),
+                Client::ClaudeCode => format!("Open Claude Code in {shown_workspace}"),
+                Client::Codex | Client::Gemini => {
+                    format!("Start {} in {shown_workspace}", client.label())
+                }
+                _ => format!("Open {} on {shown_workspace}", client.label()),
             };
             say(&format!(
                 "{} is connected as {agent}. {open} and ask:",
@@ -190,6 +239,7 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
             say(&format!("  {PROMPT}"));
             println!();
             say("Rowbit will hold its write, and the agent will give you a link to review it.");
+            say("(Change 2 on the review page is the demo's own example of that write.)");
         }
         None => {
             say(&format!(
@@ -225,7 +275,7 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
 }
 
 /// The directory, created and filled, or the existing demo's marker.
-fn prepare(dir: &Path, port: u16) -> anyhow::Result<Marker> {
+fn prepare(dir: &Path, port: u16, listen: std::net::SocketAddr) -> anyhow::Result<Marker> {
     if dir.exists() {
         anyhow::ensure!(dir.is_dir(), "{} is not a directory", dir.display());
         if let Some(marker) = read_marker(dir)? {
@@ -251,7 +301,10 @@ fn prepare(dir: &Path, port: u16) -> anyhow::Result<Marker> {
         ("compose.yaml", compose.as_str()),
         ("shop.sql", SHOP_SQL),
         ("rowbit.yml", POLICY),
-        ("rowbit-server.yml", SERVER),
+        (
+            "rowbit-server.yml",
+            &format!("version: 0\nlisten: {listen}\nmcp:\n  http: true\n"),
+        ),
     ] {
         std::fs::write(dir.join(file), text).with_context(|| format!("writing {file}"))?;
     }
@@ -357,12 +410,24 @@ fn clean(dir: &Path) -> anyhow::Result<()> {
         )
     })?;
     let mut env = Env::current()?;
-    env.cwd = dir.canonicalize()?;
+    let workspace = dir.join(WORKSPACE);
+    // Claude Code's local scope is the agent's workspace.
+    env.cwd = if workspace.is_dir() {
+        workspace.canonicalize()?
+    } else {
+        dir.canonicalize()?
+    };
     for e in &marker.connected {
         let Some(client) = client_by_id(&e.client) else {
             continue;
         };
-        match connect::remove(client, &env, &e.name, e.url.as_deref()) {
+        match connect::remove(
+            client,
+            &env,
+            &e.name,
+            e.url.as_deref(),
+            e.token_end.as_deref(),
+        ) {
             Ok(connect::Removal::Removed) => {
                 say(&format!("Removed {} from {}", e.name, client.label()))
             }
@@ -387,6 +452,8 @@ fn clean(dir: &Path) -> anyhow::Result<()> {
             Err(e) => return Err(e).with_context(|| format!("removing {f}")),
         }
     }
+    // The agent's workspace goes only if it's empty: what's in it is yours.
+    let _ = std::fs::remove_dir(&workspace);
     if std::fs::remove_dir(dir).is_ok() {
         say(&format!("Removed {}", dir.display()));
     } else {
@@ -413,8 +480,17 @@ fn check_docker() -> anyhow::Result<()> {
             "the demo needs Docker with Compose v2 (`docker compose`): https://docs.docker.com/get-docker/"
         ),
     }
-    match quiet(&["info"]) {
-        Ok(s) if s.success() => Ok(()),
+    let info = Command::new("docker")
+        .arg("info")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .output();
+    match info {
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(o) if String::from_utf8_lossy(&o.stderr).contains("permission denied") => anyhow::bail!(
+            "can't talk to Docker: permission denied on its socket; add yourself to the docker group \
+             (then log in again) or use rootless Docker, and run this again"
+        ),
         _ => anyhow::bail!(
             "Docker is installed but not running; start Docker Desktop (or the docker service) and run this again"
         ),

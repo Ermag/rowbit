@@ -47,6 +47,17 @@ fn says_what_docker_is_missing() {
     assert!(!r.join("rowbit-demo").exists(), "nothing written");
 }
 
+// Found in review: an agent following the docs ran `rowbit demo` in its own
+// shell, which blocks and hands it the review page's password.
+#[test]
+fn needs_a_terminal_unless_told_what_to_connect() {
+    let r = root("tty");
+    fake_docker(&r, 0);
+    let (ok, out) = rowbit(&r, &["demo"]);
+    assert!(!ok && out.contains("terminal of your own"), "{out}");
+    assert!(!r.join("rowbit-demo").exists(), "nothing written");
+}
+
 #[test]
 fn never_writes_into_a_directory_of_yours() {
     let r = root("yours");
