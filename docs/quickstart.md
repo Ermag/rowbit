@@ -76,7 +76,7 @@ rowbit propose --agent coding-agent "UPDATE orders SET status = 'cancelled' WHER
 ```
 
 ```json
-{"id":2,"reason":"no rule matched","review_url":"http://127.0.0.1:8080/#/changes/2","rows":1284,"state":"held","table":"shop.orders"}
+{"id":2,"reason":"no rule matched","review_url":"http://127.0.0.1:8080/changes/2","rows":1284,"state":"held","table":"shop.orders"}
 ```
 
 A delete is refused:
@@ -128,7 +128,7 @@ rowbit show 4
 It's held too, since it changes more than 20 rows. The count depends on how long the database has been up, about 84 rows if you started it just now:
 
 ```json
-{"id":4,"reason":"no rule matched","review_url":"http://127.0.0.1:8080/#/changes/4","rows":84,"state":"held","table":"shop.orders"}
+{"id":4,"reason":"no rule matched","review_url":"http://127.0.0.1:8080/changes/4","rows":84,"state":"held","table":"shop.orders"}
 ```
 
 `show` lists the first 50 rows; `rowbit show 4 --all` lists every one. Approve it with the first 12 or more characters of the review hash `show` printed, and, since it's more than 50 rows, its row count. Rowbit refuses any other hash or count, so you approve exactly what you looked at.

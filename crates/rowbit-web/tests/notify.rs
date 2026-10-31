@@ -177,7 +177,7 @@ async fn a_held_change_is_announced_and_retried() {
     assert_eq!(payload["change"]["table"], "rowbit_test.notify_refunds");
     assert_eq!(
         payload["change"]["url"],
-        format!("https://rowbit.example.com/#/changes/{}", held.id)
+        format!("https://rowbit.example.com/changes/{}", held.id)
     );
     // Never row values or the statement.
     for (_, _, body) in got.iter() {

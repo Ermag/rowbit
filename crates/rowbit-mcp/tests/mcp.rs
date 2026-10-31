@@ -183,7 +183,7 @@ async fn propose_and_follow_a_change(var: &str, table: &str) {
     );
     assert_eq!(
         held["review_url"],
-        format!("http://127.0.0.1:8080/#/changes/{}", held["id"])
+        format!("http://127.0.0.1:8080/changes/{}", held["id"])
     );
 
     let (_, text) = call(&client, "change_status", json!({ "id": held["id"] })).await;

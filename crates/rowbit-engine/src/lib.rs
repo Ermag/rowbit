@@ -911,9 +911,10 @@ pub const REVIEW_ADDRESS_SETTING: &str = "review.address";
 /// `rowbit serve`'s address when nothing else says where it is.
 pub const DEFAULT_REVIEW_ADDRESS: &str = "http://127.0.0.1:8080";
 
-/// A change's page on the review UI at `address`.
+/// A change's page on the review UI at `address`, by way of sign-in if
+/// the browser isn't signed in.
 pub fn change_link(address: &str, id: ChangeId) -> String {
-    format!("{}/#/changes/{id}", address.trim_end_matches('/'))
+    format!("{}/changes/{id}", address.trim_end_matches('/'))
 }
 
 /// What `rowbit serve` keeps under [`NOTIFY_SETTING`]. No secrets: those

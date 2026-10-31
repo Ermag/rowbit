@@ -165,7 +165,7 @@ async fn agents_sign_in_with_their_own_token() {
     assert_eq!(held["state"], "held");
     assert_eq!(
         held["review_url"],
-        format!("{}/#/changes/{}", s.base, held["id"])
+        format!("{}/changes/{}", s.base, held["id"])
     );
     let (failed, text) = call(&refund, "change_status", json!({ "id": held["id"] })).await;
     assert!(!failed);
