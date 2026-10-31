@@ -32,7 +32,7 @@ Restart the client after connecting, unless it reloads its settings on its own.
 
 Ask the agent to fix something in the data. In the demo:
 
-> Some orders are stuck in pending. Cancel them.
+> The pending orders are stuck. Cancel them.
 
 A typical agent proposes `UPDATE orders SET status = 'cancelled' WHERE status = 'pending'`, which also matches orders placed minutes ago. Rowbit holds it, and the agent hands you a link to the change on the review page, where you see all 1,284 rows before and after.
 
