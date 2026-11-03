@@ -1,12 +1,12 @@
 # Installing and setting up
 
-Status: v0.2.1.
+Status: v0.2.1; `rowbit setup` and where commands find their files are v0.2.2.
 
-How Rowbit gets onto a machine and in front of an agent: the release and its install script, `rowbit demo` for trying it, `rowbit connect` for pointing an agent client at it, the skill that teaches agents to use it, and the home page and docs site that explain it. None of this changes [`rowbit.yml`](policy.md), [`rowbit-server.yml`](server.md) or the state file. The one change to the [change lifecycle](change-lifecycle.md) is the review link in held results (see [Agent tools](change-lifecycle.md#agent-tools-mcp)).
+How Rowbit gets onto a machine and in front of an agent: the release and its install script, `rowbit setup` for a database of your own, `rowbit demo` for trying it, `rowbit connect` for pointing an agent client at it, the skill that teaches agents to use it, and the home page and docs site that explain it. None of this changes [`rowbit.yml`](policy.md), [`rowbit-server.yml`](server.md) or the state file. The one change to the [change lifecycle](change-lifecycle.md) is the review link in held results (see [Agent tools](change-lifecycle.md#agent-tools-mcp)).
 
 ```sh
 curl -fsSL https://ermag.github.io/rowbit/install.sh | sh
-rowbit demo
+rowbit setup
 ```
 
 ## Releases
@@ -46,6 +46,43 @@ macOS binaries are not signed or notarized. A binary fetched with `curl`, as the
 5. Prints `rowbit --version` from the installed binary and the next command, and removes the temporary directory. The next command is `rowbit demo` when the installed binary is the one `PATH` finds; when the directory isn't on `PATH` yet, it is the full path (`~/.local/bin/rowbit demo`), which works before the profile is changed; and when another `rowbit` comes first on `PATH` (an older `cargo install`), the script says which and how to remove it.
 
 Upgrading is running it again, after stopping every Rowbit process and backing up `rowbit.db` (see [Running Rowbit](../operating.md#upgrading)).
+
+## `rowbit setup`
+
+`rowbit setup [--name <name>] [--sample | --database-url <url>] [--client <client>]... [--no-client] [--yes]` sets Rowbit up in front of a database and connects agent clients to it, asking one question at a time. Every question has a flag, and the default answer is shown and taken with Enter. Without a terminal it asks nothing: it needs `--yes` and either `--sample` or `--database-url`, and connects only the clients `--client` names.
+
+It never runs a statement that changes the database or its users. Where something needs an administrator, it prints the statement for a person to run.
+
+1. **Your database or a sample one.** The first question. `--sample` (or choosing the sample) runs [`rowbit demo`](#rowbit-demo) in the current directory, exactly as if typed, and setup ends there.
+2. **Where Rowbit keeps its files.** `~/.rowbit/<name>`, with `--name` defaulting to `default`. The directory is made readable by its owner only. If it already holds a setup, Rowbit keeps every file in it, re-runs the checks below and offers only the steps not done yet, so running setup again is how you add a client or fix a grant. A directory that exists, isn't empty and holds no setup is refused. Keeping the files outside your projects means an agent working in a project doesn't find Rowbit's database URL there. It doesn't keep them from an agent with a shell running as you: see [Before you use it for real](../quickstart.md#before-you-use-it-for-real).
+3. **The database.** Rowbit offers the first URL it finds, in this order: `--database-url`, `ROWBIT_DATABASE_URL`, `DATABASE_URL`, then `DATABASE_URL` in a `.env` file in the current directory. It shows the URL with its password masked and says where it came from. You confirm it or type another, which isn't echoed. Only `mysql://` and `mariadb://` URLs are accepted. A `postgres://` URL is refused with a note that PostgreSQL is planned.
+   - It connects and says which server and version answered, and which databases the user can see.
+   - It compares the user's grants (`SHOW GRANTS`) with [Rowbit's database user](../privileges.md#rowbits-database-user). What's missing, it prints as the `GRANT` statements that add it. What's too much (`ALL`, `GRANT OPTION`, `SUPER`, anything on `mysql.*`), it names.
+   - A `DATABASE_URL` is usually the application's own user. If the user is called anything but `rowbit`, or holds more than Rowbit needs, setup says Rowbit should have a user of its own. It prints the `CREATE USER` and `GRANT` statements for the databases you choose, with a generated password, and asks for the new URL once a person has run them. You can carry on with the URL as it is; setup says what that risks.
+4. **The files.** In the directory, Rowbit writes:
+   - `env`, holding `ROWBIT_DATABASE_URL`, readable by its owner only;
+   - `rowbit.yml`, with one agent, `coding-agent`, and `default: hold`, so nothing is written until a person approves it or you add rules. A comment lists the tables found (the first 50) and links the rules and scopes spec;
+   - `rowbit-server.yml`, with `mcp.http: true` and `listen` on `127.0.0.1:8080`, or the next free port;
+   - `rowbit.db`.
+5. **Agent clients.** A multi-select of the [clients](#rowbit-connect) Rowbit knows, with the installed ones checked. Each is connected as `rowbit connect` does, then checked as `rowbit connect --check` does. For Claude Code, setup asks where the entry applies: the current directory, at local scope (the default when it's a git repository), or everywhere, at user scope (the default otherwise). With Claude Code chosen, it prints the two `/plugin` commands that add the [skill](#the-skill).
+6. **The review page.** Rowbit makes the page's password, shows it once and stores its hash, as `rowbit serve --set-password` does. So the first `rowbit serve` prints no password, and nothing lands in a service's log.
+7. **Running it.** It prints the command that starts Rowbit, `rowbit serve --dir ~/.rowbit/<name>`, and offers to install a service that runs it while you're logged in, default no: a launchd agent, `~/Library/LaunchAgents/dev.rowbit.<name>.plist`, on macOS, or a systemd user unit, `~/.config/systemd/user/rowbit-<name>.service`, on Linux. It writes the file and prints the command that starts it, without running it. Then it prints what to ask the agent.
+
+| Flag | Answers |
+|---|---|
+| `--sample` | 1, with the sample |
+| `--name <name>` | 2 |
+| `--database-url <url>` | 1 and 3, with this URL; the grant check still runs and prints what it finds |
+| `--client <client>`, repeatable; `--no-client` | 5 |
+| `--scope local\|user` | 5, for Claude Code |
+| `--service`, `--no-service` | 7 |
+| `--yes` | every other question, with its default |
+
+## Where commands find their files
+
+Every command that reads `rowbit.yml`, `rowbit-server.yml`, `rowbit.db` or the database URL takes `--dir <path>` (or `ROWBIT_DIR`), and then finds them in that directory. Without it, a command uses the current directory if it holds a `rowbit.yml`, as in v0.2.1, and otherwise `~/.rowbit/default` if that holds a setup. A flag or variable naming one file (`--policy`, `--store`, `--config`, `--url` and their variables) still wins for that file.
+
+In a setup's directory, Rowbit reads `ROWBIT_DATABASE_URL` from its `env` file when the environment doesn't set it. It refuses an `env` file that others can read, since it holds the database's password.
 
 ## `rowbit demo`
 
