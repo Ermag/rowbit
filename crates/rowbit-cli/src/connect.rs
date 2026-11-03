@@ -706,7 +706,7 @@ fn backup_path(file: &Path) -> PathBuf {
 /// The file holds a token or a database URL, so group and others lose
 /// access to it; returns whether they had any. A symlink (a dotfile
 /// manager's) is followed, and the file it points to is written.
-fn write_private(file: &Path, contents: &str) -> anyhow::Result<bool> {
+pub(crate) fn write_private(file: &Path, contents: &str) -> anyhow::Result<bool> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let target;
@@ -795,6 +795,32 @@ pub struct ConnectArgs {
 }
 
 impl ConnectArgs {
+    /// Puts Rowbit's files in the directory `--dir` chose.
+    pub fn place(&mut self) {
+        crate::place::file(&mut self.policy, "rowbit.yml");
+        crate::place::file(&mut self.store.store, "rowbit.db");
+        crate::place::file(&mut self.server.config, "rowbit-server.yml");
+    }
+
+    /// What `rowbit setup` runs: Rowbit's files in `dir`, the agent working
+    /// in `cwd`.
+    pub fn for_setup(
+        dir: &Path,
+        cwd: &Path,
+        client: Client,
+        agent: &str,
+        scope: Scope,
+        url: &str,
+    ) -> ConnectArgs {
+        ConnectArgs {
+            agent: Some(agent.to_owned()),
+            scope,
+            url: Some(url.to_owned()),
+            cwd: Some(cwd.to_owned()),
+            ..ConnectArgs::in_dir(dir, cwd, client)
+        }
+    }
+
     /// What `rowbit demo` runs in its directory.
     /// Rowbit's files are in `dir`; the agent works in `workspace`, which
     /// is where Claude Code's local scope applies.
@@ -1078,7 +1104,11 @@ fn issue_token(a: &ConnectArgs, agent: &str) -> anyhow::Result<String> {
 
 fn stdio_server(a: &ConnectArgs, agent: &str) -> anyhow::Result<Server> {
     let here = a.dir.clone().unwrap_or_else(|| PathBuf::from("."));
-    let url = a.url.clone().or_else(|| crate::demo::database_url(&here)).context(
+    let url = match a.url.clone().or_else(|| crate::demo::database_url(&here)) {
+        Some(url) => Some(url),
+        None => crate::place::database_url()?,
+    };
+    let url = url.context(
         "over stdio the client needs the database URL: set ROWBIT_DATABASE_URL, or turn on mcp.http in rowbit-server.yml",
     )?;
     let absolute = |p: &Path| -> anyhow::Result<String> {

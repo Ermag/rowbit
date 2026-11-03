@@ -42,6 +42,17 @@ pub struct Admin {
     #[arg(long, env = "ROWBIT_STORE", default_value = "rowbit.db")]
     store: PathBuf,
 }
+impl Admin {
+    /// Puts Rowbit's files in the directory `--dir` chose.
+    pub fn place(&mut self) {
+        crate::place::file(&mut self.config, "rowbit-server.yml");
+        crate::place::file(&mut self.policy, "rowbit.yml");
+        crate::place::file(&mut self.store, "rowbit.db");
+        if self.url.is_none() {
+            self.url = crate::place::database_url().ok().flatten();
+        }
+    }
+}
 
 #[derive(clap::Args)]
 pub struct ApplyArgs {

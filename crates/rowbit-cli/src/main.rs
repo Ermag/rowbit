@@ -1,7 +1,9 @@
 mod connect;
 mod demo;
 mod grants;
+mod place;
 mod review;
+mod setup;
 
 use std::path::PathBuf;
 
@@ -18,7 +20,8 @@ use rowbit_store::Store;
 #[command(
     name = "rowbit",
     version,
-    about = "A safety net for AI agents that write to your database"
+    about = "A safety net for AI agents that write to your database",
+    after_help = "Every command but demo and setup takes --dir <path> (or ROWBIT_DIR): the directory holding rowbit.yml, rowbit.db, rowbit-server.yml and the env file `rowbit setup` writes. Without it: the current directory if it holds a rowbit.yml, else ~/.rowbit/default."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -185,8 +188,15 @@ enum Command {
     Ping {
         /// mysql://user:password@host:port/database
         #[arg(long, env = "ROWBIT_DATABASE_URL", hide_env_values = true)]
-        url: String,
+        url: Option<String>,
     },
+    /// Set Rowbit up in front of your database, or try it on a sample one
+    ///
+    /// Asks one question at a time: your database or the sample, checks the
+    /// connection and Rowbit's grants, writes a rowbit.yml that holds every
+    /// write, connects the agent clients you pick and sets the review
+    /// page's password. Keeps its files in ~/.rowbit/<name>.
+    Setup(setup::SetupArgs),
 }
 
 /// Only Rowbit's state file: for commands that don't touch the database,
@@ -295,9 +305,10 @@ fn page_password(store: &std::path::Path, set: bool) -> anyhow::Result<String> {
 /// Where Rowbit's database, policy and state are.
 #[derive(clap::Args)]
 struct Setup {
-    /// mysql://user:password@host:port/database
+    /// mysql://user:password@host:port/database; in a setup's directory,
+    /// read from its env file if not given
     #[arg(long, env = "ROWBIT_DATABASE_URL", hide_env_values = true)]
-    url: String,
+    url: Option<String>,
     /// The policy file
     #[arg(long, env = "ROWBIT_POLICY", default_value = "rowbit.yml")]
     policy: PathBuf,
@@ -312,8 +323,9 @@ impl Setup {
         let src = std::fs::read_to_string(&self.policy)
             .with_context(|| format!("reading {}", self.policy.display()))?;
         let policy = PolicyFile::from_yaml(&src)?;
-        let database = mysql_database(&self.url)?;
-        let adapter = rowbit_mysql::MySqlAdapter::new(&self.url)?;
+        let url = database_url(&self.url)?;
+        let database = mysql_database(&url)?;
+        let adapter = rowbit_mysql::MySqlAdapter::new(&url)?;
         let store = Store::open(&self.store)
             .with_context(|| format!("opening {}", self.store.display()))?;
         Ok((RowbitEngine::new(adapter, policy, store), database))
@@ -400,6 +412,69 @@ fn decision_name(d: rowbit_policy::Decision) -> &'static str {
 async fn check_scopes(engine: &RowbitEngine) {
     for note in engine.check_scopes().await {
         eprintln!("rowbit: {note}");
+    }
+}
+
+/// The database URL: the flag or `ROWBIT_DATABASE_URL`, else the setup
+/// directory's env file.
+fn database_url(given: &Option<String>) -> anyhow::Result<String> {
+    match given {
+        Some(url) => Ok(url.clone()),
+        None => place::database_url()?.context(
+            "no database URL: set ROWBIT_DATABASE_URL, pass --url, or run this where `rowbit setup` put Rowbit (--dir)",
+        ),
+    }
+}
+
+/// Puts every file a command reads in the directory `--dir` chose.
+fn place_files(command: &mut Command) {
+    fn setup(s: &mut Setup) {
+        place::file(&mut s.policy, "rowbit.yml");
+        place::file(&mut s.store, "rowbit.db");
+    }
+    fn store(s: &mut StoreArgs) {
+        place::file(&mut s.store, "rowbit.db");
+    }
+    fn server(s: &mut ServerArgs) {
+        place::file(&mut s.config, "rowbit-server.yml");
+    }
+    match command {
+        Command::Policy {
+            command: PolicyCommand::Check { path },
+        } => place::file(path, "rowbit.yml"),
+        Command::Policy {
+            command: PolicyCommand::Test { store: s, .. },
+        }
+        | Command::Changes { store: s, .. }
+        | Command::Show { store: s, .. }
+        | Command::Reject { store: s, .. }
+        | Command::Verify { store: s } => store(s),
+        Command::Mcp { setup: s, .. }
+        | Command::Propose { setup: s, .. }
+        | Command::Approve { setup: s, .. }
+        | Command::Undo { setup: s, .. } => setup(s),
+        Command::Serve {
+            server: c,
+            setup: s,
+            ..
+        } => {
+            server(c);
+            setup(s);
+        }
+        Command::Agents {
+            policy, store: s, ..
+        } => {
+            place::file(policy, "rowbit.yml");
+            store(s);
+        }
+        Command::Server {
+            command: ServerCommand::Check { server: c },
+        } => server(c),
+        Command::Grants {
+            command: GrantsCommand::Diff { admin } | GrantsCommand::Apply { admin, .. },
+        } => admin.place(),
+        Command::Connect(args) => args.place(),
+        Command::Demo(_) | Command::Setup(_) | Command::Ping { .. } => {}
     }
 }
 
@@ -515,7 +590,9 @@ enum PolicyCommand {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    match Cli::parse().command {
+    let mut command = Cli::parse_from(place::init(std::env::args_os().collect())?).command;
+    place_files(&mut command);
+    match command {
         Command::Policy {
             command: PolicyCommand::Check { path },
         } => {
@@ -781,8 +858,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Connect(args) => {
             connect::run(args)?;
         }
+        Command::Setup(args) => setup::run(args).await?,
         Command::Ping { url } => {
-            let adapter = rowbit_mysql::MySqlAdapter::new(&url)?;
+            let adapter = rowbit_mysql::MySqlAdapter::new(&database_url(&url)?)?;
             let info = adapter.server_info().await?;
             let engine = match info.engine {
                 Engine::MariaDb => "MariaDB",

@@ -10,6 +10,8 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 
 ### New
 
+- `rowbit setup` sets Rowbit up in front of your own MariaDB or MySQL database, or runs the sample one: it finds the database URL (`DATABASE_URL`, `.env`), checks the connection and Rowbit's grants and prints the `GRANT` or `CREATE USER` statements to fix them, writes a `rowbit.yml` that holds every write, connects the agent clients you pick, sets the review page's password, and can write a launchd or systemd service. It keeps its files in `~/.rowbit/<name>` and never changes the database itself.
+- Every command but `demo` and `setup` takes `--dir` (or `ROWBIT_DIR`), and without it uses `~/.rowbit/default` when the current directory has no `rowbit.yml`. In a setup's directory, the database URL comes from its `env` file.
 - `rowbit connect <client> --check` says whether the client has Rowbit from here and whether Rowbit answers, without changing anything.
 - The Rowbit skill tells an agent without Rowbit's tools to say so and how to fix it, instead of reaching the database another way.
 
