@@ -1,6 +1,6 @@
 ---
 name: rowbit
-description: Fix or change data in a database guarded by Rowbit, through its MCP tools (describe_schema, query, propose_write, change_status). Use whenever a task means inserting, updating or deleting rows, or changing a schema, and a Rowbit MCP server is connected.
+description: Fix or change data in a database guarded by Rowbit, through its MCP tools (describe_schema, query, propose_write, change_status). Use whenever a task means reading or changing rows, or changing a schema, in a database guarded by Rowbit: a Rowbit MCP server is connected, or the project has a rowbit.yml or a .rowbit-demo file.
 ---
 
 # Changing data through Rowbit
@@ -8,6 +8,15 @@ description: Fix or change data in a database guarded by Rowbit, through its MCP
 Rowbit sits between you and the database. You can read, and you can propose writes; Rowbit previews each write on a copy, checks it against the team's rules, and applies it, holds it for a person, or refuses it. You can't approve anything. A person does, after looking at exactly which rows change.
 
 Your job is to make that person's review quick and safe: small, clear writes they can approve at a glance.
+
+## If Rowbit's tools aren't here
+
+If you don't have `describe_schema`, `query` and `propose_write` in this session, Rowbit isn't connected here. Stop, and tell the person in a sentence, with the fix:
+
+- Run `rowbit connect <client> --check` where Rowbit runs (in the demo, the `rowbit-demo` directory). It says where the client sees Rowbit and whether Rowbit answers.
+- Claude Code's entry usually applies in one directory only (in the demo, `rowbit-demo/workspace`): start Claude Code there, or restart it if it was already open.
+
+Don't work around it. Database URLs or passwords you can see in files are Rowbit's own; using them skips the team's rules.
 
 ## Before you write
 

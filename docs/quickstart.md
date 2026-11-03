@@ -20,16 +20,17 @@ The first puts `rowbit` in `~/.local/bin`, after checking the download against t
 - offers to connect an agent client it finds, such as Claude Code or Cursor, with an empty `rowbit-demo/workspace` for the agent to work in, a separate directory from the demo's passwords and state (not a sandbox: see [Before you use it for real](#before-you-use-it-for-real));
 - serves the review page on <http://127.0.0.1:8080>, and prints its password and what to ask the agent.
 
-Leave it running, and use another terminal for the rest, inside `rowbit-demo`. The CLI commands read the database URL from this variable (`rowbit demo` prints it):
-
-```sh
-cd rowbit-demo
-export ROWBIT_DATABASE_URL=mysql://rowbit:rowbit-quickstart@127.0.0.1:33070/shop
-```
+Leave it running. Its last line is the command that starts your agent in the right directory.
 
 ## 2. Ask your agent
 
-If the demo connected an agent, open it on `rowbit-demo/workspace` (for Claude Code, start it there) and ask:
+If the demo connected an agent, open a new terminal and run the line the demo printed. For Claude Code it looks like this, with the full path to where you ran the demo:
+
+```sh
+cd ~/rowbit-demo/workspace && claude
+```
+
+Start it in `rowbit-demo/workspace`, not in `rowbit-demo`: Claude Code's entry applies only in `workspace`, and `rowbit-demo` holds the database's passwords. A Claude Code that was already open there needs a restart. If the agent says it has no Rowbit tools, run `rowbit connect claude-code --check` in `rowbit-demo`: it says where Claude Code sees Rowbit and whether Rowbit answers. Then ask:
 
 > The pending orders are stuck. Cancel them.
 
@@ -58,6 +59,13 @@ agents:
 Changing only the `status` of up to 20 orders goes straight through. Deletes are refused. Anything else waits for a person.
 
 ## 4. What the demo proposed
+
+Use another terminal for the rest, inside `rowbit-demo`. The CLI commands read the database URL from this variable (`rowbit demo` prints it):
+
+```sh
+cd rowbit-demo
+export ROWBIT_DATABASE_URL=mysql://rowbit:rowbit-quickstart@127.0.0.1:33070/shop
+```
 
 ```sh
 rowbit changes
@@ -145,6 +153,7 @@ If you didn't connect one in step 1, do it now, in `rowbit-demo`:
 ```sh
 rowbit connect                  # lists the clients Rowbit knows, and which are installed
 rowbit connect claude-code      # or cursor, vscode, claude-desktop, codex, gemini, windsurf
+rowbit connect claude-code --check   # does the client see Rowbit, and does Rowbit answer?
 ```
 
 The demo serves agents over HTTP, so the client gets Rowbit's address and a token of the agent's own, never the database URL or the state file. Restart the client, then go back to [step 2](#2-ask-your-agent). [Connect your agent](connect.md) covers each client, adding Rowbit by hand, the Rowbit skill for agents, and stdio.
