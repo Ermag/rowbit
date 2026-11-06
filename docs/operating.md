@@ -12,10 +12,11 @@ They share the state file, `rowbit.db`, and the database. Nothing else.
 
 ## In a container
 
-Each release is also an image, `ghcr.io/ermag/rowbit`, for `amd64` and `arm64`. Mount the directory `rowbit setup` made at `/data` and run as your own user, so Rowbit can read its files:
+Each release is also an image, `ghcr.io/ermag/rowbit`, for `amd64` and `arm64`. Mount the directory `rowbit setup` made at `/data`. On Linux, run as your own user, so Rowbit can read its files; Rowbit writes only to `/data`, so the rest can be read-only:
 
 ```sh
-docker run -i --rm --user "$(id -u):$(id -g)" -v ~/.rowbit/default:/data \
+docker run -i --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --user "$(id -u):$(id -g)" -v ~/.rowbit/default:/data \
   ghcr.io/ermag/rowbit mcp --agent claude-code
 ```
 

@@ -1,0 +1,4 @@
+# The image is built from dist/ only (see Dockerfile).
+*
+!dist/amd64/rowbit
+!dist/arm64/rowbit

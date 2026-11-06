@@ -3,13 +3,17 @@
 # so the image holds exactly the binary the release ships. See "The
 # container image" in docs/spec/setup.md.
 #
-#   docker run -i --rm --user "$(id -u):$(id -g)" \
-#     -v ~/.rowbit/default:/data ghcr.io/ermag/rowbit mcp --agent claude-code
+#   docker run -i --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+#     --user "$(id -u):$(id -g)" -v ~/.rowbit/default:/data \
+#     ghcr.io/ermag/rowbit mcp --agent claude-code
 
 # Static: no libc needed; CA certificates for signing in through an
 # identity provider; runs as a non-root user unless --user says otherwise.
-FROM gcr.io/distroless/static-debian12:nonroot
+# Pinned by digest; Dependabot proposes updates.
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
+# dist/amd64/rowbit and dist/arm64/rowbit, unpacked from the release's
+# archives by the release workflow.
 ARG TARGETARCH
 COPY dist/${TARGETARCH}/rowbit /usr/local/bin/rowbit
 
