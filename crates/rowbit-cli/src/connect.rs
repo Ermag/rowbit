@@ -664,7 +664,7 @@ pub fn snippet(client: Client, env: &Env, name: &str, server: &Server, scope: Sc
     format!("Add to {file}:\n\n{body}")
 }
 
-fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &str) -> String {
     if !s.is_empty()
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || "-_./:=@".contains(c))
@@ -972,8 +972,9 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
                 .is_err()
             {
                 println!(
-                    "Nothing answers at {} yet: start `rowbit serve`.",
-                    address.base()
+                    "Nothing answers at {} yet: start `{}`.",
+                    address.base(),
+                    serve_command()
                 );
             }
         }
@@ -1041,8 +1042,9 @@ fn check(client: Client, env: &Env, a: &ConnectArgs) -> anyhow::Result<()> {
                 std::time::Duration::from_millis(500)
             )
             .is_ok(),
-            "Nothing answers at {}: start `rowbit serve`, or `rowbit demo` in a demo directory",
-            address.base()
+            "Nothing answers at {}: start `{}`, or `rowbit demo` in a demo directory",
+            address.base(),
+            serve_command()
         );
         println!("Rowbit answers at {}/mcp.", address.base());
     }
@@ -1057,6 +1059,17 @@ fn check(client: Client, env: &Env, a: &ConnectArgs) -> anyhow::Result<()> {
         ),
     }
     Ok(())
+}
+
+/// `rowbit serve`, with the `--dir` this command was given.
+fn serve_command() -> String {
+    match crate::place::dir() {
+        Some(dir) => format!(
+            "rowbit serve --dir {}",
+            shell_quote(&dir.display().to_string())
+        ),
+        None => "rowbit serve".into(),
+    }
 }
 
 fn pick_agent(a: &ConnectArgs) -> anyhow::Result<String> {
@@ -1104,9 +1117,9 @@ fn issue_token(a: &ConnectArgs, agent: &str) -> anyhow::Result<String> {
 
 fn stdio_server(a: &ConnectArgs, agent: &str) -> anyhow::Result<Server> {
     let here = a.dir.clone().unwrap_or_else(|| PathBuf::from("."));
-    let url = match a.url.clone().or_else(|| crate::demo::database_url(&here)) {
+    let url = match crate::place::pick_url(a.url.clone())? {
         Some(url) => Some(url),
-        None => crate::place::database_url()?,
+        None => crate::demo::database_url(&here),
     };
     let url = url.context(
         "over stdio the client needs the database URL: set ROWBIT_DATABASE_URL, or turn on mcp.http in rowbit-server.yml",

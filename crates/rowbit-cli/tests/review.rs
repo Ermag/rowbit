@@ -33,8 +33,10 @@ struct Setup {
 
 impl Setup {
     fn rowbit(&self, args: &[&str]) -> (bool, String) {
+        let decides = matches!(args.first(), Some(&("approve" | "reject" | "undo")));
         let out = Command::new(env!("CARGO_BIN_EXE_rowbit"))
             .args(args)
+            .args(decides.then_some("--scripted"))
             .env("ROWBIT_DATABASE_URL", &self.url)
             .env("ROWBIT_POLICY", self.dir.join("rowbit.yml"))
             .env("ROWBIT_STORE", self.dir.join("rowbit.db"))
@@ -145,6 +147,18 @@ async fn a_person_reviews_approves_and_undoes(var: &str, table: &str) {
     );
     let hash = review_hash(&show);
 
+    // Without a terminal, only with --scripted.
+    let out = Command::new(env!("CARGO_BIN_EXE_rowbit"))
+        .args(["approve", &id, "--review", "000000000000"])
+        .env("ROWBIT_DATABASE_URL", &s.url)
+        .env("ROWBIT_POLICY", s.dir.join("rowbit.yml"))
+        .env("ROWBIT_STORE", s.dir.join("rowbit.db"))
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success() && String::from_utf8_lossy(&out.stderr).contains("pass --scripted"),
+        "{out:?}"
+    );
     let (ok, out) = s.rowbit(&["approve", &id, "--review", "000000000000"]);
     assert!(!ok, "{out}");
     let (ok, out) = s.rowbit(&["approve", &id, "--review", &hash[..12]]);

@@ -44,13 +44,12 @@ pub struct Admin {
 }
 impl Admin {
     /// Puts Rowbit's files in the directory `--dir` chose.
-    pub fn place(&mut self) {
+    pub fn place(&mut self) -> anyhow::Result<()> {
         crate::place::file(&mut self.config, "rowbit-server.yml");
         crate::place::file(&mut self.policy, "rowbit.yml");
         crate::place::file(&mut self.store, "rowbit.db");
-        if self.url.is_none() {
-            self.url = crate::place::database_url().ok().flatten();
-        }
+        self.url = crate::place::pick_url(self.url.take())?;
+        Ok(())
     }
 }
 

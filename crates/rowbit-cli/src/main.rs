@@ -225,10 +225,21 @@ struct Person {
     /// Your name in the audit log; defaults to your login name
     #[arg(long = "as", env = "ROWBIT_USER")]
     name: Option<String>,
+    /// Run without a terminal, from a script of your own. An agent must
+    /// never use it to decide on its own change.
+    #[arg(long)]
+    scripted: bool,
 }
 
 impl Person {
+    /// The person's name. Refuses without a terminal unless --scripted, so
+    /// an agent with a shell doesn't approve its own change by accident.
     fn name(&self) -> anyhow::Result<String> {
+        use std::io::IsTerminal;
+        anyhow::ensure!(
+            self.scripted || std::io::stdin().is_terminal(),
+            "this is for a person at a terminal; from a script of your own, pass --scripted. An agent must not approve, reject or undo changes"
+        );
         let name = self
             .name
             .clone()
@@ -418,16 +429,13 @@ async fn check_scopes(engine: &RowbitEngine) {
 /// The database URL: the flag or `ROWBIT_DATABASE_URL`, else the setup
 /// directory's env file.
 fn database_url(given: &Option<String>) -> anyhow::Result<String> {
-    match given {
-        Some(url) => Ok(url.clone()),
-        None => place::database_url()?.context(
-            "no database URL: set ROWBIT_DATABASE_URL, pass --url, or run this where `rowbit setup` put Rowbit (--dir)",
-        ),
-    }
+    place::pick_url(given.clone())?.context(
+        "no database URL: set ROWBIT_DATABASE_URL, pass --url, or run this where `rowbit setup` put Rowbit (--dir)",
+    )
 }
 
 /// Puts every file a command reads in the directory `--dir` chose.
-fn place_files(command: &mut Command) {
+fn place_files(command: &mut Command) -> anyhow::Result<()> {
     fn setup(s: &mut Setup) {
         place::file(&mut s.policy, "rowbit.yml");
         place::file(&mut s.store, "rowbit.db");
@@ -472,10 +480,11 @@ fn place_files(command: &mut Command) {
         } => server(c),
         Command::Grants {
             command: GrantsCommand::Diff { admin } | GrantsCommand::Apply { admin, .. },
-        } => admin.place(),
+        } => admin.place()?,
         Command::Connect(args) => args.place(),
         Command::Demo(_) | Command::Setup(_) | Command::Ping { .. } => {}
     }
+    Ok(())
 }
 
 /// The database a `mysql://` URL names; Rowbit needs one as the default.
@@ -591,7 +600,7 @@ enum PolicyCommand {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut command = Cli::parse_from(place::init(std::env::args_os().collect())?).command;
-    place_files(&mut command);
+    place_files(&mut command)?;
     match command {
         Command::Policy {
             command: PolicyCommand::Check { path },
@@ -738,11 +747,12 @@ async fn main() -> anyhow::Result<()> {
             person,
             setup,
         } => {
+            let name = person.name()?;
             let (engine, _) = setup.engine()?;
             let change = engine.change(id)?;
             let hash = review_hash(change.review_hash.as_deref(), &review)?;
             confirm_rows(&change, rows)?;
-            let change = engine.approve(&person.name()?, id, &hash).await?;
+            let change = engine.approve(&name, id, &hash).await?;
             println!("{}", review::line(&change));
         }
         Command::Reject {
@@ -751,18 +761,15 @@ async fn main() -> anyhow::Result<()> {
             person,
             store,
         } => {
+            let name = person.name()?;
             let mut store = store.open()?;
-            store.transition(
-                id,
-                &Event::Reject { reason },
-                &Actor::Human(person.name()?),
-                None,
-            )?;
+            store.transition(id, &Event::Reject { reason }, &Actor::Human(name), None)?;
             println!("{}", review::line(&store.get(id)?));
         }
         Command::Undo { id, person, setup } => {
+            let name = person.name()?;
             let (engine, _) = setup.engine()?;
-            let change = engine.undo(&person.name()?, id).await?;
+            let change = engine.undo(&name, id).await?;
             println!("{}", review::line(&change));
         }
         Command::Serve {

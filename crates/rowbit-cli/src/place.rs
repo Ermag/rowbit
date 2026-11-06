@@ -17,9 +17,21 @@ const OWN_DIR: [&str; 2] = ["demo", "setup"];
 
 static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 
+/// Whether `--url` was on the command line, as opposed to clap taking it
+/// from `ROWBIT_DATABASE_URL`.
+static URL_FLAG: OnceLock<bool> = OnceLock::new();
+
 /// Whether `dir` holds what `rowbit setup` writes.
 pub fn is_setup(dir: &Path) -> bool {
     dir.join("rowbit.yml").is_file() && dir.join(ENV_FILE).is_file()
+}
+
+/// Whether `dir` holds any of Rowbit's own files, so a setup that stopped
+/// half way can be picked up again.
+pub fn has_rowbit_files(dir: &Path) -> bool {
+    ["rowbit.yml", ENV_FILE, "rowbit-server.yml", "rowbit.db"]
+        .iter()
+        .any(|f| dir.join(f).exists())
 }
 
 /// `~/.rowbit`, where `rowbit setup` keeps each setup.
@@ -31,11 +43,17 @@ pub fn home() -> anyhow::Result<PathBuf> {
 /// Takes `--dir` out of the arguments and settles the directory, before
 /// clap sees them. Called once, first thing.
 pub fn init(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> {
-    let command = args
-        .iter()
-        .skip(1)
-        .find(|a| !a.to_string_lossy().starts_with('-'))
-        .map(|a| a.to_string_lossy().into_owned());
+    let _ = URL_FLAG.set(args.iter().any(|a| {
+        let a = a.to_string_lossy();
+        a == "--url" || a.starts_with("--url=")
+    }));
+    let (command, dir_first) = command(&args);
+    if let Some(c) = command.as_deref().filter(|c| OWN_DIR.contains(c)) {
+        anyhow::ensure!(
+            !dir_first,
+            "rowbit {c} doesn't take --dir before it; see rowbit {c} --help"
+        );
+    }
     if command
         .as_deref()
         .is_some_and(|c| OWN_DIR.contains(&c) || c == "help")
@@ -57,6 +75,24 @@ pub fn init(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> {
     };
     let _ = DIR.set(dir);
     Ok(args)
+}
+
+/// The subcommand, and whether a `--dir` came before it.
+fn command(args: &[OsString]) -> (Option<String>, bool) {
+    let mut dir_first = false;
+    let mut it = args.iter().skip(1);
+    while let Some(a) = it.next() {
+        let a = a.to_string_lossy();
+        if a == "--dir" {
+            dir_first = true;
+            it.next();
+        } else if a.starts_with("--dir=") {
+            dir_first = true;
+        } else if !a.starts_with('-') {
+            return (Some(a.into_owned()), dir_first);
+        }
+    }
+    (None, dir_first)
 }
 
 fn take_dir(args: Vec<OsString>) -> anyhow::Result<(Vec<OsString>, Option<PathBuf>)> {
@@ -100,6 +136,28 @@ pub fn file(path: &mut PathBuf, default: &str) {
 pub fn database_url() -> anyhow::Result<Option<String>> {
     let Some(dir) = dir() else { return Ok(None) };
     read_env_file(&dir.join(ENV_FILE))
+}
+
+/// The database URL a command uses. `--url` wins. Otherwise, in a setup's
+/// directory, its env file wins over `ROWBIT_DATABASE_URL`, which may be
+/// left in the shell from the demo, and Rowbit says so when they differ.
+pub fn pick_url(given: Option<String>) -> anyhow::Result<Option<String>> {
+    if URL_FLAG.get().copied().unwrap_or(false) {
+        return Ok(given);
+    }
+    let file = database_url()?;
+    Ok(match (given, file) {
+        (Some(shell), Some(file)) if shell != file => {
+            if let Some(dir) = dir() {
+                eprintln!(
+                    "rowbit: using the database URL in {}, not ROWBIT_DATABASE_URL from your shell",
+                    dir.join(ENV_FILE).display()
+                );
+            }
+            Some(file)
+        }
+        (given, file) => given.or(file),
+    })
 }
 
 /// The URL in an `env` file, refusing one that others can read.
@@ -160,6 +218,14 @@ mod tests {
         assert_eq!(rest, args(&["rowbit", "propose", "--", "--dir"]));
         assert_eq!(dir, None);
         assert!(take_dir(args(&["rowbit", "serve", "--dir"])).is_err());
+        assert_eq!(
+            command(&args(&["rowbit", "--dir", "x", "setup"])),
+            (Some("setup".into()), true)
+        );
+        assert_eq!(
+            command(&args(&["rowbit", "changes", "--dir", "x"])),
+            (Some("changes".into()), false)
+        );
     }
 
     #[test]

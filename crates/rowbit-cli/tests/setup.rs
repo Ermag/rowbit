@@ -41,8 +41,12 @@ impl Case {
     }
 
     fn run_in(&self, cwd: &Path, args: &[&str]) -> (bool, String) {
-        let out = Command::new(env!("CARGO_BIN_EXE_rowbit"))
-            .args(args)
+        self.run_with(cwd, args, &[])
+    }
+
+    fn run_with(&self, cwd: &Path, args: &[&str], vars: &[(&str, &str)]) -> (bool, String) {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_rowbit"));
+        cmd.args(args)
             .current_dir(cwd)
             .env("HOME", &self.home)
             .env("PATH", "/bin")
@@ -53,9 +57,11 @@ impl Case {
             .env_remove("ROWBIT_DIR")
             .env_remove("ROWBIT_SERVER_CONFIG")
             .env_remove("ROWBIT_POLICY")
-            .env_remove("ROWBIT_STORE")
-            .output()
-            .unwrap();
+            .env_remove("ROWBIT_STORE");
+        for (k, v) in vars {
+            cmd.env(k, v);
+        }
+        let out = cmd.output().unwrap();
         let text = format!(
             "{}{}",
             String::from_utf8_lossy(&out.stdout),
@@ -108,16 +114,33 @@ async fn sets_up_and_other_commands_find_it(var: &str, table: &str) {
         !ok && out.contains("without a terminal, pass --yes"),
         "{out}"
     );
+    let (ok, out) = c.run(&["setup", "--yes", "--no-client"]);
+    assert!(
+        !ok && out.contains("put it in ROWBIT_DATABASE_URL"),
+        "{out}"
+    );
+    // The demo's URL left in the shell isn't taken for yours.
+    let demo = "mysql://rowbit:rowbit-quickstart@127.0.0.1:33070/shop";
+    let (ok, out) = c.run_with(
+        &c.work,
+        &["setup", "--yes", "--no-client"],
+        &[("ROWBIT_DATABASE_URL", demo)],
+    );
+    assert!(!ok && out.contains("the demo's database"), "{out}");
 
-    let (ok, out) = c.run(&[
-        "setup",
-        "--yes",
-        "--database-url",
-        &url,
-        "--no-client",
-        "--no-service",
-    ]);
+    // The URL from the environment, not the command line; a Cursor to connect.
+    std::fs::create_dir_all(c.home.join(".cursor")).unwrap();
+    let (ok, out) = c.run_with(
+        &c.work,
+        &["setup", "--yes", "--client", "cursor", "--no-service"],
+        &[("ROWBIT_DATABASE_URL", &url)],
+    );
     assert!(ok, "{out}");
+    assert!(out.contains("(from ROWBIT_DATABASE_URL)"), "{out}");
+    assert!(
+        out.contains("Added rowbit to ") && out.contains(".cursor/mcp.json as cursor"),
+        "{out}"
+    );
     assert!(out.contains("Connected to "), "{out}");
     assert!(out.contains("Review page: http://127.0.0.1:"), "{out}");
     assert!(out.contains("password: "), "{out}");
@@ -128,7 +151,7 @@ async fn sets_up_and_other_commands_find_it(var: &str, table: &str) {
     assert_eq!(env, format!("ROWBIT_DATABASE_URL={url}\n"));
     let policy = std::fs::read_to_string(dir.join("rowbit.yml")).unwrap();
     assert!(
-        policy.contains("coding-agent:") && policy.contains("# Tables in rowbit_test"),
+        policy.contains("cursor:") && policy.contains("# Tables in rowbit_test"),
         "{policy}"
     );
     assert!(
@@ -141,7 +164,7 @@ async fn sets_up_and_other_commands_find_it(var: &str, table: &str) {
     let (ok, out) = c.run(&[
         "propose",
         "--agent",
-        "coding-agent",
+        "cursor",
         &format!("UPDATE {table} SET status = 'done' WHERE id = 1"),
     ]);
     assert!(ok && out.contains("\"state\":\"held\""), "{out}");
@@ -152,25 +175,52 @@ async fn sets_up_and_other_commands_find_it(var: &str, table: &str) {
         &elsewhere,
         &["changes", "--dir", dir.to_str().unwrap(), "--state", "held"],
     );
-    assert!(ok && out.contains("coding-agent"), "{out}");
+    assert!(ok && out.contains("cursor"), "{out}");
 
-    // Running it again keeps the files and the page password.
-    let before = std::fs::read(dir.join("rowbit.yml")).unwrap();
+    // A URL left in the shell doesn't beat the setup's own.
+    let (ok, out) = c.run_with(
+        &c.work,
+        &[
+            "propose",
+            "--agent",
+            "cursor",
+            &format!("UPDATE {table} SET status = 'x' WHERE id = 2"),
+        ],
+        &[("ROWBIT_DATABASE_URL", demo)],
+    );
+    assert!(
+        ok && out.contains("not ROWBIT_DATABASE_URL from your shell"),
+        "{out}"
+    );
+
+    // Running it again keeps the files and the page password, leaves the
+    // connected client alone and adds a new one as its own agent.
+    std::fs::create_dir_all(c.home.join(".codeium/windsurf")).unwrap();
     let (ok, out) = c.run(&[
         "setup",
         "--yes",
-        "--database-url",
-        &url,
-        "--no-client",
+        "--client",
+        "cursor",
+        "--client",
+        "windsurf",
         "--no-service",
     ]);
     assert!(ok && out.contains("Found the setup in"), "{out}");
+    assert!(out.contains("(from this setup)"), "{out}");
     assert!(out.contains("password as set before"), "{out}");
-    assert_eq!(std::fs::read(dir.join("rowbit.yml")).unwrap(), before);
+    assert!(out.contains("Cursor already has Rowbit"), "{out}");
+    assert!(out.contains("Added agent windsurf"), "{out}");
+    assert!(out.contains("mcp_config.json as windsurf"), "{out}");
+    assert!(!out.contains("Couldn't connect"), "{out}");
+    let policy = std::fs::read_to_string(dir.join("rowbit.yml")).unwrap();
+    assert!(
+        policy.contains("cursor:") && policy.contains("windsurf:"),
+        "{policy}"
+    );
 
     // An env file others can read is refused.
     std::fs::set_permissions(dir.join("env"), std::fs::Permissions::from_mode(0o644)).unwrap();
-    let (ok, out) = c.run(&["propose", "--agent", "coding-agent", "UPDATE x SET y = 1"]);
+    let (ok, out) = c.run(&["propose", "--agent", "cursor", "UPDATE x SET y = 1"]);
     assert!(!ok && out.contains("chmod 600"), "{out}");
 
     let _ = std::fs::remove_dir_all(c.home.parent().unwrap());
@@ -207,9 +257,8 @@ fn refuses_what_it_cant_use() {
         "mysql://a:b@h/app",
         "--no-client",
     ]);
-    assert!(
-        !ok && out.contains("isn't empty and holds no setup"),
-        "{out}"
-    );
+    assert!(!ok && out.contains("holds none of Rowbit's files"), "{out}");
+    let (ok, out) = c.run(&["--dir", "/tmp", "setup", "--yes"]);
+    assert!(!ok && out.contains("doesn't take --dir before it"), "{out}");
     let _ = std::fs::remove_dir_all(c.home.parent().unwrap());
 }
