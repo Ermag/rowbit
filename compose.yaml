@@ -3,6 +3,7 @@
 #   docker compose up -d --wait
 #   export ROWBIT_TEST_MARIADB_URL=mysql://rowbit:rowbit@127.0.0.1:33061/rowbit_test
 #   export ROWBIT_TEST_MYSQL_URL=mysql://rowbit:rowbit@127.0.0.1:33062/rowbit_test
+#   export ROWBIT_TEST_TLS_URL=mysql://rowbit:rowbit@127.0.0.1:33063/rowbit_test
 #   cargo test --workspace
 name: rowbit-test
 
@@ -15,6 +16,25 @@ services:
       MARIADB_USER: rowbit
       MARIADB_PASSWORD: rowbit
     ports: ["127.0.0.1:33061:3306"]
+    volumes: ["./scripts/test-db-init.sql:/docker-entrypoint-initdb.d/rowbit.sql:ro"]
+    tmpfs: [/var/lib/mysql]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  # Refuses connections without TLS, as managed databases do. MariaDB 11.4
+  # makes its own self-signed certificate.
+  mariadb-tls:
+    image: mariadb:11.4
+    command: ["--require-secure-transport=ON"]
+    environment:
+      MARIADB_ROOT_PASSWORD: rowbit
+      MARIADB_DATABASE: rowbit_test
+      MARIADB_USER: rowbit
+      MARIADB_PASSWORD: rowbit
+    ports: ["127.0.0.1:33063:3306"]
     volumes: ["./scripts/test-db-init.sql:/docker-entrypoint-initdb.d/rowbit.sql:ro"]
     tmpfs: [/var/lib/mysql]
     healthcheck:
