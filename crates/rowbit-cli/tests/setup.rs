@@ -218,6 +218,39 @@ async fn sets_up_and_other_commands_find_it(var: &str, table: &str) {
         "{policy}"
     );
 
+    // ROWBIT_DATABASE_URL set on purpose wins over the setup's own URL, so a
+    // re-run switches users. An application's user gets no grants printed
+    // for it, a user of Rowbit's own suggested, and setup ends not ready.
+    let app = url.replacen("//rowbit:rowbit@", "//limited:limited@", 1);
+    let (ok, out) = c.run_with(
+        &c.work,
+        &["setup", "--yes", "--no-client", "--no-service"],
+        &[("ROWBIT_DATABASE_URL", &app)],
+    );
+    assert!(!ok, "{out}");
+    assert!(out.contains("(from ROWBIT_DATABASE_URL)"), "{out}");
+    assert!(
+        !out.contains("TO 'limited'"),
+        "no grants for the app's user: {out}"
+    );
+    assert!(out.contains("CREATE USER 'rowbit'@'%'"), "{out}");
+    assert!(out.contains("<a new password>"), "{out}");
+    assert!(out.contains("not a user of its own"), "{out}");
+    assert!(
+        out.contains("not ready: limited@% lacks TRIGGER, PROCESS"),
+        "{out}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("env")).unwrap(),
+        format!("ROWBIT_DATABASE_URL={app}\n")
+    );
+    let (ok, out) = c.run_with(
+        &c.work,
+        &["setup", "--yes", "--no-client", "--no-service"],
+        &[("ROWBIT_DATABASE_URL", &url)],
+    );
+    assert!(ok && !out.contains("not ready"), "{out}");
+
     // An env file others can read is refused.
     std::fs::set_permissions(dir.join("env"), std::fs::Permissions::from_mode(0o644)).unwrap();
     let (ok, out) = c.run(&["propose", "--agent", "cursor", "UPDATE x SET y = 1"]);

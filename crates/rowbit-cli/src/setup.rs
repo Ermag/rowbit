@@ -337,12 +337,29 @@ pub async fn run(a: SetupArgs) -> anyhow::Result<()> {
         _ => {}
     }
     say("Writes wait for you on the review page until you add rules to rowbit.yml.");
+    say(&format!(
+        "Agents can read every table {} can. Limit what each one sees with scopes: https://ermag.github.io/rowbit/docs/spec/policy.html#scopes",
+        found.account
+    ));
     if dir != place::home()?.join("default") {
         say(&format!(
             "Other commands find this setup with --dir {}.",
             quoted(&dir)
         ));
     }
+    if !found.own_user {
+        println!();
+        say(&format!(
+            "Rowbit is connecting as {}, not a user of its own. Once an administrator has made one with the statements above, run rowbit setup again and switch to it, or set ROWBIT_DATABASE_URL to its URL and run rowbit setup.",
+            found.account
+        ));
+    }
+    anyhow::ensure!(
+        found.missing.is_empty(),
+        "set up, but not ready: {} lacks {}, so Rowbit refuses every write until an administrator grants it",
+        found.account,
+        found.missing.join(", ")
+    );
     Ok(())
 }
 
@@ -378,6 +395,12 @@ fn make_private_dir(dir: &Path) -> anyhow::Result<()> {
 /// What the database said when Rowbit connected.
 struct Found {
     tables: Vec<String>,
+    /// The user Rowbit connects as.
+    account: String,
+    /// Whether it's a user of Rowbit's own.
+    own_user: bool,
+    /// Privileges Rowbit needs that it lacks.
+    missing: Vec<String>,
 }
 
 /// Picks the database URL, checks it, and returns it with what was found.
@@ -458,7 +481,7 @@ async fn database(a: &SetupArgs, ask: &Ask, dir: &Path) -> anyhow::Result<(Strin
             }
             Next::Switch(suggested) => {
                 if ask.yes(
-                    "Switch to that user now? Run the statements above first.",
+                    &format!("Switch to that user now? Yes once an administrator has run the statements above; no carries on as {}.", checked.account),
                     false,
                 )? {
                     previous = Some(url);
@@ -601,22 +624,29 @@ fn first_url(a: &SetupArgs, dir: &Path) -> anyhow::Result<Option<(String, String
     if let Some(url) = &a.database_url {
         return Ok(Some((url.clone(), "--database-url".into())));
     }
+    // Set on purpose, it wins over the setup's own URL, so a re-run can
+    // switch users; left from the demo, it doesn't.
+    let shell = std::env::var("ROWBIT_DATABASE_URL")
+        .ok()
+        .filter(|u| !u.is_empty());
+    if let Some(url) = shell.clone().filter(|u| !is_demo(u)) {
+        return Ok(Some((url, "ROWBIT_DATABASE_URL".into())));
+    }
     if let Some(url) = place::read_env_file(&dir.join(place::ENV_FILE))? {
         return Ok(Some((url, "this setup".into())));
     }
-    for var in ["ROWBIT_DATABASE_URL", "DATABASE_URL"] {
-        if let Ok(url) = std::env::var(var)
-            && !url.is_empty()
-        {
-            return Ok(Some((url, var.into())));
-        }
+    if let Ok(url) = std::env::var("DATABASE_URL")
+        && !url.is_empty()
+    {
+        return Ok(Some((url, "DATABASE_URL".into())));
     }
     if let Ok(src) = std::fs::read_to_string(".env")
         && let Some(url) = place::env_value(&src, "DATABASE_URL")
     {
         return Ok(Some((url, "DATABASE_URL in .env".into())));
     }
-    Ok(None)
+    // The demo's URL, offered only to say it isn't yours.
+    Ok(shell.map(|url| (url, "ROWBIT_DATABASE_URL".into())))
 }
 
 /// The URL as Rowbit will use it, or why it can't.
@@ -778,10 +808,16 @@ async fn check(url: &str) -> anyhow::Result<Checked> {
         tables.len(),
         if tables.len() == 1 { "" } else { "s" }
     ));
+    let compared = compare(&have.grants, &database);
     Ok(Checked {
-        found: Found { tables },
+        found: Found {
+            tables,
+            account: account.to_string(),
+            own_user: account.user == "rowbit",
+            missing: compared.missing.clone(),
+        },
         account,
-        compared: compare(&have.grants, &database),
+        compared,
         database,
         roles: role.is_some_and(|r| !r.eq_ignore_ascii_case("NONE")),
     })
@@ -889,7 +925,10 @@ fn grant_lines(database: &str, to: &str, privileges: &[String]) -> Vec<String> {
 /// terminal the statement gets a placeholder instead.
 fn report(url: &str, c: &Checked, asking: bool) -> Next {
     let r = &c.compared;
-    if !r.missing.is_empty() {
+    let own = c.account.user == "rowbit";
+    // Grants for an application's user would widen it; it gets a user of
+    // Rowbit's own suggested instead, below.
+    if own && !r.missing.is_empty() {
         say(&format!(
             "{} lacks what Rowbit needs (see docs/privileges.md). An administrator can add it with:",
             c.account
@@ -962,7 +1001,7 @@ fn report(url: &str, c: &Checked, asking: bool) -> Next {
     match password {
         Some(p) => Next::Switch(with_user(url, "rowbit", &p)),
         None => {
-            say("Then run rowbit setup again with that user's URL.");
+            say("Then run rowbit setup again with that user's URL in ROWBIT_DATABASE_URL.");
             Next::Done
         }
     }
@@ -1357,7 +1396,12 @@ mod tests {
     #[test]
     fn report_switches_to_rowbits_own_user_only_on_a_terminal() {
         let checked = |user: &str, compared: Compared| Checked {
-            found: Found { tables: vec![] },
+            found: Found {
+                tables: vec![],
+                account: format!("{user}@%"),
+                own_user: user == "rowbit",
+                missing: compared.missing.clone(),
+            },
             account: Account {
                 user: user.into(),
                 host: "%".into(),

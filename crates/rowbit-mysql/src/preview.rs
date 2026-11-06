@@ -180,7 +180,7 @@ async fn run(
         && let Some(&k) = written.iter().find(|w| table.primary_key.contains(w))
     {
         return refuse(format!(
-            "{} is part of the primary key; v0.1 does not change keys",
+            "{} is part of the primary key; Rowbit doesn't change keys",
             table.columns[k].name
         ));
     }
@@ -510,7 +510,7 @@ async fn refuse_side_effects(
     };
     let Some(ref_name) = innodb_name(&table.database, &table.name) else {
         return refuse(format!(
-            "v0.1 cannot check foreign keys of {qualified}: use ASCII letters, digits and _ \
+            "Rowbit can't check foreign keys of {qualified}: use ASCII letters, digits and _ \
              in its database and table names"
         ));
     };
