@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Ermag/rowbit",
+  "title": "Rowbit",
+  "description": "Preview, approve and undo AI agents' writes to MariaDB and MySQL",
+  "repository": {
+    "url": "https://github.com/Ermag/rowbit",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/ermag/rowbit:0.0.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

@@ -214,6 +214,23 @@ For agents, next to the pages:
 - `llms.txt`: what Rowbit is in a paragraph, then a link to each page's Markdown with one line on it;
 - `llms-full.txt`: every page in one file.
 
+## The container image
+
+`ghcr.io/ermag/rowbit:<version>` (and `:latest` for releases that aren't pre-releases) holds the release's static Linux binary for `linux/amd64` and `linux/arm64`, on a distroless base with CA certificates and no shell, running as a non-root user. The release workflow builds it from the archives it has already checked against `SHA256SUMS`, so the image holds exactly the binary the release ships, and attests its build provenance (`gh attestation verify oci://ghcr.io/ermag/rowbit:<version> --repo Ermag/rowbit`).
+
+`ROWBIT_DIR` is `/data`, so mounting a setup's directory there gives every command its files and the database URL in the `env` file. The mounted files belong to the host user, so the container runs as that user:
+
+```sh
+docker run -i --rm --user "$(id -u):$(id -g)" -v ~/.rowbit/default:/data \
+  ghcr.io/ermag/rowbit mcp --agent claude-code
+```
+
+`rowbit serve` in a container listens beyond loopback, so it needs reviewers signing in through an identity provider ([rowbit-server.yml](server.md#signing-in)), as on any server: `--listen 0.0.0.0:8080` with `-p 8080:8080`.
+
+## The MCP Registry
+
+Rowbit is listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.Ermag/rowbit`, an OCI package pointing at the image, over stdio. `server.json` in the repository holds the listing; the release workflow sets its version to the tag's and publishes it with `mcp-publisher` (checked against its Sigstore signature), signing in through GitHub's OIDC token, after the release and the image are published. The image carries the `io.modelcontextprotocol.server.name` label the Registry checks.
+
 ## Not in v0.2.1
 
 A recording of the real flow on the home page and in the README, Windows binaries, signed and notarized macOS binaries, a Homebrew tap, a container image and an MCP Registry listing, more than one token per agent, upgrading from inside Rowbit, handing out agent tokens from the web UI, a Claude Desktop `.mcpb` bundle, clients beyond the seven above (`--print` covers the rest), and a demo without Docker.
