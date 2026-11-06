@@ -488,10 +488,15 @@ fn enter_url(ask: &Ask) -> anyhow::Result<String> {
     let database = ask.line("  Database:", "")?;
     let user = ask.line("  User:", "")?;
     let password = ask.secret("  Password:")?;
+    let default = if rowbit_mysql::url::is_local(&host) {
+        "n"
+    } else {
+        "v"
+    };
     let tls = match ask
         .line(
-            "  TLS (n: none, r: required, v: required and the certificate checked):",
-            "n",
+            "  TLS (n: none; r: encrypted, certificate not checked, open to interception; v: encrypted and the certificate checked):",
+            default,
         )?
         .to_ascii_lowercase()
         .as_str()
@@ -661,6 +666,12 @@ async fn check(url: &str) -> anyhow::Result<Checked> {
     let database = crate::mysql_database(url)?;
     let opts = rowbit_mysql::url::opts(url).context("the database URL isn't valid")?;
     let opts_used = opts.clone();
+    if opts.ssl_opts().is_none() && !rowbit_mysql::url::is_local(opts.ip_or_hostname()) {
+        say(&format!(
+            "The URL doesn't ask for TLS, so the password and data cross the network to {} in plain text. Add ssl-mode=VERIFY_IDENTITY if the server supports TLS.",
+            opts.ip_or_hostname()
+        ));
+    }
     let mut conn = Conn::new(opts)
         .await
         .with_context(|| format!("Couldn't connect to {}", mask(url)))?;
