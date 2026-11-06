@@ -8,6 +8,7 @@ mod preview;
 mod query;
 pub mod schema;
 pub mod statement;
+pub mod url;
 
 pub use apply::ApplyError;
 pub use preview::{PreviewError, PreviewLimits, db_error_code, server_message};
@@ -29,7 +30,7 @@ pub struct MySqlAdapter {
 impl MySqlAdapter {
     /// `url` is a `mysql://user:password@host:port/database` URL.
     pub fn new(url: &str) -> Result<Self, Error> {
-        let opts = mysql_async::Opts::from_url(url)?;
+        let opts = url::opts(url)?;
         Ok(Self {
             pool: mysql_async::Pool::new(opts.clone()),
             opts,

@@ -177,7 +177,7 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
     )?;
 
     let setup = crate::Setup {
-        url: marker.database_url.clone(),
+        url: Some(marker.database_url.clone()),
         policy: dir.join("rowbit.yml"),
         store: dir.join("rowbit.db"),
     };

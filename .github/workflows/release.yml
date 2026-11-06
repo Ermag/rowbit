@@ -96,7 +96,7 @@ jobs:
       - name: Pack
         run: |
           mkdir "$NAME"
-          cp target/${{ matrix.target }}/release/rowbit LICENSE README.md CHANGELOG.md "$NAME/"
+          cp target/${{ matrix.target }}/release/rowbit LICENSE THIRD-PARTY.md README.md CHANGELOG.md "$NAME/"
           tar -czf "$NAME.tar.gz" "$NAME"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

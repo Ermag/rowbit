@@ -5,6 +5,9 @@
 
 pub const MARIADB: &str = "ROWBIT_TEST_MARIADB_URL";
 pub const MYSQL: &str = "ROWBIT_TEST_MYSQL_URL";
+/// A MariaDB that refuses connections without TLS.
+#[allow(dead_code)]
+pub const TLS: &str = "ROWBIT_TEST_TLS_URL";
 
 pub fn url(var: &str) -> Option<String> {
     match std::env::var(var) {

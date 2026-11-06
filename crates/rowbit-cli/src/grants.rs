@@ -6,8 +6,8 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 
 use anyhow::Context;
+use mysql_async::Conn;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, Opts};
 use rowbit_mysql::grants::{self, Account, Catalog, Compiled, Current, Diff};
 use rowbit_policy::{PolicyFile, agent_user};
 use rowbit_store::Store;
@@ -41,6 +41,16 @@ pub struct Admin {
     /// database passwords
     #[arg(long, env = "ROWBIT_STORE", default_value = "rowbit.db")]
     store: PathBuf,
+}
+impl Admin {
+    /// Puts Rowbit's files in the directory `--dir` chose.
+    pub fn place(&mut self) -> anyhow::Result<()> {
+        crate::place::file(&mut self.config, "rowbit-server.yml");
+        crate::place::file(&mut self.policy, "rowbit.yml");
+        crate::place::file(&mut self.store, "rowbit.db");
+        self.url = crate::place::pick_url(self.url.take())?;
+        Ok(())
+    }
 }
 
 #[derive(clap::Args)]
@@ -112,7 +122,7 @@ impl Plan {
 }
 
 async fn connect(url: &str) -> anyhow::Result<Conn> {
-    let opts = Opts::from_url(url).context("the database URL is not valid")?;
+    let opts = rowbit_mysql::url::opts(url).context("the database URL is not valid")?;
     Ok(Conn::new(opts).await?)
 }
 

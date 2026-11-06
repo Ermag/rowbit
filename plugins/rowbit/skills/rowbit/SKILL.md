@@ -41,6 +41,7 @@ The result has a `state`:
 - Never retry a held or refused write in another shape to get it through: not split into smaller batches to stay under a size rule, not rewritten to dodge a rule, not as a schema change. A rule that holds or refuses a write is the team's decision; the person decides, not you.
 - Never look for another way to the database: no connection strings, no `mysql` client, no ORM scripts, no reading Rowbit's state file or settings. If Rowbit is the only way in, that's on purpose.
 - Never claim a held change is done. It's done when `change_status` says `applied`.
+- Never run `rowbit approve`, `rowbit reject` or `rowbit undo`, with or without `--scripted`. Deciding on a change is the person's job, not yours.
 - Never ask the person for Rowbit's review password or to approve on your behalf.
 
 ## When something's unclear
