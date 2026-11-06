@@ -13,9 +13,9 @@ You need macOS or Linux (Windows through WSL), a MariaDB or MySQL database you c
 
 | Database | Status |
 |---|---|
-| MariaDB 11.4, MySQL 8.4 | Supported, tested on every change |
+| MariaDB 11.4, MySQL 8.4 | Supported, tested on every change, with or without TLS |
 | Other MariaDB and MySQL versions | Likely to work, untested; tell us which you run |
-| Databases that require TLS (PlanetScale, most managed cloud MySQL) | Not yet: Rowbit connects without TLS |
+| Managed MySQL that requires TLS (PlanetScale, cloud providers) | Supported: keep the URL's `ssl-mode`, `sslaccept` or `ssl` parameter ([which ones](spec/setup.md#the-database-url)) |
 | PostgreSQL | Planned, next |
 | MongoDB | Exploring: documents map to rows and filters to `WHERE`, so preview, rules and undo carry over |
 | Redis | Exploring: there are no rows to preview, so rules would match commands and key patterns |

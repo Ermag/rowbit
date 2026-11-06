@@ -199,7 +199,7 @@ The plugin holds the skill only, not an MCP entry: `rowbit connect` sets up the 
 3. The clients Rowbit connects to, linking to their part of the docs, with the install buttons.
 4. "Set it up with your agent": a prompt that has an agent install Rowbit by following `llms.txt` and tell the person how to set it up. Next to it: the person runs `rowbit setup` in their own terminal, because the agent must not hold the database's credentials or the review password, or edit its own rules.
 5. The interactive demo, on simulated data and labelled so, telling the README's orders story.
-6. How it works, matching what ships: MCP server, exact preview on a temporary copy, rules and people, applying what was approved, undo, scopes, shadow mode, the review UI. What's next (TLS connections, PostgreSQL, budgets, the MySQL wire protocol proxy) under its own heading.
+6. How it works, matching what ships: MCP server, exact preview on a temporary copy, rules and people, applying what was approved, undo, scopes, shadow mode, the review UI. What's next (PostgreSQL, budgets, the MySQL wire protocol proxy) under its own heading.
 7. Links to the docs, the changelog, the spec and the feedback discussion.
 
 CI fails if the page contains phrases that described Rowbit before its first release ("concept", "not released", "rolled back", `docker run`), so the page doesn't drift again.

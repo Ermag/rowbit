@@ -27,7 +27,7 @@ No database to try it on? Choose the sample when setup asks: it runs a shop data
 
 | Database | Status |
 |---|---|
-| MariaDB, MySQL | Supported (MariaDB 11.4 and MySQL 8.4 tested on every change), without TLS for now |
+| MariaDB, MySQL | Supported, over TLS too (MariaDB 11.4 and MySQL 8.4 tested on every change) |
 | PostgreSQL | Planned, next |
 | MongoDB, Redis | Exploring |
 
