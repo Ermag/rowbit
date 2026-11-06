@@ -43,7 +43,7 @@ macOS binaries are not signed or notarized. A binary fetched with `curl`, as the
 2. Downloads `SHA256SUMS` from the latest release, or from `v$ROWBIT_VERSION` if that is set, and takes the archive name for the target from it. Downloads are HTTPS only, redirects included. `ROWBIT_DOWNLOAD_URL` replaces the release's address, for a mirror or for testing a local build, and then also allows HTTP.
 3. Downloads the archive into a new temporary directory, checks it against `SHA256SUMS`, and refuses on any mismatch. This catches a broken download, not a compromised release: both files come from the same place. The quickstart says how to check provenance with `gh attestation verify`.
 4. Installs `rowbit` to `$ROWBIT_INSTALL_DIR`, by default `~/.local/bin`, creating the directory, replacing a `rowbit` already there and never using `sudo`. If the directory isn't on `PATH`, it prints the line to add to the shell's profile and changes no profile itself.
-5. Prints `rowbit --version` from the installed binary and the next command, and removes the temporary directory. The next command is `rowbit demo` when the installed binary is the one `PATH` finds; when the directory isn't on `PATH` yet, it is the full path (`~/.local/bin/rowbit demo`), which works before the profile is changed; and when another `rowbit` comes first on `PATH` (an older `cargo install`), the script says which and how to remove it.
+5. Prints `rowbit --version` from the installed binary and the next command, and removes the temporary directory. The next command is `rowbit setup` when the installed binary is the one `PATH` finds; when the directory isn't on `PATH` yet, it is the full path (`~/.local/bin/rowbit setup`), which works before the profile is changed; and when another `rowbit` comes first on `PATH` (an older `cargo install`), the script says which and how to remove it.
 
 Upgrading is running it again, after stopping every Rowbit process and backing up `rowbit.db` (see [Running Rowbit](../operating.md#upgrading)).
 
@@ -235,6 +235,28 @@ For agents, next to the pages:
 - every page's Markdown at the same path with `.md`, and a link to it on the page;
 - `llms.txt`: what Rowbit is in a paragraph, then a link to each page's Markdown with one line on it;
 - `llms-full.txt`: every page in one file.
+
+## The container image
+
+`ghcr.io/ermag/rowbit:<version>` (and `:latest` for releases that aren't pre-releases) holds the release's static Linux binary for `linux/amd64` and `linux/arm64`, on a distroless base, pinned by digest, with CA certificates and no shell, running as a non-root user. The release workflow builds it from the archives it has already checked against `SHA256SUMS`, so the image holds exactly the binary the release ships. On a tag it pushes the image by digest, runs `--version` from what it pushed on both platforms, and only after the GitHub Release is published tags it and attests its build provenance (`gh attestation verify oci://ghcr.io/ermag/rowbit:<version> --repo Ermag/rowbit`). A version's tag is never moved: the workflow refuses to tag a version that already has an image.
+
+`ROWBIT_DIR` is `/data`, so mounting a setup's directory there gives every command its files and the database URL in the `env` file. The mounted files belong to the host user, so on Linux the container runs as that user. Rowbit writes only to `/data`, so the rest of the container can be read-only, with no capabilities:
+
+```sh
+docker run -i --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --user "$(id -u):$(id -g)" -v ~/.rowbit/default:/data \
+  ghcr.io/ermag/rowbit mcp --agent claude-code
+```
+
+`rowbit serve` in a container listens beyond loopback, so it needs reviewers signing in through an identity provider ([rowbit-server.yml](server.md#signing-in)), as on any server: `--listen 0.0.0.0:8080` with `-p 8080:8080`.
+
+## The MCP Registry
+
+Rowbit is listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.Ermag/rowbit`, an OCI package pointing at the image, over stdio. The listing asks for the setup's directory, mounted at `/data`, the agent's id for `mcp --agent`, and the user to run as, so a client installing it runs the command above. The release workflow checks the listing on every run. `server.json` in the repository holds the listing; the release workflow sets its version to the tag's and publishes it with `mcp-publisher` (checked against its Sigstore signature), signing in through GitHub's OIDC token, after the release and the image are published. The image carries the `io.modelcontextprotocol.server.name` label the Registry checks.
+
+## Not in v0.2.2
+
+Windows binaries, signed and notarized macOS binaries, a Homebrew tap, a Claude Desktop `.mcpb` bundle, more than one token per agent, handing out agent tokens or adding database connections from the web UI, named connections (several databases behind one Rowbit, v0.3), client certificates for the database, PostgreSQL, and auditing reads.
 
 ## Not in v0.2.1
 

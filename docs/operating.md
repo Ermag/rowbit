@@ -10,6 +10,18 @@ What happens day to day: outages, upgrades, and how long data is kept. The [quic
 
 They share the state file, `rowbit.db`, and the database. Nothing else.
 
+## In a container
+
+Each release is also an image, `ghcr.io/ermag/rowbit`, for `amd64` and `arm64`. Mount the directory `rowbit setup` made at `/data`. On Linux, run as your own user, so Rowbit can read its files; Rowbit writes only to `/data`, so the rest can be read-only:
+
+```sh
+docker run -i --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --user "$(id -u):$(id -g)" -v ~/.rowbit/default:/data \
+  ghcr.io/ermag/rowbit mcp --agent claude-code
+```
+
+That's the command an MCP client runs for an agent over stdio. `rowbit serve` in a container needs reviewers to sign in through your identity provider, since it listens beyond loopback; see [the container image](spec/setup.md#the-container-image).
+
 ## When Rowbit is down
 
 Rowbit fails closed: when it can't do its job, writes don't happen.
@@ -42,4 +54,4 @@ Notification deliveries are kept in the same file. They hold no row values.
 | An agent's MCP token | `rowbit agents token <agent>` (the old one stops working) |
 | Scoped agents' database passwords | `rowbit grants apply --rotate-passwords` |
 | OIDC client secret, webhook secrets, Slack URL | Change the environment variable and restart `rowbit serve` |
-| Rowbit's own database password | Change it in the database and `ROWBIT_DATABASE_URL`, then restart every process |
+| Rowbit's own database password | Change it in the database, then in `~/.rowbit/<name>/env` (or run `rowbit setup` again with the new URL in `ROWBIT_DATABASE_URL`), or in `ROWBIT_DATABASE_URL` where you set it yourself, then restart every process |

@@ -18,11 +18,14 @@ Scripts that run `rowbit approve`, `reject` or `undo` without a terminal need `-
 - `rowbit setup` sets Rowbit up in front of your own MariaDB or MySQL database, or runs the sample one: it finds the database URL (`DATABASE_URL`, `.env`), checks the connection and Rowbit's grants and prints the `GRANT` or `CREATE USER` statements to fix them, writes a `rowbit.yml` that holds every write, connects the agent clients you pick, sets the review page's password, and can write a launchd or systemd service. It keeps its files in `~/.rowbit/<name>` and never changes the database itself.
 - `rowbit approve`, `reject` and `undo` refuse to run without a terminal unless `--scripted` is given, so an agent with a shell doesn't decide on its own change by accident.
 - Every command but `demo` and `setup` takes `--dir` (or `ROWBIT_DIR`), and without it uses `~/.rowbit/default` when the current directory has no `rowbit.yml`. In a setup's directory, the database URL comes from its `env` file, over a `ROWBIT_DATABASE_URL` left in the shell.
+- A container image for each release, `ghcr.io/ermag/rowbit`, for `amd64` and `arm64`, built from the release's own binaries, with build provenance.
+- Rowbit is listed in the MCP Registry as `io.github.Ermag/rowbit`.
 - `rowbit connect <client> --check` says whether the client has Rowbit from here and whether Rowbit answers, without changing anything.
 - The Rowbit skill tells an agent without Rowbit's tools to say so and how to fix it, instead of reaching the database another way.
 
 ### Docs
 
+- The install script's last line suggests `rowbit setup`.
 - The quickstart, README and home page start with `rowbit setup` on your own database; the demo walkthrough is now the tour with the sample database.
 - A table of supported and planned databases, and what agents can do through Rowbit: read with `query` and `describe_schema` as well as propose writes.
 

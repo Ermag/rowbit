@@ -108,7 +108,7 @@ agents:
 
   Then configure the MCP client to run `sudo -n -u rowbit /usr/local/bin/rowbit-mcp-coding-agent`. Reviewers run `rowbit` as the `rowbit` user too, or use the review page. Over a network, put the page behind HTTPS; it is plain HTTP.
 - **Sign reviewers in with your identity provider.** The page password is for one machine: `rowbit serve` won't listen beyond loopback without a provider. Copy [examples/rowbit-server.yml](../examples/rowbit-server.yml), register `https://<your Rowbit>/auth/callback` with your provider, and run `rowbit server check`. See [rowbit-server.yml](spec/server.md#signing-in).
-- **Keep the page's password out of logs.** The first `rowbit serve` prints it to standard error, so under a service manager like systemd it would land in the journal. Run the first `serve` in a terminal, or set the password with `rowbit serve --set-password` before installing the service.
+- **Keep the page's password out of logs.** `rowbit setup` sets it and shows it once, so `rowbit serve` doesn't print it. Without setup, the first `rowbit serve` prints it to standard error, which a service manager like systemd would keep in its journal: run that first `serve` in a terminal, or set the password with `rowbit serve --set-password` before installing the service.
 - **Give Rowbit its own database user** with the grants in [database privileges](privileges.md), and nothing else.
 - **Protect `rowbit.db`.** It holds before and after copies of every row a change touched. Rowbit makes it readable by its owner only; back it up like the database. See [the SQLite file](privileges.md#the-sqlite-file).
 - **Give agents scopes.** Without them an agent reads with Rowbit's privileges. See [Scopes](spec/policy.md#scopes) and `rowbit grants`.
