@@ -4,12 +4,19 @@ Written by hand. Each release says what changed for someone running Rowbit, not 
 
 ## Unreleased
 
+### Upgrading from 0.2.1
+
+Scripts that run `rowbit approve`, `reject` or `undo` without a terminal need `--scripted`.
+
 ### Fixed
 
 - `rowbit demo` connected Claude Code in `rowbit-demo/workspace` while the quickstart sent people to `rowbit-demo`, where Claude Code has no Rowbit tools. The demo now ends with the line to paste into a new terminal (`cd <full path>/workspace && claude`), checks that the client shows the entry, and the quickstart opens the agent before the CLI steps.
 
 ### New
 
+- `rowbit setup` sets Rowbit up in front of your own MariaDB or MySQL database, or runs the sample one: it finds the database URL (`DATABASE_URL`, `.env`), checks the connection and Rowbit's grants and prints the `GRANT` or `CREATE USER` statements to fix them, writes a `rowbit.yml` that holds every write, connects the agent clients you pick, sets the review page's password, and can write a launchd or systemd service. It keeps its files in `~/.rowbit/<name>` and never changes the database itself.
+- `rowbit approve`, `reject` and `undo` refuse to run without a terminal unless `--scripted` is given, so an agent with a shell doesn't decide on its own change by accident.
+- Every command but `demo` and `setup` takes `--dir` (or `ROWBIT_DIR`), and without it uses `~/.rowbit/default` when the current directory has no `rowbit.yml`. In a setup's directory, the database URL comes from its `env` file, over a `ROWBIT_DATABASE_URL` left in the shell.
 - `rowbit connect <client> --check` says whether the client has Rowbit from here and whether Rowbit answers, without changing anything.
 - The Rowbit skill tells an agent without Rowbit's tools to say so and how to fix it, instead of reaching the database another way.
 
