@@ -1,6 +1,6 @@
 # Connect your agent
 
-Agents reach Rowbit over MCP. `rowbit connect` sets up an agent client in one command, as one agent from `rowbit.yml`. Run it where `rowbit serve` runs (in the demo, inside `rowbit-demo/`):
+Agents reach Rowbit over MCP. [`rowbit setup`](quickstart.md) connects the clients you pick as it sets Rowbit up, and connects more when run again. `rowbit connect` sets up one client, as one agent from `rowbit.yml`. Run it where `rowbit serve` runs, or pass `--dir` (in the demo, inside `rowbit-demo/`):
 
 ```sh
 rowbit connect                  # lists the clients Rowbit knows, and which are installed
@@ -35,6 +35,19 @@ Ask the agent to fix something in the data. In the demo:
 > The pending orders are stuck. Cancel them.
 
 A typical agent proposes `UPDATE orders SET status = 'cancelled' WHERE status = 'pending'`, which also matches orders placed minutes ago. Rowbit holds it, and the agent hands you a link to the change on the review page, where you see all 1,284 rows before and after. A careful agent may first ask which orders count; say all of them.
+
+## What agents can do
+
+Rowbit gives an agent four tools, and nothing else reaches the database:
+
+| Tool | What it does |
+|---|---|
+| `describe_schema` | The tables the agent may use, their columns, and what it may do with each (read, insert, update, delete, schema changes) |
+| `query` | One read-only `SELECT`, up to 1,000 rows, stopped after 10 seconds. An agent with [scopes](spec/policy.md#scopes) reads as its own database user, so the database itself enforces what it may see |
+| `propose_write` | One `INSERT`, `UPDATE`, `DELETE` or schema change, previewed and then applied, held for a person or refused by the rules. A held change comes back with a link to it on the review page |
+| `change_status` | Where a change the agent proposed stands now |
+
+So agents read and write your data through Rowbit, without the database's credentials. Writes are recorded in the audit log; reads aren't yet.
 
 ## Teach the agent with the skill
 

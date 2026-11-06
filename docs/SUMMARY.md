@@ -4,6 +4,7 @@
 
 [Quickstart](quickstart.md)
 
+- [Tour with the sample database](tour.md)
 - [Connect your agent](connect.md)
 - [Rules: rowbit.yml](spec/policy.md)
 - [How a change moves](spec/change-lifecycle.md)
