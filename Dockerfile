@@ -16,6 +16,7 @@ FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c
 # archives by the release workflow.
 ARG TARGETARCH
 COPY dist/${TARGETARCH}/rowbit /usr/local/bin/rowbit
+COPY LICENSE THIRD-PARTY.md /usr/share/doc/rowbit/
 
 # Where `rowbit setup` put Rowbit's files, mounted from the host: rowbit.yml,
 # rowbit-server.yml, rowbit.db and the env file holding the database URL.

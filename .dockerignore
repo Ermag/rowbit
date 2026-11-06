@@ -2,3 +2,5 @@
 *
 !dist/amd64/rowbit
 !dist/arm64/rowbit
+!LICENSE
+!THIRD-PARTY.md
