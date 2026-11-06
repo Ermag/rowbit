@@ -6,8 +6,8 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 
 use anyhow::Context;
+use mysql_async::Conn;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, Opts};
 use rowbit_mysql::grants::{self, Account, Catalog, Compiled, Current, Diff};
 use rowbit_policy::{PolicyFile, agent_user};
 use rowbit_store::Store;
@@ -122,7 +122,7 @@ impl Plan {
 }
 
 async fn connect(url: &str) -> anyhow::Result<Conn> {
-    let opts = Opts::from_url(url).context("the database URL is not valid")?;
+    let opts = rowbit_mysql::url::opts(url).context("the database URL is not valid")?;
     Ok(Conn::new(opts).await?)
 }
 

@@ -37,6 +37,13 @@ allow = [
 ]
 confidence-threshold = 0.9
 
+# Mozilla's root certificates, which TLS to the database checks servers
+# against. CDLA-Permissive-2.0 covers data and asks only that its notice
+# travels with it.
+[[licenses.exceptions]]
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
 [licenses.private]
 ignore = true
 

@@ -51,6 +51,7 @@ jobs:
           ROWBIT_REQUIRE_DB: "1"
           ROWBIT_TEST_MARIADB_URL: mysql://rowbit:rowbit@127.0.0.1:33061/rowbit_test
           ROWBIT_TEST_MYSQL_URL: mysql://rowbit:rowbit@127.0.0.1:33062/rowbit_test
+          ROWBIT_TEST_TLS_URL: mysql://rowbit:rowbit@127.0.0.1:33063/rowbit_test
         run: cargo test --workspace --locked
       - name: Check the example policy
         run: cargo run --locked -q -p rowbit-cli -- policy check examples/rowbit.yml

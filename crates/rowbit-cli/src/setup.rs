@@ -6,8 +6,8 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use mysql_async::Conn;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, Opts};
 use rowbit_mysql::grants::{self, Account, Grant, Object};
 
 use crate::connect::{self, Client, Env, Scope};
@@ -488,13 +488,25 @@ fn enter_url(ask: &Ask) -> anyhow::Result<String> {
     let database = ask.line("  Database:", "")?;
     let user = ask.line("  User:", "")?;
     let password = ask.secret("  Password:")?;
+    let tls = match ask
+        .line(
+            "  TLS (n: none, r: required, v: required and the certificate checked):",
+            "n",
+        )?
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "r" => "?ssl-mode=REQUIRED",
+        "v" => "?ssl-mode=VERIFY_IDENTITY",
+        _ => "",
+    };
     let userinfo = if password.is_empty() {
         encode(&user)
     } else {
         format!("{}:{}", encode(&user), encode(&password))
     };
     Ok(format!(
-        "mysql://{userinfo}@{host}:{port}/{}",
+        "mysql://{userinfo}@{host}:{port}/{}{tls}",
         encode(&database)
     ))
 }
@@ -581,8 +593,9 @@ const DRIVER_PARAMS: [&str; 19] = [
     "enable_cleartext_plugin",
 ];
 
-/// Drops the parameters other drivers use that Rowbit's doesn't, saying
-/// so, and refuses TLS, which Rowbit doesn't do yet.
+/// Drops the parameters other drivers use that Rowbit doesn't, saying so.
+/// TLS parameters stay, in whichever client's spelling: the adapter reads
+/// them, and refuses what it can't do.
 fn params(url: &str) -> anyhow::Result<String> {
     let Some((base, query)) = url.split_once('?') else {
         return Ok(url.to_owned());
@@ -591,11 +604,11 @@ fn params(url: &str) -> anyhow::Result<String> {
     for pair in query.split('&').filter(|p| !p.is_empty()) {
         let key = pair.split_once('=').map(|(k, _)| k).unwrap_or(pair);
         let lower = key.to_ascii_lowercase();
-        anyhow::ensure!(
-            !(lower.contains("ssl") || lower.contains("tls") || lower.starts_with("verify_")),
-            "the URL asks for TLS ({key}); Rowbit connects without TLS for now, so it can't reach databases that require it"
-        );
-        if DRIVER_PARAMS.contains(&key) {
+        let tls = lower.contains("ssl")
+            || lower.contains("tls")
+            || lower.starts_with("verify_")
+            || lower == "built_in_roots";
+        if tls || DRIVER_PARAMS.contains(&key) {
             kept.push(pair);
         } else {
             say(&format!(
@@ -603,11 +616,13 @@ fn params(url: &str) -> anyhow::Result<String> {
             ));
         }
     }
-    Ok(if kept.is_empty() {
+    let url = if kept.is_empty() {
         base.to_owned()
     } else {
         format!("{base}?{}", kept.join("&"))
-    })
+    };
+    rowbit_mysql::url::opts(&url).context("the database URL isn't valid")?;
+    Ok(url)
 }
 
 /// The URL with its password replaced by `****`.
@@ -644,7 +659,8 @@ struct Checked {
 /// what Rowbit needs. Changes nothing.
 async fn check(url: &str) -> anyhow::Result<Checked> {
     let database = crate::mysql_database(url)?;
-    let opts = Opts::from_url(url).context("the database URL isn't valid")?;
+    let opts = rowbit_mysql::url::opts(url).context("the database URL isn't valid")?;
+    let opts_used = opts.clone();
     let mut conn = Conn::new(opts)
         .await
         .with_context(|| format!("Couldn't connect to {}", mask(url)))?;
@@ -678,7 +694,8 @@ async fn check(url: &str) -> anyhow::Result<Checked> {
     };
     let version = version.split('-').next().unwrap_or(&version);
     say(&format!(
-        "Connected to {engine} {version} as {account}: database {database}, {} table{}.",
+        "Connected to {engine} {version} as {account} ({}): database {database}, {} table{}.",
+        rowbit_mysql::url::describe(&opts_used),
         tables.len(),
         if tables.len() == 1 { "" } else { "s" }
     ));
@@ -1180,9 +1197,10 @@ mod tests {
             "mysql://a@h/d"
         );
         for tls in ["sslaccept=strict", "ssl-mode=REQUIRED", "require_ssl=true"] {
-            let e = prepare(&format!("mysql://a@h/d?{tls}")).unwrap_err();
-            assert!(e.to_string().contains("without TLS"), "{tls}: {e}");
+            let url = format!("mysql://a@h/d?{tls}");
+            assert_eq!(prepare(&url).unwrap(), url);
         }
+        assert!(prepare("mysql://a@h/d?ssl-cert=/c.pem").is_err());
         assert_eq!(encode("p@ss:w/rd é"), "p%40ss%3Aw%2Frd%20%C3%A9");
         assert!(is_demo(
             "mysql://rowbit:rowbit-quickstart@127.0.0.1:33070/shop"
