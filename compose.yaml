@@ -24,18 +24,24 @@ services:
       timeout: 5s
       retries: 60
 
-  # Refuses connections without TLS, as managed databases do. MariaDB 11.4
-  # makes its own self-signed certificate.
+  # Refuses connections without TLS, as managed databases do, with a
+  # certificate from the test CA in scripts/test-tls.
   mariadb-tls:
     image: mariadb:11.4
-    command: ["--require-secure-transport=ON"]
+    command:
+      - --require-secure-transport=ON
+      - --ssl-ca=/etc/mysql/tls/ca.pem
+      - --ssl-cert=/etc/mysql/tls/server.pem
+      - --ssl-key=/etc/mysql/tls/server-key.pem
     environment:
       MARIADB_ROOT_PASSWORD: rowbit
       MARIADB_DATABASE: rowbit_test
       MARIADB_USER: rowbit
       MARIADB_PASSWORD: rowbit
     ports: ["127.0.0.1:33063:3306"]
-    volumes: ["./scripts/test-db-init.sql:/docker-entrypoint-initdb.d/rowbit.sql:ro"]
+    volumes:
+      - ./scripts/test-db-init.sql:/docker-entrypoint-initdb.d/rowbit.sql:ro
+      - ./scripts/test-tls:/etc/mysql/tls:ro
     tmpfs: [/var/lib/mysql]
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]

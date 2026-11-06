@@ -24,37 +24,67 @@ async fn connects_to_mysql_8_4() {
     check(common::MYSQL, Engine::MySql, "8.4.").await;
 }
 
-/// A server that requires TLS: refused in plain text, reached with the
-/// TLS parameters other clients use, and its self-signed certificate
-/// refused wherever the URL asks for it to be checked.
+/// A server that requires TLS, with a certificate from the test CA in
+/// scripts/test-tls: refused in plain text, reached when the URL asks for
+/// TLS, its certificate refused unless the URL names that CA, and accepted,
+/// host name and all, when it does.
 #[tokio::test]
 async fn connects_over_tls_when_the_url_asks() {
     let Some(url) = common::url(common::TLS) else {
         return;
     };
-    let plain = MySqlAdapter::new(&url).unwrap();
-    let e = plain.server_info().await.unwrap_err();
-    assert!(e.to_string().contains("secure"), "{e}");
+    let ca = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scripts/test-tls/ca.pem")
+        .canonicalize()
+        .unwrap();
+    let ca = ca.to_str().unwrap();
+    let connect = |tls: String| {
+        let url = format!("{url}?{tls}");
+        async move {
+            let adapter = MySqlAdapter::new(&url).expect("valid URL");
+            let result = adapter.server_info().await;
+            let _ = adapter.close().await;
+            result
+        }
+    };
 
-    for tls in ["ssl-mode=REQUIRED", "sslaccept=accept_invalid_certs"] {
-        let adapter = MySqlAdapter::new(&format!("{url}?{tls}")).expect("valid URL");
-        let info = adapter
-            .server_info()
+    let e = connect("ssl-mode=DISABLED".into()).await.unwrap_err();
+    assert!(e.to_string().contains("secure transport"), "{e}");
+
+    for tls in [
+        "ssl-mode=REQUIRED",
+        "ssl-mode=PREFERRED",
+        "sslaccept=accept_invalid_certs",
+    ] {
+        let info = connect(tls.into())
             .await
             .unwrap_or_else(|e| panic!("{tls}: {e}"));
         assert_eq!(info.engine, Engine::MariaDb);
-        adapter.close().await.unwrap();
     }
 
+    // Mozilla's roots don't vouch for the test CA: refused for the
+    // certificate, not for want of TLS.
     for tls in [
         "ssl-mode=VERIFY_IDENTITY",
         "sslaccept=strict",
         "require_ssl=true",
     ] {
-        let adapter = MySqlAdapter::new(&format!("{url}?{tls}")).expect("valid URL");
+        let e = connect(tls.into()).await.unwrap_err();
+        let e = e.to_string();
         assert!(
-            adapter.server_info().await.is_err(),
-            "{tls}: a self-signed certificate was accepted"
+            e.contains("certificate") && !e.contains("secure transport"),
+            "{tls}: {e}"
         );
+    }
+
+    for tls in [
+        format!("ssl-mode=VERIFY_IDENTITY&ssl-ca={ca}"),
+        format!("ssl-mode=VERIFY_CA&ssl-ca={ca}"),
+        format!("ssl-ca={ca}"),
+    ] {
+        let info = connect(tls.clone())
+            .await
+            .unwrap_or_else(|e| panic!("{tls}: {e}"));
+        assert_eq!(info.engine, Engine::MariaDb);
     }
 }

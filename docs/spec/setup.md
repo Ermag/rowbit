@@ -55,7 +55,7 @@ It never runs a statement that changes the database or its users. Where somethin
 
 1. **Your database or a sample one.** The first question. `--sample` (or choosing the sample) runs [`rowbit demo`](#rowbit-demo) in the current directory, exactly as if typed, and setup ends there. The demo connects one client, so `--sample` with more than one `--client` is refused.
 2. **Where Rowbit keeps its files.** `~/.rowbit/<name>`, with `--name` defaulting to `default`. The directory is made readable by its owner only. If it holds any of Rowbit's files, even from a run that stopped half way, setup picks it up again: it keeps every file, re-runs the checks below, and leaves clients that are already connected as they are. So running setup again is how you add a client or fix a grant. A directory that exists, isn't empty and holds none of Rowbit's files is refused. Keeping the files outside your projects means an agent working in a project doesn't find Rowbit's database URL there. It doesn't keep them from an agent with a shell running as you: see [Before you use it for real](../quickstart.md#before-you-use-it-for-real).
-3. **The database.** Rowbit offers the first URL it finds, in this order: `--database-url`, this setup's own `env` file (on a re-run), `ROWBIT_DATABASE_URL`, `DATABASE_URL`, then `DATABASE_URL` in a `.env` file in the current directory. It shows the URL with its password masked and says where it came from, and you confirm it. The demo's URL (its fixed `rowbit-quickstart` password), as left in a shell by the quickstart, is named as the demo's and not offered. Otherwise you type the host, port, database and user, which are echoed, the password, which isn't, and whether to use TLS: none, encrypted, or encrypted with the certificate checked.
+3. **The database.** Rowbit offers the first URL it finds, in this order: `--database-url`, this setup's own `env` file (on a re-run), `ROWBIT_DATABASE_URL`, `DATABASE_URL`, then `DATABASE_URL` in a `.env` file in the current directory. It shows the URL with its password masked and says where it came from, and you confirm it. The demo's URL (its fixed `rowbit-quickstart` password), as left in a shell by the quickstart, is named as the demo's and not offered. Otherwise you type the host, port, database and user, which are echoed, the password, which isn't, and whether to use TLS: none, encrypted, or encrypted with the certificate checked (the default for a host that isn't this machine).
    - Only `mysql://` and `mariadb://` URLs are accepted. A `postgres://` URL is refused with a note that PostgreSQL is planned. URL parameters Rowbit doesn't use are left out, and each one is named. TLS parameters stay, in any of the spellings under [The database URL](#the-database-url).
    - It connects and says which server and version answered, as which user, whether over TLS and how much of the certificate is checked, and how many tables the URL's database holds.
    - It compares the user's grants (from `information_schema`) with [Rowbit's database user](../privileges.md#rowbits-database-user), on the URL's database. What's missing, it prints as the `GRANT` statements that add it. What's too much, it names: `GRANT OPTION`, anything on `mysql.*`, global privileges other than `PROCESS`, and privileges on the database beyond what Rowbit needs. Schema privileges (`CREATE`, `ALTER`, `DROP`, `INDEX`) get a softer note, since Rowbit runs approved schema changes with them. Privileges on other databases are named too, since Rowbit and agents without scopes can read them. If the user has active roles, setup says the check can't see what they grant.
@@ -92,12 +92,19 @@ The database URL is `--url` if given. Otherwise, in a setup's directory, it's th
 
 | Parameter | TLS | Certificate checked |
 |---|---|---|
-| none, `ssl-mode=DISABLED`, `ssl-mode=PREFERRED` | no | |
-| `ssl-mode=REQUIRED`, `sslmode=require`, `sslaccept=accept_invalid_certs` | yes | no |
-| `ssl-mode=VERIFY_CA`, `require_ssl=true&verify_identity=false` | yes | its chain |
-| `ssl-mode=VERIFY_IDENTITY`, `sslmode=verify-full`, `sslaccept=strict`, `ssl=true`, `require_ssl=true` | yes | its chain and that it names the host |
+| none, `ssl-mode=DISABLED`, `ssl=false` | no | |
+| `ssl-mode=PREFERRED` or `REQUIRED`, `sslmode=require`, `sslaccept=accept_invalid_certs`, `ssl={"rejectUnauthorized":false}`, `require_ssl=true&verify_ca=false` | yes | no |
+| `ssl-mode=VERIFY_CA` with `ssl-ca` | yes | its chain, to that CA |
+| `ssl-mode=VERIFY_IDENTITY`, `sslmode=verify-full`, `sslaccept=strict`, `ssl=true`, `require_ssl=true`, `ssl-ca` alone | yes | its chain, and that it names the host |
 
-Certificates are checked against Mozilla's root certificates, built into the binary, and the CA file `ssl-ca=<path>` (also `sslrootcert`) names, if any; `ssl-ca` on its own means checking chain and host. `PREFERRED` doesn't try TLS: Rowbit never falls back to plain text, so it encrypts only when asked to. Client certificates (`ssl-cert`, `ssl-key`) aren't supported yet and are refused, as is any other parameter Rowbit doesn't know. Agents' own database users connect the same way as Rowbit's.
+- Rowbit never falls back to plain text, so `PREFERRED` encrypts, as `REQUIRED` does, and fails against a server without TLS.
+- Without `ssl-ca`, certificates are checked against Mozilla's root certificates, built into the binary. With it (also `sslrootcert`, an absolute path), only that CA is trusted, as in other MySQL clients. `VERIFY_CA` needs `ssl-ca`: against Mozilla's roots any publicly issued certificate has a valid chain, so checking the chain alone would stop no one.
+- Parameters that disagree (`sslaccept=strict&ssl-mode=DISABLED`) are refused rather than one winning.
+- With TLS, Rowbit connects over TCP even on this machine, since the driver doesn't use TLS over a Unix socket; `socket=` with TLS is refused. `enable_cleartext_plugin=true` without TLS is refused: it sends the password as it is.
+- Client certificates (`ssl-cert`, `ssl-key`) aren't supported yet and are refused, as is any other parameter Rowbit doesn't know.
+- Agents' own database users connect the same way as Rowbit's.
+
+`rowbit setup` says how it connected, and warns when a URL for another machine has no TLS. Typing the URL in pieces, it asks about TLS, with the certificate checked by default for a host that isn't this machine.
 
 ## `rowbit demo`
 
