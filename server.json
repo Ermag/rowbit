@@ -1,0 +1,75 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Ermag/rowbit",
+  "title": "Rowbit",
+  "description": "Preview, approve and undo AI agents' writes to MariaDB and MySQL",
+  "repository": {
+    "url": "https://github.com/Ermag/rowbit",
+    "source": "github"
+  },
+  "websiteUrl": "https://ermag.github.io/rowbit/",
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/ermag/rowbit:0.0.0",
+      "runtimeHint": "docker",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--interactive",
+          "value": "true",
+          "description": "Keep standard input open: the agent talks to Rowbit over it"
+        },
+        {
+          "type": "named",
+          "name": "--rm",
+          "value": "true",
+          "description": "Remove the container when the agent client stops it"
+        },
+        {
+          "type": "named",
+          "name": "--mount",
+          "value": "type=bind,src={rowbit_dir},dst=/data",
+          "description": "Rowbit's files, from `rowbit setup`",
+          "isRequired": true,
+          "variables": {
+            "rowbit_dir": {
+              "description": "The directory `rowbit setup` made, such as /home/you/.rowbit/default (a full path)",
+              "format": "filepath",
+              "isRequired": true
+            }
+          }
+        },
+        {
+          "type": "named",
+          "name": "--user",
+          "value": "{uid_gid}",
+          "description": "Run as the owner of Rowbit's files, so it can read them (needed on Linux)",
+          "variables": {
+            "uid_gid": {
+              "description": "Your user and group ids as uid:gid, from `id -u` and `id -g`, such as 1000:1000",
+              "isRequired": true
+            }
+          }
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "positional",
+          "valueHint": "command",
+          "value": "mcp"
+        },
+        {
+          "type": "named",
+          "name": "--agent",
+          "description": "The agent's id in rowbit.yml; `rowbit setup` names agents after clients, such as claude-code or cursor",
+          "isRequired": true
+        }
+      ]
+    }
+  ]
+}
