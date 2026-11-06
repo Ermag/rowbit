@@ -393,17 +393,17 @@ async fn database(a: &SetupArgs, ask: &Ask, dir: &Path) -> anyhow::Result<(Strin
                 ask.asking,
                 "unset ROWBIT_DATABASE_URL, or give your database's URL in it"
             );
-            enter_url(ask)?
+            enter_url(ask, None)?
         }
         Some((url, source)) => {
             say(&format!("Database: {} (from {source})", mask(&url)));
             if ask.yes("Use it?", true)? {
                 url
             } else {
-                enter_url(ask)?
+                enter_url(ask, Some(&url))?
             }
         }
-        None if ask.asking => enter_url(ask)?,
+        None if ask.asking => enter_url(ask, None)?,
         None => anyhow::bail!(
             "no database URL: put it in ROWBIT_DATABASE_URL (kept out of your shell history and process list), or pass --database-url"
         ),
@@ -424,7 +424,7 @@ async fn database(a: &SetupArgs, ask: &Ask, dir: &Path) -> anyhow::Result<(Strin
             Ok(checked) => checked,
             Err(e) if !ask.asking => return Err(e),
             Err(e) => {
-                say(&format!("{e:#}"));
+                say(&explain(&e, &url));
                 if let Some(old) = &previous {
                     if ask.yes(
                         "Try again, once an administrator has run the statements?",
@@ -438,7 +438,7 @@ async fn database(a: &SetupArgs, ask: &Ask, dir: &Path) -> anyhow::Result<(Strin
                     went_back = true;
                     continue;
                 }
-                url = enter_url(ask)?;
+                url = enter_url(ask, Some(&url))?;
                 continue;
             }
         };
@@ -481,19 +481,53 @@ fn is_demo(url: &str) -> bool {
 }
 
 /// Asks for the URL a piece at a time, with only the password hidden.
-fn enter_url(ask: &Ask) -> anyhow::Result<String> {
+/// Asks for the URL a piece at a time, with only the password hidden. After
+/// a failed try, `previous` fills in the answers given, so only the wrong
+/// one needs typing again.
+fn enter_url(ask: &Ask, previous: Option<&str>) -> anyhow::Result<String> {
+    let prev = previous.and_then(|u| rowbit_mysql::url::opts(u).ok());
+    let prev_tls = previous.map(|u| {
+        if u.contains("ssl-mode=VERIFY_IDENTITY") {
+            "v"
+        } else if u.contains("ssl-mode=REQUIRED") {
+            "r"
+        } else {
+            "n"
+        }
+    });
     say("Your database (MariaDB or MySQL); only the password is hidden:");
-    let host = ask.line("  Host:", "127.0.0.1")?;
-    let port = ask.line("  Port:", "3306")?;
-    let database = ask.line("  Database:", "")?;
-    let user = ask.line("  User:", "")?;
-    let password = ask.secret("  Password:")?;
-    let default = if rowbit_mysql::url::is_local(&host) {
+    let host = ask.line(
+        "  Host:",
+        prev.as_ref().map_or("127.0.0.1", |o| o.ip_or_hostname()),
+    )?;
+    let port = ask.line(
+        "  Port:",
+        &prev.as_ref().map_or(3306, |o| o.tcp_port()).to_string(),
+    )?;
+    let database = ask.line(
+        "  Database:",
+        prev.as_ref().and_then(|o| o.db_name()).unwrap_or(""),
+    )?;
+    let user = ask.line(
+        "  User:",
+        prev.as_ref().and_then(|o| o.user()).unwrap_or(""),
+    )?;
+    let mut password = ask.secret(if prev.is_some() {
+        "  Password (Enter keeps the last one):"
+    } else {
+        "  Password:"
+    })?;
+    if password.is_empty()
+        && let Some(o) = &prev
+    {
+        password = o.pass().unwrap_or("").to_owned();
+    }
+    let default = prev_tls.unwrap_or(if rowbit_mysql::url::is_local(&host) {
         "n"
     } else {
         "v"
-    };
-    let tls = match ask
+    });
+    let mut tls = match ask
         .line(
             "  TLS (n: none; r: encrypted, certificate not checked, open to interception; v: encrypted and the certificate checked):",
             default,
@@ -501,10 +535,26 @@ fn enter_url(ask: &Ask) -> anyhow::Result<String> {
         .to_ascii_lowercase()
         .as_str()
     {
-        "r" => "?ssl-mode=REQUIRED",
-        "v" => "?ssl-mode=VERIFY_IDENTITY",
-        _ => "",
+        "r" => "?ssl-mode=REQUIRED".to_owned(),
+        "v" => "?ssl-mode=VERIFY_IDENTITY".to_owned(),
+        _ => String::new(),
     };
+    if tls.ends_with("VERIFY_IDENTITY") {
+        let ca = ask.line(
+            "  Your provider's CA file, if it gives you one (Enter for the public CAs):",
+            "",
+        )?;
+        if !ca.is_empty() {
+            let ca = match ca.strip_prefix("~/") {
+                Some(rest) => {
+                    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(rest)
+                }
+                None => PathBuf::from(&ca),
+            };
+            let ca = std::path::absolute(&ca).unwrap_or(ca);
+            tls.push_str(&format!("&ssl-ca={}", encode(&ca.display().to_string())));
+        }
+    }
     let userinfo = if password.is_empty() {
         encode(&user)
     } else {
@@ -514,6 +564,24 @@ fn enter_url(ask: &Ask) -> anyhow::Result<String> {
         "mysql://{userinfo}@{host}:{port}/{}{tls}",
         encode(&database)
     ))
+}
+
+/// Why a connection failed, in a line, with what to do for the usual
+/// causes.
+fn explain(e: &anyhow::Error, url: &str) -> String {
+    let cause = e.root_cause().to_string();
+    let hint = if cause.contains("UnknownIssuer") {
+        " The server's certificate isn't signed by a CA Rowbit trusts. If your provider gives you a CA file, give it when asked (or add ssl-ca=<file> to the URL); r encrypts without checking the certificate."
+    } else if cause.contains("NotValidForName") {
+        " The server's certificate is for another name: connect by the host name it was issued for."
+    } else if cause.contains("secure transport") {
+        " The server only takes TLS connections: choose r or v."
+    } else if cause.contains("Access denied") {
+        " Check the user and password."
+    } else {
+        ""
+    };
+    format!("Couldn't connect to {}: {cause}.{hint}", mask(url))
 }
 
 /// Percent-encodes everything but the URL's unreserved characters.
