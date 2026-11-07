@@ -456,7 +456,33 @@ impl Store {
         if matches!(event, Event::ApplySucceeded) {
             return Err(StoreError::ApplyNeedsRecord);
         }
-        self.transition_with(id, event, actor, reviewed, None, notify)
+        self.transition_with(id, event, actor, reviewed, None, notify, None)
+    }
+
+    /// Withdraws a held change for `agent`, which proposed it, and logs a
+    /// `Superseded` note with `detail` in the same transaction, so the note
+    /// is never there without the withdraw. Returns false, and logs
+    /// nothing, if the change is no longer held; only the proposer may.
+    pub fn withdraw_superseded(
+        &mut self,
+        id: ChangeId,
+        agent: &str,
+        detail: &str,
+    ) -> Result<bool, StoreError> {
+        let actor = Actor::Agent(agent.to_owned());
+        match self.transition_with(
+            id,
+            &Event::Withdraw,
+            &actor,
+            None,
+            None,
+            &[],
+            Some(("Superseded", detail)),
+        ) {
+            Ok(_) => Ok(true),
+            Err(StoreError::Transition(TransitionError::InvalidTransition { .. })) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// Records a successful apply (`ApplySucceeded`, by the system) together
@@ -469,9 +495,13 @@ impl Store {
             None,
             Some(applied.to_canonical_json()),
             &[],
+            None,
         )
     }
 
+    // One private entry point for every transition; the callers above name
+    // what each argument is for.
+    #[allow(clippy::too_many_arguments)]
     fn transition_with(
         &mut self,
         id: ChangeId,
@@ -480,6 +510,7 @@ impl Store {
         reviewed: Option<&str>,
         applied: Option<Vec<u8>>,
         notify: &[NewDelivery],
+        note: Option<(&str, &str)>,
     ) -> Result<State, StoreError> {
         let tx = self
             .conn
@@ -536,6 +567,19 @@ impl Store {
             },
             at,
         )?;
+        if let Some((event, detail)) = note {
+            append(
+                &tx,
+                id,
+                Some(to),
+                to,
+                event,
+                Some(detail),
+                &actor.to_string(),
+                None,
+                at,
+            )?;
+        }
         for d in notify {
             tx.execute(
                 "INSERT INTO deliveries (change_id, target, delivery, payload, state, next_at_ms, created_at_ms)

@@ -208,7 +208,9 @@ async fn self_approval(var: &str, table: &str) {
     )
     .await;
     assert!(text.contains("\"held\""), "{text}");
-    assert_eq!(w.engine.held().unwrap().len(), 2);
+    // The same statement again replaces the first copy; neither is approved.
+    let again: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(w.engine.held().unwrap(), [again["id"].as_i64().unwrap()]);
     w.untouched().await;
 }
 

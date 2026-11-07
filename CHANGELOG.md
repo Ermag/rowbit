@@ -2,6 +2,12 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
+## Unreleased
+
+### Fixed
+
+- When an agent proposes the same statement on the same database again, its older held copy is withdrawn, with a `Superseded` note naming the new change. Its review page links the new change and won't approve the old one. A held change left over from an earlier run could be approved in its place: it applied, while the change the agent was watching stayed held, and approving that one too failed on drift.
+
 ## 0.2.2 (2026-11-07)
 
 Set up on your database: `rowbit setup` checks your database's URL and Rowbit's grants, writes rules that hold every write, and connects your agents; TLS to the database; a container image and an MCP Registry listing.

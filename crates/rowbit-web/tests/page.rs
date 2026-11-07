@@ -674,3 +674,53 @@ async fn shadowed_changes_are_listed_apart(var: &str, table: &str) {
         json!({ "by": "policy:default", "would": "would hold: no rule matched" })
     );
 }
+
+// A copy the agent replaced by proposing it again says so, links the new
+// one, and can't be approved: the person is sent to the newer copy.
+on_both!(a_replaced_copy_points_to_the_new_one);
+async fn a_replaced_copy_points_to_the_new_one(var: &str, table: &str) {
+    let Some((page, url, t)) = setup(var, &format!("{table}_su")).await else {
+        return;
+    };
+    let sql = format!("UPDATE {t} SET status = 'refunded'");
+    let old = page
+        .engine
+        .propose("refund-bot", "rowbit_test", &sql)
+        .await
+        .unwrap()
+        .id;
+    let new = page
+        .engine
+        .propose("refund-bot", "rowbit_test", &sql)
+        .await
+        .unwrap()
+        .id;
+
+    let (_, change) = page.api(&format!("/api/changes/{old}")).await;
+    assert_eq!(change["state"], "rejected", "{change}");
+    assert_eq!(change["superseded_by"], new, "{change}");
+    assert_eq!(
+        change["reason"],
+        format!("Replaced by #{new}: the agent proposed the same change again."),
+    );
+    let review = change["review_hash"].as_str().unwrap().to_owned();
+    let token = page.token().await;
+    let (status, body) = page
+        .act(
+            &format!("/api/changes/{old}/approve"),
+            json!({ "review": review }),
+            Some(&token),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        body.to_string().contains(&format!("review #{new} instead")),
+        "{body}"
+    );
+    assert_eq!(statuses(&url, &t).await, ["approved", "approved"]);
+
+    let (_, change) = page.api(&format!("/api/changes/{new}")).await;
+    assert_eq!(change["state"], "held");
+    assert_eq!(change["superseded_by"], Value::Null);
+}

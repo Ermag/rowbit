@@ -359,6 +359,13 @@ impl Engine {
             };
             store.transition_notifying(id, &event, &actor, None, &notify)?;
         }
+        if decision != Decision::Block || shadow {
+            // Only tidies up: the new change is recorded and decided, so a
+            // failure here must not tell the agent its proposal failed.
+            if let Err(e) = self.supersede(agent, database, &classified.canonical, id) {
+                eprintln!("rowbit: change {id}: couldn't withdraw older held copies: {e}");
+            }
+        }
         if decision == Decision::Allow || shadow {
             self.apply(id).await?;
         }
@@ -571,6 +578,37 @@ impl Engine {
         Ok(self.store().verify()?)
     }
 
+    /// Withdraws `agent`'s older held changes that are the same statement
+    /// on the same database as `newer`, so a person never approves a stale
+    /// copy of what the agent just proposed again. Each one gets a
+    /// `Superseded` note naming `newer`, in the same transaction as the
+    /// withdraw. A copy a person decided on in the meantime is left alone.
+    ///
+    /// Matches on the agent's name, not the connection: two projects
+    /// connected as the same agent replace each other's held copies.
+    fn supersede(
+        &self,
+        agent: &str,
+        database: &str,
+        canonical: &str,
+        newer: ChangeId,
+    ) -> Result<(), EngineError> {
+        let mut store = self.store();
+        for id in store.list(State::Held)? {
+            if id == newer {
+                continue;
+            }
+            let old = store.get(id)?;
+            let same = old.agent == agent
+                && old.database == database
+                && classify(&old.sql).is_ok_and(|c| c.canonical == canonical);
+            if same {
+                store.withdraw_superseded(id, agent, &format!("{SUPERSEDED_PREFIX}{newer}"))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Changes waiting for a person, oldest first.
     pub fn held(&self) -> Result<Vec<ChangeId>, EngineError> {
         Ok(self.store().list(State::Held)?)
@@ -695,8 +733,8 @@ impl Engine {
             Ok(_) | Err(StoreError::NotFound(_)) => return Err(EngineError::NotFound(id)),
             Err(e) => return Err(e.into()),
         };
-        let reason = store
-            .events(id)?
+        let history = store.events(id)?;
+        let reason = history
             .iter()
             .rev()
             .find(|e| e.from.as_deref() != Some(e.to.as_str()) || e.event == "Proposed")
@@ -706,7 +744,8 @@ impl Engine {
                     "PolicyHeld" | "PolicyBlocked" | "Reject" | "ApplyFailed"
                 )
             })
-            .and_then(|e| e.detail.clone());
+            .and_then(|e| e.detail.clone())
+            .or_else(|| superseded_by(&history).map(|n| format!("{SUPERSEDED_PREFIX}{n}")));
         let (table, rows) = match &change.review {
             Some(Review::Rows(p)) => (Some(p.table.qualified_name()), Some(p.rows.len())),
             Some(Review::Ddl { .. }) | None => (None, None),
@@ -921,6 +960,23 @@ pub const DEFAULT_REVIEW_ADDRESS: &str = "http://127.0.0.1:8080";
 
 /// A change's page on the review UI at `address`, by way of sign-in if
 /// the browser isn't signed in.
+/// How a `Superseded` note's detail starts; the newer change's id follows.
+const SUPERSEDED_PREFIX: &str = "proposed again as #";
+
+/// The change that replaced this one, from its `Superseded` note.
+pub fn superseded_by(history: &[AuditEvent]) -> Option<ChangeId> {
+    history
+        .iter()
+        .find(|e| e.event == "Superseded")
+        .and_then(|e| {
+            e.detail
+                .as_deref()?
+                .strip_prefix(SUPERSEDED_PREFIX)?
+                .parse()
+                .ok()
+        })
+}
+
 pub fn change_link(address: &str, id: ChangeId) -> String {
     format!("{}/changes/{id}", address.trim_end_matches('/'))
 }

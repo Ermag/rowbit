@@ -184,6 +184,11 @@ fn summary(app: &App, change: &Change) -> Value {
             )
         })
         .and_then(|e| e.detail.clone());
+    let superseded_by = rowbit_engine::superseded_by(&history);
+    let reason = reason.or_else(|| {
+        superseded_by
+            .map(|n| format!("Replaced by #{n}: the agent proposed the same change again."))
+    });
     let shadowed = history.iter().find(|e| e.event == "PolicyShadowed");
     json!({
         "id": change.id,
@@ -199,6 +204,8 @@ fn summary(app: &App, change: &Change) -> Value {
         "kind": kind,
         "rows": rows,
         "reason": reason.map(|r| visible(&r)),
+        // The change that replaced this one, when the agent proposed it again.
+        "superseded_by": superseded_by,
         "decided_by": decided.map(|e| visible(&e.actor)),
         "created_at_ms": change.created_at_ms,
     })
@@ -364,6 +371,14 @@ pub(crate) async fn approve(
         Ok(c) => c,
         Err(e) => return error(StatusCode::NOT_FOUND, &e.to_string()),
     };
+    if change.state != ChangeState::Held
+        && let Some(n) = rowbit_engine::superseded_by(&app.engine.history(id).unwrap_or_default())
+    {
+        return error(
+            StatusCode::CONFLICT,
+            &format!("#{id} was replaced by #{n}, the agent's newer copy; review #{n} instead"),
+        );
+    }
     if let (_, _, Some(total)) = table_and_kind(&change)
         && total > CONFIRM_ROWS_ABOVE
         && body.rows != Some(total)

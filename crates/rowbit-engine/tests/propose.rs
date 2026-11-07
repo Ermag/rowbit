@@ -354,3 +354,63 @@ async fn rejected_and_drifted_changes_write_nothing(var: &str, table: &str) {
     assert_eq!(refunded, [4]);
     conn.disconnect().await.unwrap();
 }
+
+// An agent that proposes the same statement again replaces its older held
+// copy, so the person can't approve a stale one by mistake.
+on_both!(proposing_again_withdraws_the_older_held_copy);
+async fn proposing_again_withdraws_the_older_held_copy(var: &str, table: &str) {
+    let Some((engine, t)) = setup(var, &format!("{table}_w")).await else {
+        return;
+    };
+    let sql = format!("UPDATE {t} SET status = 'refunded' WHERE status = 'approved'");
+    let first = propose(&engine, "refund-bot", &sql).await;
+    assert_eq!(first.state, State::Held);
+    let other = propose(
+        &engine,
+        "refund-bot",
+        &format!("UPDATE {t} SET status = 'refunded' WHERE id = 3"),
+    )
+    .await;
+    assert_eq!(other.state, State::Held, "{other:?}");
+
+    // Same statement, spelled differently.
+    let second = propose(
+        &engine,
+        "refund-bot",
+        &format!("update {t}  set status = 'refunded' where status = 'approved'"),
+    )
+    .await;
+    assert_eq!(second.state, State::Held);
+    assert_eq!(engine.held().unwrap(), [other.id, second.id]);
+
+    let old = engine.status("refund-bot", first.id).unwrap();
+    assert_eq!(old.state, State::Rejected);
+    assert_eq!(old.review_url, None);
+    // The agent that looks at the old copy learns why it was withdrawn.
+    let because = format!("proposed again as #{}", second.id);
+    assert_eq!(old.reason.as_deref(), Some(because.as_str()));
+    let history = engine.history(first.id).unwrap();
+    let events: Vec<_> = history
+        .iter()
+        .rev()
+        .take(2)
+        .map(|e| e.event.as_str())
+        .collect();
+    assert_eq!(
+        events,
+        ["Superseded", "Withdraw"],
+        "noted after the withdraw"
+    );
+    assert_eq!(
+        history.last().unwrap().detail.as_deref(),
+        Some(because.as_str())
+    );
+    assert_eq!(rowbit_engine::superseded_by(&history), Some(second.id));
+    assert!(engine.verify().unwrap().is_ok());
+
+    let hash = engine.change(first.id).unwrap().review_hash.unwrap();
+    assert!(engine.approve("philip", first.id, &hash).await.is_err());
+    let hash = engine.change(second.id).unwrap().review_hash.unwrap();
+    let change = engine.approve("philip", second.id, &hash).await.unwrap();
+    assert_eq!(change.state, State::Applied);
+}
