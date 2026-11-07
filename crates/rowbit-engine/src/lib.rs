@@ -357,6 +357,9 @@ impl Engine {
             };
             store.transition_notifying(id, &event, &actor, None, &notify)?;
         }
+        if decision != Decision::Block || shadow {
+            self.supersede(agent, database, &classified.canonical, id)?;
+        }
         if decision == Decision::Allow || shadow {
             self.apply(id).await?;
         }
@@ -561,6 +564,45 @@ impl Engine {
     /// Checks the whole audit log; see [`Store::verify`].
     pub fn verify(&self) -> Result<Result<(), rowbit_store::Tampered>, EngineError> {
         Ok(self.store().verify()?)
+    }
+
+    /// Withdraws `agent`'s older held changes that are the same statement
+    /// on the same database as `newer`, so a person never approves a stale
+    /// copy of what the agent just proposed again. Each one gets a
+    /// `Superseded` note naming `newer`. A copy a person decided on in the
+    /// meantime is left as it is.
+    fn supersede(
+        &self,
+        agent: &str,
+        database: &str,
+        canonical: &str,
+        newer: ChangeId,
+    ) -> Result<(), EngineError> {
+        let mut store = self.store();
+        for id in store.list(State::Held)? {
+            if id == newer {
+                continue;
+            }
+            let old = store.get(id)?;
+            let same = old.agent == agent
+                && old.database == database
+                && classify(&old.sql).is_ok_and(|c| c.canonical == canonical);
+            if !same {
+                continue;
+            }
+            let actor = Actor::Agent(agent.to_owned());
+            store.note(
+                id,
+                &actor,
+                "Superseded",
+                &format!("proposed again as #{newer}"),
+            )?;
+            match store.transition(id, &Event::Withdraw, &actor, None) {
+                Ok(_) | Err(StoreError::Transition(_)) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
     }
 
     /// Changes waiting for a person, oldest first.
