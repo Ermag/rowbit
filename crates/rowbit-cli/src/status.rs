@@ -108,7 +108,7 @@ fn describe(f: &Found) -> Vec<String> {
     }
     if connected {
         lines.push(format!(
-            "sign one out: rowbit agents revoke <agent> --connection <id> --dir {}",
+            "sign one out: rowbit agents revoke <agent> --connection <id> (or --single) --dir {}",
             crate::connect::shell_quote(&dir.display().to_string())
         ));
     }
