@@ -195,8 +195,20 @@ fn pick(found: &[Found]) -> Picked<'_> {
 
 /// Whether the command reads a setup's files, so finding none is an error
 /// worth stopping for. `ping`, `policy`, `server` and `connect` with no
-/// client name (it lists them) work without one.
+/// client name (it lists them) work without one, and so does a command
+/// told where its files are (`--policy`, `ROWBIT_STORE`, ...).
 fn needs_files(args: &[OsString]) -> bool {
+    let named = args.iter().any(|a| {
+        let a = a.to_string_lossy();
+        ["--policy", "--store", "--config"]
+            .iter()
+            .any(|f| a == *f || a.starts_with(&format!("{f}=")))
+    }) || ["ROWBIT_POLICY", "ROWBIT_STORE", "ROWBIT_SERVER_CONFIG"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some());
+    if named {
+        return false;
+    }
     let (command, _) = command(args);
     match command.as_deref() {
         None | Some("ping" | "policy" | "server" | "help") => false,
