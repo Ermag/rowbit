@@ -99,8 +99,8 @@ main() {
     esac
 
     say ""
-    say "Next, try it on a sample database (needs Docker):"
-    say "  $run demo"
+    say "Next, set it up in front of your database, or try it on a sample one:"
+    say "  $run setup"
 }
 
 detect_target() {

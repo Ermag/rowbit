@@ -10,18 +10,26 @@ A safety net for AI agents that write to your database. Preview every write, app
   <a href="https://ermag.github.io/rowbit/"><img src="site/social/social-preview.png" alt="Rowbit: a safety net for AI agents that write to your database. Preview, approve, undo." width="100%"></a>
 </p>
 
-## Try it
+## Get started
 
 ```sh
 curl -fsSL https://ermag.github.io/rowbit/install.sh | sh
-rowbit demo
+rowbit setup
 ```
 
-macOS and Linux (Windows through WSL); the demo needs Docker. If `~/.local/bin` isn't on your `PATH`, the installer says so: run `~/.local/bin/rowbit demo` instead. It runs a sample shop database with Rowbit in front of it, connects your agent and serves the review page. Then ask the agent:
+macOS and Linux (Windows through WSL). If `~/.local/bin` isn't on your `PATH`, the installer says so: run `~/.local/bin/rowbit setup` instead. Setup finds your database's URL, checks Rowbit's privileges and prints the `GRANT` statements to fix them, writes rules that hold every write for review, connects the agent clients you pick, and prints the review page's password. See the [quickstart](docs/quickstart.md).
+
+No database to try it on? Choose the sample when setup asks: it runs a shop database in Docker with Rowbit in front of it (the [tour](docs/tour.md)). Then ask the agent:
 
 > The pending orders are stuck. Cancel them.
 
 **Works with** [Claude Code](docs/connect.md), [Cursor](docs/connect.md), [VS Code](docs/connect.md), [Claude Desktop](docs/connect.md), [Codex](docs/connect.md), [Gemini CLI](docs/connect.md), [Windsurf](docs/connect.md) and [any MCP client](docs/connect.md#any-other-client).
+
+| Database | Status |
+|---|---|
+| MariaDB, MySQL | Supported, over TLS too (MariaDB 11.4 and MySQL 8.4 tested on every change) |
+| PostgreSQL | Planned, next |
+| MongoDB, Redis | Exploring |
 
 [**Docs**](https://ermag.github.io/rowbit/docs/) · [Quickstart](docs/quickstart.md) · [Interactive demo](https://ermag.github.io/rowbit/) · [Tell us what you think](https://github.com/Ermag/rowbit/discussions/2)
 
@@ -33,7 +41,7 @@ You ask a coding agent to fix the orders stuck in pending, and it writes `UPDATE
 
 ## How it works
 
-Rowbit sits between your agents and your database. Agents talk to Rowbit over MCP, never to the database directly.
+Rowbit sits between your agents and your database. Agents talk to Rowbit over MCP, never to the database directly: they [read and propose writes](docs/connect.md#what-agents-can-do) through it, without the database's credentials.
 
 - **Exact preview.** Rowbit reads the rows a write would change and replays it on a private temporary copy, so you see each row before and after, exactly as the table would store it. Your tables are only read.
 - **Rules, then people.** A small YAML file lets safe writes through, holds risky ones for a person, and refuses the rest. Only people approve, and approval applies exactly what was previewed, or nothing. See [rules](docs/spec/policy.md).
@@ -63,7 +71,7 @@ See [examples/rowbit.yml](examples/rowbit.yml) and the [rowbit.yml spec](docs/sp
 
 ## Connect your agent
 
-`rowbit connect <client>` sets up a client in one command, with a token of the agent's own. The demo runs it for you. See [Connect your agent](docs/connect.md).
+`rowbit setup` connects the clients you pick. `rowbit connect <client>` sets up one more, with a token of the agent's own. See [Connect your agent](docs/connect.md).
 
 <details>
 <summary><b>Claude Code</b></summary>

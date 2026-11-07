@@ -265,18 +265,18 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
     <div>
       <h1>ROWBIT</h1>
       <p class="tag">A safety net for AI agents that write to your database. <em>Preview</em> every write, let a person <em>approve</em> the risky ones, <em>undo</em> any single change.</p>
-      <div class="meta"><span>v0.2.1</span><span>MCP server for MariaDB &amp; MySQL</span><span>Open source, AGPL-3.0</span><span><a href="https://github.com/Ermag/rowbit">GitHub</a></span></div>
+      <div class="meta"><span>v0.2.2</span><span>MCP server for MariaDB &amp; MySQL</span><span>Open source, AGPL-3.0</span><span><a href="https://github.com/Ermag/rowbit">GitHub</a></span></div>
     </div>
   </header>
 
   <section aria-labelledby="start-h">
-    <h2 id="start-h">TRY IT: TWO COMMANDS</h2>
-    <p class="sub">Installs <code>rowbit</code>, then runs a sample shop database in Docker with Rowbit in front of it, connects your agent and serves the review page. macOS and Linux (Windows through WSL); the demo needs Docker. <a href="install.sh">Read install.sh</a> before you run it.</p>
+    <h2 id="start-h">GET STARTED: TWO COMMANDS</h2>
+    <p class="sub">Installs <code>rowbit</code>, then sets it up in front of your MariaDB or MySQL database: it checks Rowbit's privileges, writes rules that hold every write for review, connects your agent and prints the review page's password. No database to hand? Choose the sample shop database when it asks (needs Docker). macOS and Linux (Windows through WSL). <a href="install.sh">Read install.sh</a> before you run it.</p>
     <div class="frame cmds">
       <div class="cmd"><span class="n">1</span><pre><code>curl -fsSL https://ermag.github.io/rowbit/install.sh | sh</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
-      <div class="cmd"><span class="n">2</span><pre><code>rowbit demo</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
+      <div class="cmd"><span class="n">2</span><pre><code>rowbit setup</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
     </div>
-    <p class="sub then">Then ask your agent: <q>The pending orders are stuck. Cancel them.</q> Its write matches orders placed minutes ago too, so Rowbit holds it, and the agent hands you a link to review all 1,284 rows.</p>
+    <p class="sub then">With the sample, ask your agent: <q>The pending orders are stuck. Cancel them.</q> Its write matches orders placed minutes ago too, so Rowbit holds it, and the agent hands you a link to review all 1,284 rows.</p>
     <div class="works">
       <span class="eyebrow">Works with</span>
       <ul>
@@ -292,15 +292,15 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
     </div>
     <div class="extras">
       <div class="frame">
-        <div class="eyebrow">Already running the demo?</div>
-        <p class="p">The demo connects the client you pick. To add VS Code too, use the button and paste the token from <code>rowbit connect vscode --print --new-token</code> when VS Code asks (an agent has one token, so this signs out the other client). The button assumes the default <code>127.0.0.1:8080</code>.</p>
+        <div class="eyebrow">Already running Rowbit?</div>
+        <p class="p">Setup connects the clients you pick. To add VS Code from here, use the button and paste the token from <code>rowbit connect vscode --print --new-token</code> when VS Code asks (an agent has one token, so this signs out the other client). The button assumes the default <code>127.0.0.1:8080</code>.</p>
         <a class="btn sm" id="vscode" href="#">▶ ADD TO VS CODE</a>
       </div>
       <div class="frame">
         <div class="eyebrow">Set it up with your agent</div>
         <p class="p">Paste this into your coding agent to have it install Rowbit for you:</p>
-        <div class="cmd"><pre><code>Install Rowbit following https://ermag.github.io/rowbit/llms.txt, then tell me how to start its demo.</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
-        <p class="p muted">You run <code>rowbit demo</code> yourself: it prints the review page's password, which is yours, not the agent's. For a real database a person sets Rowbit up: the agent mustn't hold the database's credentials or edit its own rules.</p>
+        <div class="cmd"><pre><code>Install Rowbit following https://ermag.github.io/rowbit/llms.txt, then tell me how to set it up.</code></pre><button class="btn ghost sm copy" type="button">COPY</button></div>
+        <p class="p muted">You run <code>rowbit setup</code> yourself, in your own terminal: it handles the database's credentials and prints the review page's password, which are yours, not the agent's, and the agent mustn't edit its own rules.</p>
       </div>
     </div>
   </section>
@@ -357,7 +357,7 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
     </div>
     <div class="dbs">
       <div class="frame dbcol"><div class="eyebrow">Today</div><ul><li class="first">MariaDB</li><li class="first">MySQL</li></ul></div>
-      <div class="frame dbcol"><div class="eyebrow">Next</div><ul><li>Budgets</li><li>SQL proxy</li><li>PostgreSQL</li></ul></div>
+      <div class="frame dbcol"><div class="eyebrow">Next</div><ul><li>PostgreSQL</li><li>Budgets</li><li>SQL proxy</li></ul></div>
       <p class="p muted">Next on the roadmap: budgets across an agent's changes, a MySQL wire-protocol proxy for agents that only speak SQL, and other databases through adapters.</p>
     </div>
   </section>
@@ -365,13 +365,13 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
   <section aria-labelledby="docs-h">
     <h2 id="docs-h">READ THE MANUAL</h2>
     <div class="docs">
-      <a class="frame" href="docs/quickstart.html"><b>Quickstart</b><span>The demo, step by step: allow, hold, refuse, undo.</span></a>
+      <a class="frame" href="docs/quickstart.html"><b>Quickstart</b><span>Set Rowbit up on your database, or tour the sample one: allow, hold, refuse, undo.</span></a>
       <a class="frame" href="docs/connect.html"><b>Connect your agent</b><span><code>rowbit connect</code>, the skill, stdio or HTTP.</span></a>
       <a class="frame" href="docs/spec/policy.html"><b>Rules</b><span><code>rowbit.yml</code>: rules, scopes, shadow mode.</span></a>
       <a class="frame" href="docs/spec/change-lifecycle.html"><b>How a change moves</b><span>Preview, decide, apply, undo, the audit log.</span></a>
       <a class="frame" href="docs/privileges.html"><b>Database privileges</b><span>Exactly what Rowbit's database user needs.</span></a>
       <a class="frame" href="https://github.com/Ermag/rowbit/blob/main/CHANGELOG.md"><b>Changelog</b><span>What changed, and how to upgrade.</span></a>
-      <a class="frame" href="https://github.com/Ermag/rowbit/blob/main/SECURITY.md"><b>Security</b><span>How to report a vulnerability, and what Rowbit defends against.</span></a>
+      <a class="frame" href="https://github.com/Ermag/rowbit/blob/main/SECURITY.md"><b>Security</b><span>How to report a vulnerability, and what counts as a bypass.</span></a>
     </div>
     <p class="sub">For agents: <a href="llms.txt">llms.txt</a> and <a href="llms-full.txt">llms-full.txt</a>, and every page as Markdown.</p>
   </section>

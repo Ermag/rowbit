@@ -32,6 +32,12 @@ Scripts that run `rowbit approve`, `reject` or `undo` without a terminal need `-
 - `rowbit connect <client> --check` says whether the client has Rowbit from here and whether Rowbit answers, without changing anything.
 - The Rowbit skill tells an agent without Rowbit's tools to say so and how to fix it, instead of reaching the database another way.
 
+### Docs
+
+- The install script's last line suggests `rowbit setup`.
+- The quickstart, README and home page start with `rowbit setup` on your own database; the demo walkthrough is now the tour with the sample database.
+- A table of supported and planned databases, and what agents can do through Rowbit: read with `query` and `describe_schema` as well as propose writes.
+
 ## 0.2.1 (2026-10-31)
 
 Easy start: prebuilt binaries, a demo with an agent connected in two commands, one-command setup for seven agent clients, and review links agents hand to the person.

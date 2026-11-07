@@ -28,12 +28,13 @@ FENCE = re.compile(r"^\s*(```|~~~)")
 
 # One line per page for llms.txt; a page not here gets its first sentence.
 DESCRIPTIONS = {
-    "quickstart.md": "Install Rowbit, start the demo shop database, and watch it let a small fix through, hold a risky write, refuse a delete and undo a change.",
-    "connect.md": "Set up Claude Code, Cursor, VS Code, Claude Desktop, Codex, Gemini CLI or Windsurf with `rowbit connect`, the Rowbit skill, and stdio versus HTTP.",
+    "quickstart.md": "Install Rowbit and run `rowbit setup`: your database's URL, Rowbit's grants, rules that hold every write, your agent clients and the review page; supported databases.",
+    "tour.md": "Try Rowbit on a sample shop database in Docker and watch it let a small fix through, hold a risky write, refuse a delete and undo a change.",
+    "connect.md": "Set up Claude Code, Cursor, VS Code, Claude Desktop, Codex, Gemini CLI or Windsurf with `rowbit connect`; the four tools agents read and write through; the Rowbit skill; stdio versus HTTP.",
     "spec/policy.md": "The rowbit.yml schema: agents, rules (when/then), scopes the database enforces, and shadow mode.",
     "spec/change-lifecycle.md": "How a change moves from propose through preview, decide, apply and undo; the agent tools; reviewing in the CLI and web UI; the audit log.",
     "spec/server.md": "rowbit-server.yml: sign-in through an identity provider, notifications, MCP over HTTP with per-agent tokens, and agents' database users.",
-    "spec/setup.md": "The releases and install script, `rowbit demo`, `rowbit connect`, review links, the skill, the home page and this site.",
+    "spec/setup.md": "The releases and install script, `rowbit setup`, where commands find their files, `rowbit demo`, `rowbit connect`, review links, the skill, the home page and this site.",
     "privileges.md": "The exact grants Rowbit's database user needs, agents' own users, and protecting the SQLite state file.",
     "operating.md": "What happens when Rowbit is down, upgrading, how long data is kept, and rotating secrets.",
 }
@@ -183,16 +184,16 @@ def main():
         "or refuses it by the rules in rowbit.yml, and can undo any single change. "
         "MariaDB and MySQL. Open source (AGPL-3.0).",
         "",
-        "To try it: `curl -fsSL https://ermag.github.io/rowbit/install.sh | sh` installs "
-        "`rowbit` (macOS and Linux), and `rowbit demo` starts a sample database with Rowbit "
-        "in front of it (needs Docker).",
+        "To start: `curl -fsSL https://ermag.github.io/rowbit/install.sh | sh` installs "
+        "`rowbit` (macOS and Linux), and `rowbit setup` sets it up in front of your database, "
+        "or runs a sample database with Rowbit in front of it (needs Docker).",
         "",
         "If you are an agent setting Rowbit up for a person: install it, then ask the person "
-        "to run `rowbit demo` in a terminal of their own, and don't run it yourself. It runs "
-        "until stopped, offers to connect you, and prints the review page's password, which "
-        "is the person's: only people approve. For a real database a person sets Rowbit up; "
-        "an agent must not hold the database's credentials, Rowbit's state file or the "
-        "review password, or edit rowbit.yml, the rules it is held to.",
+        "to run `rowbit setup` in a terminal of their own, and don't run it yourself. It "
+        "handles the database's credentials, offers to connect you, and prints the review "
+        "page's password, which is the person's: only people approve. An agent must not hold "
+        "the database's credentials, Rowbit's state file or the review password, edit "
+        "rowbit.yml, the rules it is held to, or run `rowbit approve`, `reject` or `undo`.",
         "",
         "## Docs",
         "",

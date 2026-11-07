@@ -54,4 +54,4 @@ Notification deliveries are kept in the same file. They hold no row values.
 | An agent's MCP token | `rowbit agents token <agent>` (the old one stops working) |
 | Scoped agents' database passwords | `rowbit grants apply --rotate-passwords` |
 | OIDC client secret, webhook secrets, Slack URL | Change the environment variable and restart `rowbit serve` |
-| Rowbit's own database password | Change it in the database and `ROWBIT_DATABASE_URL`, then restart every process |
+| Rowbit's own database password | Change it in the database, then in `~/.rowbit/<name>/env` (or run `rowbit setup` again with the new URL in `ROWBIT_DATABASE_URL`), or in `ROWBIT_DATABASE_URL` where you set it yourself, then restart every process |
