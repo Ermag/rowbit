@@ -60,6 +60,7 @@ stateDiagram-v2
 Every other pair is an error. Notable consequences:
 
 - `Approve` is only accepted from `held`, and only from a person. A person cannot approve a change that has no preview yet, and a policy rule cannot approve a held change.
+- When an agent proposes the same statement (after normalizing) on the same database while its earlier copy is still held, Rowbit withdraws the earlier copy on the agent's behalf, with a `Superseded` note naming the new change, unless the new one is blocked. A person then sees one copy to decide on, the one the agent is waiting for.
 - `Expire` rejects. A timeout never approves. Nothing sends `Expire` yet: held changes wait until a person decides or the agent withdraws.
 - An `approved` change cannot be rejected: it is applied as soon as it is approved, and a reject would race the write. A cool-down window, if one comes, will add its own state.
 - Undo is requested by a person. The system performs it and records `UndoSucceeded`. If undo is refused (see below) the change stays `applied` and the refusal is logged.
