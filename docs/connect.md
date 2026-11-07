@@ -35,7 +35,8 @@ With `mcp.http: true` in `rowbit-server.yml` (the demo has it), the client gets 
 `rowbit connect` keeps a backup of any file it changes (`<file>.rowbit-backup`), refuses a file it can't parse, and replaces nothing without being told:
 
 - `--force` replaces an entry of the same name; `--name <name>` adds another.
-- Each client entry gets a token of its own, named for the client and, for Claude Code, the project: "Claude Code in ~/projects/my-app". Connecting the same place again (with `--force`) replaces only that one. `rowbit agents` lists them, and `rowbit agents revoke <id>` signs out all of an agent's.
+- Each client entry gets a token of its own, named for the client and, for Claude Code, the project: "Claude Code in ~/projects/my-app". Connecting the same place again (with `--force`) replaces only that one, once the new entry is written. `rowbit agents` lists them with an id each; `rowbit agents revoke <agent> --connection <id>` signs out one, and `rowbit agents revoke <agent>` all of them. Tokens don't expire, so revoke the ones for projects you've moved or deleted.
+- `--new-token` also revokes the agent's single token from before 0.2.3, once no client uses it; without it, `rowbit connect` says when the agent still has one.
 - `--agent <id>` picks the agent when `rowbit.yml` lists more than one.
 - `--print` changes nothing in the client and prints what to add by hand, with the token.
 

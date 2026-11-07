@@ -115,7 +115,7 @@ pub struct Found {
 impl Found {
     pub fn describe(&self) -> String {
         let shown = tilde(&self.dir);
-        if self.name == "demo" {
+        if self.name == "demo" && crate::demo::is_demo(&self.dir) {
             format!("the demo in {shown}")
         } else {
             format!("{} in {shown}", self.name)
@@ -210,10 +210,27 @@ fn needs_files(args: &[OsString]) -> bool {
     let (command, _) = command(args);
     match command.as_deref() {
         None | Some("ping" | "policy" | "server" | "help") => false,
-        Some("connect") => args
-            .iter()
-            .skip(2)
-            .any(|a| a == "--print" || !a.to_string_lossy().starts_with('-')),
+        Some("connect") => {
+            // What follows the command's name: a client, or --print.
+            let after = args
+                .iter()
+                .skip(1)
+                .skip_while(|a| a.to_string_lossy() != "connect")
+                .skip(1);
+            let mut after = after.peekable();
+            let mut needs = false;
+            while let Some(a) = after.next() {
+                let a = a.to_string_lossy();
+                if a == "--print" {
+                    needs = true;
+                } else if a == "--agent" || a == "--name" || a == "--scope" || a == "--url" {
+                    after.next();
+                } else if !a.starts_with('-') {
+                    needs = true;
+                }
+            }
+            needs
+        }
         Some(_) => !args.iter().any(|a| a == "--help" || a == "-h"),
     }
 }

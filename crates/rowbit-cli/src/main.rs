@@ -506,8 +506,19 @@ fn mysql_database(url: &str) -> anyhow::Result<String> {
 enum AgentsCommand {
     /// Make a new token for an agent, replacing any it had, and print it once
     Token { agent: String },
-    /// Remove an agent's token
-    Revoke { agent: String },
+    /// Sign an agent out: every token it has, or one
+    ///
+    /// `rowbit agents` lists each token with its id.
+    Revoke {
+        agent: String,
+        /// Only this connection's token, by the id `rowbit agents` shows
+        #[arg(long, conflicts_with = "single")]
+        connection: Option<String>,
+        /// Only the single token from `rowbit agents token` (or
+        /// `rowbit connect` before 0.2.3)
+        #[arg(long)]
+        single: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -801,10 +812,27 @@ async fn main() -> anyhow::Result<()> {
                     );
                     println!("{token}");
                 }
-                Some(AgentsCommand::Revoke { agent }) => {
+                Some(AgentsCommand::Revoke {
+                    agent,
+                    connection,
+                    single,
+                }) => {
                     let mut store = store.open()?;
-                    if store.revoke_agent_token(&agent)? {
-                        println!("{agent}'s token is revoked");
+                    if let Some(id) = connection {
+                        match store.revoke_connection(&agent, &id)? {
+                            Some(label) => println!("{agent}'s token for {label} is revoked"),
+                            None => anyhow::bail!(
+                                "{agent} has no connection {id}; `rowbit agents` lists them with their ids"
+                            ),
+                        }
+                    } else if single {
+                        if store.revoke_single_token(&agent)? {
+                            println!("{agent}'s single token is revoked");
+                        } else {
+                            println!("{agent} had no single token");
+                        }
+                    } else if store.revoke_agent_token(&agent)? {
+                        println!("every token of {agent}'s is revoked");
                     } else {
                         println!("{agent} had no token");
                     }
@@ -827,20 +855,25 @@ async fn main() -> anyhow::Result<()> {
                         println!("{agent}");
                         if let Some((created, last)) = manual {
                             println!(
-                                "  the agent's own token (rowbit agents token, or rowbit connect before 0.2.3): made {}, {}",
+                                "  {:<10} single token (rowbit agents token, or rowbit connect before 0.2.3): made {}, {}",
+                                "--single",
                                 review::when(created),
                                 used(last)
                             );
                         }
                         for t in mine {
                             println!(
-                                "  {}: made {}, {}",
+                                "  {:<10} {}: made {}, {}",
+                                t.id,
                                 t.label,
                                 review::when(t.created_ms),
                                 used(t.used_ms)
                             );
                         }
                     }
+                    println!(
+                        "\nSign one out: rowbit agents revoke <agent> --connection <id> (or --single); all of an agent's: rowbit agents revoke <agent>"
+                    );
                 }
             }
         }

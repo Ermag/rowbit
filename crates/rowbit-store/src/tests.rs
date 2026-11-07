@@ -550,12 +550,13 @@ fn agent_tokens_are_kept_as_hashes_and_replaced() {
 fn each_connection_has_a_token_of_its_own() {
     let mut store = Store::open_in_memory().unwrap();
     let manual = store.issue_agent_token("bot").unwrap();
-    let app = store
+    let (app, app_id) = store
         .issue_connection_token("bot", "Claude Code in ~/app")
         .unwrap();
-    let web = store
+    let (web, web_id) = store
         .issue_connection_token("bot", "Claude Code in ~/web")
         .unwrap();
+    assert_eq!(app_id.len(), CONNECTION_ID_LEN);
     // Each works, and none signs another out.
     for t in [&manual, &app, &web] {
         assert_eq!(store.agent_for_token(t).unwrap().as_deref(), Some("bot"));
@@ -565,12 +566,20 @@ fn each_connection_has_a_token_of_its_own() {
         list.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(),
         ["Claude Code in ~/app", "Claude Code in ~/web"]
     );
+    assert_eq!(list[0].id, app_id);
     assert!(list.iter().all(|t| t.used_ms.is_some()));
 
-    // Connecting the same place again replaces only that one.
-    let app2 = store
+    // Connecting the same place again: both work until the new entry is
+    // written, then only the new one.
+    let (app2, app2_id) = store
         .issue_connection_token("bot", "Claude Code in ~/app")
         .unwrap();
+    assert_eq!(store.agent_for_token(&app).unwrap().as_deref(), Some("bot"));
+    assert!(
+        store
+            .retire_older_connections("bot", "Claude Code in ~/app", &app2_id)
+            .unwrap()
+    );
     assert_eq!(store.agent_for_token(&app).unwrap(), None);
     assert_eq!(
         store.agent_for_token(&app2).unwrap().as_deref(),
@@ -579,14 +588,33 @@ fn each_connection_has_a_token_of_its_own() {
     assert_eq!(store.agent_for_token(&web).unwrap().as_deref(), Some("bot"));
     assert_eq!(store.connection_tokens().unwrap().len(), 2);
 
-    assert!(
-        store
-            .revoke_connection_token("bot", "Claude Code in ~/web")
-            .unwrap()
+    // One connection, by its id; too short an id names none.
+    assert_eq!(store.revoke_connection("bot", &web_id[..4]).unwrap(), None);
+    assert_eq!(store.revoke_connection("other", &web_id).unwrap(), None);
+    assert_eq!(
+        store.revoke_connection("bot", &web_id).unwrap().as_deref(),
+        Some("Claude Code in ~/web")
     );
     assert_eq!(store.agent_for_token(&web).unwrap(), None);
+    // A revoked token's row doesn't come back when it is tried.
+    assert!(
+        store
+            .connection_tokens()
+            .unwrap()
+            .iter()
+            .all(|t| t.id != web_id)
+    );
+
+    // The single token alone, leaving the connections.
+    assert!(store.revoke_single_token("bot").unwrap());
+    assert_eq!(store.agent_for_token(&manual).unwrap(), None);
+    assert_eq!(
+        store.agent_for_token(&app2).unwrap().as_deref(),
+        Some("bot")
+    );
 
     // Revoking the agent signs out every one.
+    let manual = store.issue_agent_token("bot").unwrap();
     assert!(store.revoke_agent_token("bot").unwrap());
     assert_eq!(store.agent_for_token(&manual).unwrap(), None);
     assert_eq!(store.agent_for_token(&app2).unwrap(), None);
