@@ -81,7 +81,8 @@ The UI inserts values only as text (no `{@html}`), and the server sends them wit
 
 1. In one pull request: set `version` in `Cargo.toml` (and `Cargo.lock`, with `cargo check`) and in `plugins/rowbit/.claude-plugin/plugin.json`, and turn the changelog's `Unreleased` into `## <version> (<date>)`.
 2. After it is merged, tag `main` with `v<version>`, its message the notes from `gh api repos/Ermag/rowbit/releases/generate-notes -f tag_name=v<version>`, and push the tag.
-3. The [release workflow](.github/workflows/release.yml) builds the binaries, checks the install script against them, and publishes the GitHub Release. If any step fails nothing is published: fix it, delete the tag, and tag again.
+3. The [release workflow](.github/workflows/release.yml) builds the binaries, checks the install script against them, publishes the GitHub Release, then tags the container image `ghcr.io/ermag/rowbit` and publishes the MCP Registry listing. If a step before the GitHub Release fails, nothing is published: fix it, delete the tag, and tag again. A version's image is never re-tagged, so a failure after that point is fixed in the next patch release.
+4. Merge pull requests that change the site or docs for this release only after the release is published, so `install.sh` and the docs never describe a release that isn't out.
 
 To try the builds without releasing, run the workflow from the Actions tab; the archives are left as artifacts.
 
