@@ -194,6 +194,8 @@ pub enum Server {
 pub enum Scope {
     Local,
     User,
+    /// Refused with a reason; hidden from the possible values.
+    #[value(hide = true)]
     Project,
 }
 

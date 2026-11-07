@@ -32,6 +32,24 @@
         },
         {
           "type": "named",
+          "name": "--read-only",
+          "value": "true",
+          "description": "Rowbit writes only to /data"
+        },
+        {
+          "type": "named",
+          "name": "--cap-drop",
+          "value": "ALL",
+          "description": "Rowbit needs no Linux capabilities"
+        },
+        {
+          "type": "named",
+          "name": "--security-opt",
+          "value": "no-new-privileges",
+          "description": "Nothing in the container gains privileges"
+        },
+        {
+          "type": "named",
           "name": "--mount",
           "value": "type=bind,src={rowbit_dir},dst=/data",
           "description": "Rowbit's files, from `rowbit setup`",
