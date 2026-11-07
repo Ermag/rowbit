@@ -75,12 +75,19 @@ fn agent_tokens_are_shown_once_and_revocable() {
     assert_eq!(token.len(), 47);
     let (ok, out) = rowbit(&["agents"], &d);
     assert!(
-        ok && out.contains("refund-bot\n  single token") && out.contains("never used"),
+        ok && out.contains("refund-bot\n  --single   single token") && out.contains("never used"),
         "{out}"
     );
     assert!(!out.contains(&token));
+    let (ok, out) = rowbit(
+        &["agents", "revoke", "refund-bot", "--connection", "abcdef12"],
+        &d,
+    );
+    assert!(!ok && out.contains("no connection"), "{out}");
+    let (ok, out) = rowbit(&["agents", "revoke", "refund-bot", "--single"], &d);
+    assert!(ok && out.contains("single token is revoked"), "{out}");
     let (ok, out) = rowbit(&["agents", "revoke", "refund-bot"], &d);
-    assert!(ok && out.contains("revoked"), "{out}");
+    assert!(ok && out.contains("had no token"), "{out}");
     let (_, out) = rowbit(&["agents"], &d);
     assert!(out.contains("refund-bot  no token"), "{out}");
 }

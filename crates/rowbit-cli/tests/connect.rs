@@ -321,6 +321,24 @@ fn a_project_folder_finds_the_setup_in_rowbit_home() {
     );
     let (_, agents) = in_app(&["agents"]);
     assert!(agents.contains("Claude Code in "), "{agents}");
+    // Reconnecting the same place leaves one token for it.
+    let (ok, out) = in_app(&["connect", "claude-code", "--force"]);
+    assert!(ok, "{out}");
+    let (_, agents) = in_app(&["agents"]);
+    assert_eq!(agents.matches(": made").count(), 1, "{agents}");
+    // And that one can be signed out on its own, by its id.
+    let id = agents
+        .lines()
+        .find(|l| l.contains("Claude Code in "))
+        .and_then(|l| l.split_whitespace().next())
+        .unwrap()
+        .to_owned();
+    let (ok, out) = in_app(&["agents", "revoke", "coding-agent", "--connection", &id]);
+    assert!(ok && out.contains("Claude Code in "), "{out}");
+    let (_, agents) = in_app(&["agents"]);
+    assert!(agents.contains("coding-agent  no token"), "{agents}");
+    let (ok, out) = in_app(&["connect", "claude-code", "--force"]);
+    assert!(ok, "{out}");
     // `rowbit status` says what it guards, without the password.
     let (ok, status) = in_app(&["status"]);
     assert!(ok, "{status}");

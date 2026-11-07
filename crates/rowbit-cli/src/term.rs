@@ -25,6 +25,9 @@ fn link_if(url: &str, terminal: bool) -> String {
 }
 
 fn osc8(url: &str, text: &str) -> String {
+    // Control characters would end the sequence early.
+    let clean = |s: &str| s.chars().filter(|c| !c.is_control()).collect::<String>();
+    let (url, text) = (clean(url), clean(text));
     format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\")
 }
 
@@ -72,32 +75,17 @@ pub fn open_browser(url: &str) -> bool {
         .is_ok()
 }
 
-/// Opens `url` in the browser once something answers there, from a
-/// thread of its own, giving up after ten seconds.
-pub fn open_when_up(url: String) {
-    std::thread::spawn(move || wait_and_open(&url, 50));
+/// Whether a browser can be opened here: not over SSH, and on Linux only
+/// with a display.
+pub fn can_open_browser() -> bool {
+    can_open(|k| std::env::var_os(k).is_some(), cfg!(target_os = "macos"))
 }
 
-/// Opens `url` in the browser once something answers there, trying
-/// `tries` times, 200ms apart. Returns whether it opened.
-pub fn wait_and_open(url: &str, tries: u32) -> bool {
-    let Some(addr) = url
-        .strip_prefix("http://")
-        .and_then(|rest| rest.split('/').next())
-        .and_then(|host| std::net::ToSocketAddrs::to_socket_addrs(host).ok())
-        .and_then(|mut a| a.next())
-    else {
+fn can_open(set: impl Fn(&str) -> bool, macos: bool) -> bool {
+    if set("SSH_CONNECTION") || set("SSH_TTY") {
         return false;
-    };
-    for _ in 0..tries {
-        if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(200))
-            .is_ok()
-        {
-            return open_browser(url);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
     }
-    false
+    macos || set("DISPLAY") || set("WAYLAND_DISPLAY")
 }
 
 #[cfg(test)]
@@ -129,6 +117,23 @@ mod tests {
             ("ROWBIT_HYPERLINKS", "0")
         ])));
         assert!(supports(env(&[("ROWBIT_HYPERLINKS", "1")])));
+    }
+
+    #[test]
+    fn browsers_open_only_where_someone_can_see_them() {
+        let set = |vars: &'static [&'static str]| move |k: &str| vars.contains(&k);
+        assert!(can_open(set(&[]), true));
+        assert!(!can_open(set(&["SSH_CONNECTION"]), true));
+        assert!(!can_open(set(&[]), false));
+        assert!(can_open(set(&["WAYLAND_DISPLAY"]), false));
+    }
+
+    #[test]
+    fn control_characters_stay_out_of_links() {
+        assert_eq!(
+            osc8("http://x/\x1b]8;;evil\x07", "a\x1bb"),
+            "\x1b]8;;http://x/]8;;evil\x1b\\ab\x1b]8;;\x1b\\"
+        );
     }
 
     #[test]
