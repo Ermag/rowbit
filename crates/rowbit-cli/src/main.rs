@@ -4,6 +4,7 @@ mod grants;
 mod place;
 mod review;
 mod setup;
+mod term;
 
 use std::path::PathBuf;
 
@@ -349,6 +350,7 @@ async fn serve(
     set_password: bool,
     server: &ServerArgs,
     setup: &Setup,
+    open_browser: bool,
 ) -> anyhow::Result<()> {
     let config = server.load()?;
     let listen = config.listen(listen);
@@ -399,14 +401,24 @@ async fn serve(
         mcp: config.mcp_http.then_some(database),
     };
     let address = address.trim_end_matches('/');
-    eprintln!("rowbit: review page on {address}/");
+    eprintln!(
+        "rowbit: review page on {}",
+        term::link_err(&format!("{address}/"))
+    );
     if config.mcp_http {
         eprintln!("rowbit: agents over MCP at {address}/mcp, each with its own token");
     }
     for n in &config.notify {
         eprintln!("rowbit: held changes are announced to {}", n.name);
     }
-    rowbit_web::serve(engine, web, listen).await?;
+    let page = format!("{address}/");
+    rowbit_web::serve_then(engine, web, listen, move |_| {
+        // Bound: whatever answers is this server, not another left running.
+        if open_browser {
+            term::open_browser(&page);
+        }
+    })
+    .await?;
     Ok(())
 }
 
@@ -788,7 +800,7 @@ async fn main() -> anyhow::Result<()> {
             set_password,
             server,
             setup,
-        } => serve(listen, set_password, &server, &setup).await?,
+        } => serve(listen, set_password, &server, &setup, false).await?,
         Command::Agents {
             command,
             policy,

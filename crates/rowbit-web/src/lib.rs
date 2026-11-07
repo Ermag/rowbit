@@ -147,13 +147,25 @@ pub fn router(engine: Arc<Engine>, web: Web) -> Router {
 
 /// Serves the page on `addr` until the process stops. `web.hosts` gains
 /// the address it listens on.
-pub async fn serve(engine: Arc<Engine>, mut web: Web, addr: SocketAddr) -> std::io::Result<()> {
+pub async fn serve(engine: Arc<Engine>, web: Web, addr: SocketAddr) -> std::io::Result<()> {
+    serve_then(engine, web, addr, |_| {}).await
+}
+
+/// [`serve`], calling `listening` once the address is bound, before the
+/// first request: for opening a browser on this server and no other.
+pub async fn serve_then(
+    engine: Arc<Engine>,
+    mut web: Web,
+    addr: SocketAddr,
+    listening: impl FnOnce(SocketAddr),
+) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let local = listener.local_addr()?;
     web.hosts.push(local.to_string());
     if local.ip().is_loopback() {
         web.hosts.push(format!("localhost:{}", local.port()));
     }
+    listening(local);
     axum::serve(listener, router(engine, web)).await
 }
 

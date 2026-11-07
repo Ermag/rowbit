@@ -62,6 +62,9 @@ pub struct DemoArgs {
     /// Don't connect an agent client
     #[arg(long)]
     no_connect: bool,
+    /// Don't open the review page in the browser
+    #[arg(long)]
+    no_open: bool,
 }
 
 #[derive(clap::Subcommand)]
@@ -273,7 +276,8 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
     println!();
     say("Rowbit is guarding the demo shop database.");
     say(&format!(
-        "Review page: {address}    password: {password}    name: anything"
+        "Review page: {}    password: {password}    name: anything",
+        crate::term::link(&address)
     ));
     println!();
     match (&connected, &open) {
@@ -347,6 +351,14 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
     println!();
     std::io::stdout().flush()?;
 
+    let open = !a.no_open
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
+        && crate::term::can_open_browser();
+    if open {
+        say("Opening the review page in your browser (--no-open skips this).");
+        println!();
+    }
     std::env::set_current_dir(&dir)?;
     crate::serve(
         None,
@@ -355,6 +367,7 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
             config: dir.join("rowbit-server.yml"),
         },
         &setup,
+        open,
     )
     .await
 }
