@@ -47,4 +47,5 @@ export const reject = (id, reason) => call('POST', `/api/changes/${id}/reject`, 
 export const undo = (id) => call('POST', `/api/changes/${id}/undo`, {});
 export const verify = () => call('GET', '/api/verify');
 export const deliveries = () => call('GET', '/api/deliveries');
+export const setup = () => call('GET', '/api/setup');
 export const logout = () => call('POST', '/api/logout', {});

@@ -75,7 +75,7 @@ fn agent_tokens_are_shown_once_and_revocable() {
     assert_eq!(token.len(), 47);
     let (ok, out) = rowbit(&["agents"], &d);
     assert!(
-        ok && out.contains("refund-bot\n  the agent's own token") && out.contains("never used"),
+        ok && out.contains("refund-bot\n  single token") && out.contains("never used"),
         "{out}"
     );
     assert!(!out.contains(&token));

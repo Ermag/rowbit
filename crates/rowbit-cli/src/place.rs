@@ -74,6 +74,8 @@ pub fn init(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> {
         {
             None
         }
+        // `status` lists every setup unless told which.
+        None if command.as_deref() == Some("status") => None,
         None => {
             let found = home().map(|h| setups(&h)).unwrap_or_default();
             match pick(&found) {
@@ -275,7 +277,12 @@ pub fn file(path: &mut PathBuf, default: &str) {
 /// `ROWBIT_DATABASE_URL` from the directory's `env` file, for when neither
 /// the flag nor the environment set it.
 pub fn database_url() -> anyhow::Result<Option<String>> {
-    let Some(dir) = dir() else { return Ok(None) };
+    // Run inside a setup's or the demo's folder, that folder.
+    let dir = match dir() {
+        Some(dir) => dir,
+        None if Path::new("rowbit.yml").exists() => Path::new("."),
+        None => return Ok(None),
+    };
     Ok(read_env_file(&dir.join(ENV_FILE))?.or_else(|| crate::demo::database_url(dir)))
 }
 

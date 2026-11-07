@@ -4,6 +4,7 @@ mod grants;
 mod place;
 mod review;
 mod setup;
+mod status;
 mod term;
 
 use std::path::PathBuf;
@@ -198,6 +199,12 @@ enum Command {
     /// write, connects the agent clients you pick and sets the review
     /// page's password. Keeps its files in ~/.rowbit/<name>.
     Setup(setup::SetupArgs),
+    /// What Rowbit is connected to: each setup's database, review page,
+    /// agents and where they're connected
+    ///
+    /// Lists every setup in ~/.rowbit and the demo, or with --dir (or in a
+    /// folder of Rowbit's) that one. Reads files only.
+    Status(status::StatusArgs),
 }
 
 /// Only Rowbit's state file: for commands that don't touch the database,
@@ -393,7 +400,29 @@ async fn serve(
     engine.set_review_address(&address)?;
     let engine = std::sync::Arc::new(engine);
     tokio::spawn(rowbit_web::notify::Notifier::new(engine.clone(), config.notify.clone()).run());
+    let setup_json = serde_json::json!({
+        "database": database_url(&setup.url)
+            .ok()
+            .and_then(|u| rowbit_engine::overview::Database::from_url(&u)),
+        "dir": setup
+            .policy
+            .canonicalize()
+            .ok()
+            .and_then(|p| p.parent().map(place::tilde)),
+        "review_page": format!("{}/", address.trim_end_matches('/')),
+        "mcp": config.mcp_http.then(|| format!("{}/mcp", address.trim_end_matches('/'))),
+        "sign_in": match &sign_in {
+            rowbit_web::SignIn::Oidc(_) => format!(
+                "through {}",
+                config.oidc.as_ref().map(|o| o.issuer.as_str()).unwrap_or("an identity provider")
+            ),
+            _ => "page password, this machine only".to_owned(),
+        },
+        "notify": config.notify.iter().map(|n| n.name.clone()).collect::<Vec<_>>(),
+        "version": env!("CARGO_PKG_VERSION"),
+    });
     let web = rowbit_web::Web {
+        setup: setup_json,
         sign_in,
         hosts: config.public_host().into_iter().collect(),
         secure: config.https(),
@@ -486,7 +515,7 @@ fn place_files(command: &mut Command) -> anyhow::Result<()> {
             command: GrantsCommand::Diff { admin } | GrantsCommand::Apply { admin, .. },
         } => admin.place()?,
         Command::Connect(args) => args.place(),
-        Command::Demo(_) | Command::Setup(_) | Command::Ping { .. } => {}
+        Command::Demo(_) | Command::Setup(_) | Command::Ping { .. } | Command::Status(_) => {}
     }
     Ok(())
 }
@@ -831,7 +860,8 @@ async fn main() -> anyhow::Result<()> {
                         println!("{agent}");
                         if let Some((created, last)) = manual {
                             println!(
-                                "  the agent's own token (rowbit agents token, or rowbit connect before 0.2.3): made {}, {}",
+                                "  {}: made {}, {}",
+                                rowbit_engine::overview::OWN_TOKEN,
                                 review::when(created),
                                 used(last)
                             );
@@ -889,6 +919,7 @@ async fn main() -> anyhow::Result<()> {
             connect::run(args)?;
         }
         Command::Setup(args) => setup::run(args).await?,
+        Command::Status(args) => status::run(args)?,
         Command::Ping { url } => {
             let adapter = rowbit_mysql::MySqlAdapter::new(&database_url(&url)?)?;
             let info = adapter.server_info().await?;

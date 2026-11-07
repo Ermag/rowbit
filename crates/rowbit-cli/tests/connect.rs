@@ -321,6 +321,18 @@ fn a_project_folder_finds_the_setup_in_rowbit_home() {
     );
     let (_, agents) = in_app(&["agents"]);
     assert!(agents.contains("Claude Code in "), "{agents}");
+    // `rowbit status` says what it guards, without the password.
+    let (ok, status) = in_app(&["status"]);
+    assert!(ok, "{status}");
+    assert!(
+        status.contains("shop  ~/.rowbit/shop")
+            && status.contains("database: shop on h:3306 as u, no TLS")
+            && status.contains("not running")
+            && status.contains("agent coding-agent: ")
+            && status.contains("  Claude Code in "),
+        "{status}"
+    );
+    assert!(!status.contains(":p@"), "{status}");
 
     // Two, and neither the default: Rowbit asks which.
     std::fs::create_dir_all(c.home.join(".rowbit/other")).unwrap();

@@ -16,7 +16,7 @@ cd ~/projects/my-app
 rowbit connect claude-code
 ```
 
-Rowbit finds its setup on its own: the folder's `rowbit.yml` if it has one, else `~/.rowbit/default`, else your only setup in `~/.rowbit` or the demo, and says which it used. With several and no `default`, it lists them and asks for `--dir`. For Claude Code the entry applies to this project only, so other projects don't see Rowbit; `--scope user` adds it everywhere. Each project you connect gets a token of its own, so connecting a second project doesn't sign out the first, and `rowbit agents` lists them all.
+Rowbit finds its setup on its own: the folder's `rowbit.yml` if it has one, else `~/.rowbit/default`, else your only setup in `~/.rowbit` or the demo, and says which it used. With several and no `default`, it lists them and asks for `--dir`. For Claude Code the entry applies to this project only, so other projects don't see Rowbit; `--scope user` adds it everywhere. Each project you connect gets a token of its own, so connecting a second project doesn't sign out the first. `rowbit status` lists every setup, the database each guards and where each agent is connected; the review page's Setup view shows the same for its own.
 
 Rowbit doesn't write `.mcp.json` (Claude Code's project scope), since that file is meant to be committed and would carry the token.
 
