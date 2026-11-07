@@ -1,7 +1,9 @@
 // The docs' title links back to the home page, and the bar gets the same
 // links as the home page's header, so the two read as one site.
 (function () {
-  var home = "/rowbit/";
+  // The docs live in docs/ under the home page; mdBook gives each page
+  // the way back to the docs' root.
+  var home = typeof path_to_root === "string" ? path_to_root + "../" : "/rowbit/";
   var title = document.querySelector(".menu-title");
   if (title) {
     title.textContent = "";

@@ -120,6 +120,18 @@ def rewrite(page, text, on_site, errors):
     return "".join(lines)
 
 
+def check_readme(on_site, errors):
+    """The README links to the docs on the site: each page must be on it,
+    and each #anchor a heading there."""
+    pattern = re.compile(re.escape(BASE) + r"/docs/([^)\s#]*?)\.html(?:#([^)\s]+))?")
+    for m in pattern.finditer((ROOT / "README.md").read_text()):
+        page, anchor = m.group(1) + ".md", m.group(2)
+        if page not in on_site:
+            errors.append(f"README.md: {m.group(0)} isn't a page on the site")
+        elif anchor and anchor not in anchors(DOCS / page):
+            errors.append(f"README.md: no heading #{anchor} in docs/{page}")
+
+
 def summary_line(text):
     """The page's first sentence, for llms.txt."""
     in_code = False
@@ -166,6 +178,7 @@ def main():
             + f'\n\n---\n\n<p class="rowbit-md"><a href="{BASE}/docs/{page}">This page as Markdown</a>'
             + f' · <a href="{BASE}/llms.txt">llms.txt</a></p>\n'
         )
+    check_readme(on_site, errors)
     if errors:
         sys.exit("broken links:\n  " + "\n  ".join(errors))
     shutil.copy(DOCS / "SUMMARY.md", build / "src" / "SUMMARY.md")
