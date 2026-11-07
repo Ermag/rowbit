@@ -106,6 +106,10 @@ pub fn opts(url: &str) -> Result<Opts, UrlError> {
                     param: key.to_owned(),
                 });
             }
+            // Other clients' settings that change nothing Rowbit relies on,
+            // so an application's DATABASE_URL works as it is.
+            "charset" | "collation" | "connect-timeout" | "connection-limit" | "pool-timeout"
+            | "socket-timeout" | "timezone" | "parsetime" | "loc" => continue,
             _ => {
                 kept.push(pair);
                 continue;
@@ -314,8 +318,13 @@ mod tests {
             refused("mysql://a@h/db?sslmode=require&socket=/tmp/m.sock").contains("Unix socket")
         );
         assert!(matches!(
-            opts("mysql://a@h/db?charset=utf8"),
+            opts("mysql://a@h/db?colour=blue"),
             Err(UrlError::UnknownParameter { .. })
         ));
+        // Other clients' harmless settings are let go.
+        assert_eq!(
+            d("mysql://a@h/db?charset=utf8mb4&connect_timeout=10&connection_limit=5"),
+            "no TLS"
+        );
     }
 }

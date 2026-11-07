@@ -2,7 +2,14 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
-## Unreleased
+## 0.2.2 (2026-11-07)
+
+Set up on your database: `rowbit setup` checks your database's URL and Rowbit's grants, writes rules that hold every write, and connects your agents; TLS to the database; a container image and an MCP Registry listing.
+
+```sh
+curl -fsSL https://ermag.github.io/rowbit/install.sh | sh
+rowbit setup
+```
 
 ### Upgrading from 0.2.1
 
@@ -10,6 +17,8 @@ Scripts that run `rowbit approve`, `reject` or `undo` without a terminal need `-
 
 ### Fixed
 
+- `rowbit setup` no longer prints grants for an application's own user, which would widen it; it suggests a user of Rowbit's own, says so again at the end, and ends with an error when grants are missing, since every write would be refused. `ROWBIT_DATABASE_URL` wins over a setup's own URL on a re-run, so it can switch users. Failed connections say what to do (a CA file for an unknown certificate, TLS for a server that requires it), and a retry keeps the answers given.
+- Other clients' harmless URL settings (`charset`, `connect_timeout`, ...) are let go by every command, not only by setup.
 - `rowbit demo` connected Claude Code in `rowbit-demo/workspace` while the quickstart sent people to `rowbit-demo`, where Claude Code has no Rowbit tools. The demo now ends with the line to paste into a new terminal (`cd <full path>/workspace && claude`), checks that the client shows the entry, and the quickstart opens the agent before the CLI steps.
 
 ### New

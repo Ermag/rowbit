@@ -337,12 +337,29 @@ pub async fn run(a: SetupArgs) -> anyhow::Result<()> {
         _ => {}
     }
     say("Writes wait for you on the review page until you add rules to rowbit.yml.");
+    say(&format!(
+        "Agents can read every table {} can. Limit what each one sees with scopes: https://ermag.github.io/rowbit/docs/spec/policy.html#scopes",
+        found.account
+    ));
     if dir != place::home()?.join("default") {
         say(&format!(
             "Other commands find this setup with --dir {}.",
             quoted(&dir)
         ));
     }
+    if !found.own_user {
+        println!();
+        say(&format!(
+            "Rowbit is connecting as {}, not a user of its own. Once an administrator has made one with the statements above, run rowbit setup again and switch to it, or set ROWBIT_DATABASE_URL to its URL and run rowbit setup.",
+            found.account
+        ));
+    }
+    anyhow::ensure!(
+        found.missing.is_empty(),
+        "set up, but not ready: {} lacks {}, so Rowbit refuses every write until an administrator grants it",
+        found.account,
+        found.missing.join(", ")
+    );
     Ok(())
 }
 
@@ -378,11 +395,19 @@ fn make_private_dir(dir: &Path) -> anyhow::Result<()> {
 /// What the database said when Rowbit connected.
 struct Found {
     tables: Vec<String>,
+    /// The user Rowbit connects as.
+    account: String,
+    /// Whether it's a user of Rowbit's own.
+    own_user: bool,
+    /// Privileges Rowbit needs that it lacks.
+    missing: Vec<String>,
 }
 
 /// Picks the database URL, checks it, and returns it with what was found.
 /// On a terminal, every mistake asks again rather than ending setup.
 async fn database(a: &SetupArgs, ask: &Ask, dir: &Path) -> anyhow::Result<(String, Found)> {
+    // What the person typed last, so a retry only needs the wrong answer.
+    let mut answers: Option<Answers> = None;
     let mut url = match first_url(a, dir)? {
         Some((url, source)) if is_demo(&url) => {
             say(&format!(
@@ -393,17 +418,17 @@ async fn database(a: &SetupArgs, ask: &Ask, dir: &Path) -> anyhow::Result<(Strin
                 ask.asking,
                 "unset ROWBIT_DATABASE_URL, or give your database's URL in it"
             );
-            enter_url(ask)?
+            typed(enter_url(ask, None)?, &mut answers)
         }
         Some((url, source)) => {
             say(&format!("Database: {} (from {source})", mask(&url)));
             if ask.yes("Use it?", true)? {
                 url
             } else {
-                enter_url(ask)?
+                typed(enter_url(ask, None)?, &mut answers)
             }
         }
-        None if ask.asking => enter_url(ask)?,
+        None if ask.asking => typed(enter_url(ask, None)?, &mut answers),
         None => anyhow::bail!(
             "no database URL: put it in ROWBIT_DATABASE_URL (kept out of your shell history and process list), or pass --database-url"
         ),
@@ -424,7 +449,7 @@ async fn database(a: &SetupArgs, ask: &Ask, dir: &Path) -> anyhow::Result<(Strin
             Ok(checked) => checked,
             Err(e) if !ask.asking => return Err(e),
             Err(e) => {
-                say(&format!("{e:#}"));
+                say(&explain(&e, &url));
                 if let Some(old) = &previous {
                     if ask.yes(
                         "Try again, once an administrator has run the statements?",
@@ -438,7 +463,7 @@ async fn database(a: &SetupArgs, ask: &Ask, dir: &Path) -> anyhow::Result<(Strin
                     went_back = true;
                     continue;
                 }
-                url = enter_url(ask)?;
+                url = typed(enter_url(ask, answers.as_ref())?, &mut answers);
                 continue;
             }
         };
@@ -458,7 +483,7 @@ async fn database(a: &SetupArgs, ask: &Ask, dir: &Path) -> anyhow::Result<(Strin
             }
             Next::Switch(suggested) => {
                 if ask.yes(
-                    "Switch to that user now? Run the statements above first.",
+                    "Switch to that user now? Yes once an administrator has run the statements above; no carries on with the user in the URL.",
                     false,
                 )? {
                     previous = Some(url);
@@ -480,40 +505,119 @@ fn is_demo(url: &str) -> bool {
     url.contains("://rowbit:rowbit-quickstart@")
 }
 
-/// Asks for the URL a piece at a time, with only the password hidden.
-fn enter_url(ask: &Ask) -> anyhow::Result<String> {
+/// The answers to `enter_url`'s questions.
+#[derive(Clone, Default)]
+struct Answers {
+    host: String,
+    port: String,
+    database: String,
+    user: String,
+    secret: String,
+    tls: String,
+    ca: String,
+}
+
+/// Keeps what was typed, and gives back the URL.
+fn typed((url, given): (String, Answers), answers: &mut Option<Answers>) -> String {
+    *answers = Some(given);
+    url
+}
+
+/// Asks for the URL a piece at a time, with only the password hidden. After
+/// a failed try, `previous` fills in the answers given, so only the wrong
+/// one needs typing again.
+fn enter_url(ask: &Ask, previous: Option<&Answers>) -> anyhow::Result<(String, Answers)> {
+    let p = previous.cloned().unwrap_or_default();
+    let or = |given: &str, fallback: &'static str| -> String {
+        if given.is_empty() {
+            fallback.to_owned()
+        } else {
+            given.to_owned()
+        }
+    };
     say("Your database (MariaDB or MySQL); only the password is hidden:");
-    let host = ask.line("  Host:", "127.0.0.1")?;
-    let port = ask.line("  Port:", "3306")?;
-    let database = ask.line("  Database:", "")?;
-    let user = ask.line("  User:", "")?;
-    let password = ask.secret("  Password:")?;
-    let default = if rowbit_mysql::url::is_local(&host) {
+    let host = ask.line("  Host:", &or(&p.host, "127.0.0.1"))?;
+    let port = ask.line("  Port:", &or(&p.port, "3306"))?;
+    let database = ask.line("  Database:", &p.database)?;
+    let user = ask.line("  User:", &p.user)?;
+    let mut password = ask.secret(if previous.is_some() {
+        "  Password (Enter keeps the last one):"
+    } else {
+        "  Password:"
+    })?;
+    if password.is_empty() {
+        password = p.secret.clone();
+    }
+    let local_default = if rowbit_mysql::url::is_local(&host) {
         "n"
     } else {
         "v"
     };
-    let tls = match ask
+    let choice = ask
         .line(
             "  TLS (n: none; r: encrypted, certificate not checked, open to interception; v: encrypted and the certificate checked):",
-            default,
+            &or(&p.tls, local_default),
         )?
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "r" => "?ssl-mode=REQUIRED",
-        "v" => "?ssl-mode=VERIFY_IDENTITY",
-        _ => "",
+        .to_ascii_lowercase();
+    let mut tls = match choice.as_str() {
+        "r" => "?ssl-mode=REQUIRED".to_owned(),
+        "v" => "?ssl-mode=VERIFY_IDENTITY".to_owned(),
+        _ => String::new(),
+    };
+    let mut ca = String::new();
+    if tls.ends_with("VERIFY_IDENTITY") {
+        ca = ask.line(
+            "  Your provider's CA file, if it gives you one (Enter for the public CAs):",
+            &p.ca,
+        )?;
+        if !ca.is_empty() {
+            let path = match ca.strip_prefix("~/") {
+                Some(rest) => {
+                    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(rest)
+                }
+                None => PathBuf::from(&ca),
+            };
+            let path = std::path::absolute(&path).unwrap_or(path);
+            tls.push_str(&format!("&ssl-ca={}", encode(&path.display().to_string())));
+        }
+    }
+    let given = Answers {
+        host: host.clone(),
+        port: port.clone(),
+        database: database.clone(),
+        user: user.clone(),
+        secret: password.clone(),
+        tls: choice,
+        ca,
     };
     let userinfo = if password.is_empty() {
         encode(&user)
     } else {
         format!("{}:{}", encode(&user), encode(&password))
     };
-    Ok(format!(
+    let url = format!(
         "mysql://{userinfo}@{host}:{port}/{}{tls}",
         encode(&database)
-    ))
+    );
+    Ok((url, given))
+}
+
+/// Why a connection failed, in a line, with what to do for the usual
+/// causes.
+fn explain(e: &anyhow::Error, url: &str) -> String {
+    let cause = e.root_cause().to_string();
+    let hint = if cause.contains("UnknownIssuer") {
+        " The server's certificate isn't signed by a CA Rowbit trusts. If your provider gives you a CA file, give it when asked (or add ssl-ca=<file> to the URL); r encrypts without checking the certificate."
+    } else if cause.contains("NotValidForName") {
+        " The server's certificate is for another name: connect by the host name it was issued for."
+    } else if cause.contains("secure transport") {
+        " The server only takes TLS connections: choose r or v."
+    } else if cause.contains("Access denied") {
+        " Check the user and password."
+    } else {
+        ""
+    };
+    format!("Couldn't connect to {}: {cause}.{hint}", mask(url))
 }
 
 /// Percent-encodes everything but the URL's unreserved characters.
@@ -533,22 +637,29 @@ fn first_url(a: &SetupArgs, dir: &Path) -> anyhow::Result<Option<(String, String
     if let Some(url) = &a.database_url {
         return Ok(Some((url.clone(), "--database-url".into())));
     }
+    // Set on purpose, it wins over the setup's own URL, so a re-run can
+    // switch users; left from the demo, it doesn't.
+    let shell = std::env::var("ROWBIT_DATABASE_URL")
+        .ok()
+        .filter(|u| !u.is_empty());
+    if let Some(url) = shell.clone().filter(|u| !is_demo(u)) {
+        return Ok(Some((url, "ROWBIT_DATABASE_URL".into())));
+    }
     if let Some(url) = place::read_env_file(&dir.join(place::ENV_FILE))? {
         return Ok(Some((url, "this setup".into())));
     }
-    for var in ["ROWBIT_DATABASE_URL", "DATABASE_URL"] {
-        if let Ok(url) = std::env::var(var)
-            && !url.is_empty()
-        {
-            return Ok(Some((url, var.into())));
-        }
+    if let Ok(url) = std::env::var("DATABASE_URL")
+        && !url.is_empty()
+    {
+        return Ok(Some((url, "DATABASE_URL".into())));
     }
     if let Ok(src) = std::fs::read_to_string(".env")
         && let Some(url) = place::env_value(&src, "DATABASE_URL")
     {
         return Ok(Some((url, "DATABASE_URL in .env".into())));
     }
-    Ok(None)
+    // The demo's URL, offered only to say it isn't yours.
+    Ok(shell.map(|url| (url, "ROWBIT_DATABASE_URL".into())))
 }
 
 /// The URL as Rowbit will use it, or why it can't.
@@ -710,10 +821,16 @@ async fn check(url: &str) -> anyhow::Result<Checked> {
         tables.len(),
         if tables.len() == 1 { "" } else { "s" }
     ));
+    let compared = compare(&have.grants, &database);
     Ok(Checked {
-        found: Found { tables },
+        found: Found {
+            tables,
+            account: account.to_string(),
+            own_user: account.user == "rowbit",
+            missing: compared.missing.clone(),
+        },
         account,
-        compared: compare(&have.grants, &database),
+        compared,
         database,
         roles: role.is_some_and(|r| !r.eq_ignore_ascii_case("NONE")),
     })
@@ -821,7 +938,10 @@ fn grant_lines(database: &str, to: &str, privileges: &[String]) -> Vec<String> {
 /// terminal the statement gets a placeholder instead.
 fn report(url: &str, c: &Checked, asking: bool) -> Next {
     let r = &c.compared;
-    if !r.missing.is_empty() {
+    let own = c.account.user == "rowbit";
+    // Grants for an application's user would widen it; it gets a user of
+    // Rowbit's own suggested instead, below.
+    if own && !r.missing.is_empty() {
         say(&format!(
             "{} lacks what Rowbit needs (see docs/privileges.md). An administrator can add it with:",
             c.account
@@ -894,7 +1014,7 @@ fn report(url: &str, c: &Checked, asking: bool) -> Next {
     match password {
         Some(p) => Next::Switch(with_user(url, "rowbit", &p)),
         None => {
-            say("Then run rowbit setup again with that user's URL.");
+            say("Then run rowbit setup again with that user's URL in ROWBIT_DATABASE_URL.");
             Next::Done
         }
     }
@@ -1289,7 +1409,12 @@ mod tests {
     #[test]
     fn report_switches_to_rowbits_own_user_only_on_a_terminal() {
         let checked = |user: &str, compared: Compared| Checked {
-            found: Found { tables: vec![] },
+            found: Found {
+                tables: vec![],
+                account: format!("{user}@%"),
+                own_user: user == "rowbit",
+                missing: compared.missing.clone(),
+            },
             account: Account {
                 user: user.into(),
                 host: "%".into(),

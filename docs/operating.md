@@ -20,7 +20,7 @@ docker run -i --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
   ghcr.io/ermag/rowbit mcp --agent claude-code
 ```
 
-That's the command an MCP client runs for an agent over stdio. `rowbit serve` in a container needs reviewers to sign in through your identity provider, since it listens beyond loopback; see [the container image](spec/setup.md#the-container-image).
+That's the command an MCP client runs for an agent over stdio. As with any stdio setup, it puts the database URL and `rowbit.db` within the agent's reach, since the agent's client starts it with the setup's files; on your own machine, prefer `rowbit serve` over HTTP, which `rowbit setup` configures. `rowbit serve` in a container needs reviewers to sign in through your identity provider, since it listens beyond loopback; see [the container image](spec/setup.md#the-container-image).
 
 ## When Rowbit is down
 

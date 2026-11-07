@@ -1,6 +1,6 @@
 {
   "name": "rowbit",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Teaches the agent to fix data through Rowbit: one narrow write at a time, and a review link for the person when a write is held. Connect Rowbit itself with `rowbit connect claude-code`.",
   "author": {
     "name": "Rowbit",
