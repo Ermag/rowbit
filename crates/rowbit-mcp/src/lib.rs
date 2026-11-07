@@ -29,9 +29,9 @@ send one INSERT, UPDATE or DELETE (or a schema change) to `propose_write`. \
 Rowbit previews it without running it and checks it against the team's \
 rules: it may be applied at once, held for a person, or rejected with a \
 reason. You cannot approve changes; a person does. When a change is held, \
-give the person its `review_url` as a Markdown link, such as \
-[Review change 4](http://127.0.0.1:8080/changes/4), so they can click it, \
-say what it changes, and stop: don't \
+give the person its `review_url` as a link whose text is the URL \
+itself, as in <http://127.0.0.1:8080/changes/4>, so they can click it and \
+see where it goes; say what it changes, and stop: don't \
 retry the write in another form or split it to get under a rule. Follow \
 it with `change_status`.";
 

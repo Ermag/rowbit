@@ -350,6 +350,7 @@ async fn serve(
     set_password: bool,
     server: &ServerArgs,
     setup: &Setup,
+    open_browser: bool,
 ) -> anyhow::Result<()> {
     let config = server.load()?;
     let listen = config.listen(listen);
@@ -410,7 +411,14 @@ async fn serve(
     for n in &config.notify {
         eprintln!("rowbit: held changes are announced to {}", n.name);
     }
-    rowbit_web::serve(engine, web, listen).await?;
+    let page = format!("{address}/");
+    rowbit_web::serve_then(engine, web, listen, move |_| {
+        // Bound: whatever answers is this server, not another left running.
+        if open_browser {
+            term::open_browser(&page);
+        }
+    })
+    .await?;
     Ok(())
 }
 
@@ -792,7 +800,7 @@ async fn main() -> anyhow::Result<()> {
             set_password,
             server,
             setup,
-        } => serve(listen, set_password, &server, &setup).await?,
+        } => serve(listen, set_password, &server, &setup, false).await?,
         Command::Agents {
             command,
             policy,

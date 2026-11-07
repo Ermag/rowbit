@@ -351,10 +351,13 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
     println!();
     std::io::stdout().flush()?;
 
-    if !a.no_open && std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+    let open = !a.no_open
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
+        && crate::term::can_open_browser();
+    if open {
         say("Opening the review page in your browser (--no-open skips this).");
         println!();
-        crate::term::open_when_up(address.clone());
     }
     std::env::set_current_dir(&dir)?;
     crate::serve(
@@ -364,6 +367,7 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
             config: dir.join("rowbit-server.yml"),
         },
         &setup,
+        open,
     )
     .await
 }
