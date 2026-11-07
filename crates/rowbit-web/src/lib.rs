@@ -69,6 +69,9 @@ pub struct Web {
     pub secure: bool,
     /// Serve agents over MCP at `/mcp`, with this default database.
     pub mcp: Option<String>,
+    /// What the Setup view shows besides the agents: the database without
+    /// its password, Rowbit's directory, sign-in. Built by `rowbit serve`.
+    pub setup: serde_json::Value,
 }
 
 #[derive(Clone)]
@@ -78,6 +81,7 @@ struct App {
     sign_in: Arc<SignIn>,
     secure: bool,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
+    setup: Arc<serde_json::Value>,
     /// Wrong passwords in a row, across all clients. Held for the whole of
     /// a sign-in, so passwords are checked one at a time and each wrong one
     /// waits longer: the wait caps the guessing rate, and only one Argon2
@@ -109,6 +113,7 @@ pub fn router(engine: Arc<Engine>, web: Web) -> Router {
         sign_in: Arc::new(web.sign_in),
         secure: web.secure,
         sessions: Arc::new(Mutex::new(HashMap::new())),
+        setup: Arc::new(web.setup),
         failures: Arc::new(tokio::sync::Mutex::new(0)),
     };
     Router::new()
@@ -127,6 +132,7 @@ pub fn router(engine: Arc<Engine>, web: Web) -> Router {
         .route("/api/changes/{id}/reject", post(api::reject))
         .route("/api/changes/{id}/undo", post(api::undo))
         .route("/api/verify", get(api::verify))
+        .route("/api/setup", get(api::setup))
         .route("/api/deliveries", get(api::deliveries))
         .merge(match mcp {
             // Every request signs in with its agent's token first.

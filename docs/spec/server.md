@@ -65,6 +65,8 @@ Reviewers sign in to the web UI through an OpenID Connect provider: Google Works
 - `reviewers.allow` decides who may sign in: an exact `emails` entry, an email in one of the `domains`, or membership of one of the `groups` (the token's `groups` claim). Anyone else is refused, and an empty `allow` refuses everyone.
 - The audit log records the reviewer as `human:<email>`.
 
+Everyone who can sign in also sees the Setup view: the database's host, port, user and name, Rowbit's folder, this identity provider, the notification targets' names and each agent connection's label (see [What Rowbit is connected to](setup.md#what-rowbit-is-connected-to)). No secrets, but more than which changes are held.
+
 Sessions live in memory, so restarting `rowbit serve` signs everyone out. Signing in gives the same session as v0.1: an `HttpOnly`, `SameSite=Strict` cookie (and `Secure` behind HTTPS), valid for 12 hours or until the process stops, and a per-session token every action must send. The short-lived cookie that brings the browser back to its login is `SameSite=Lax`, since the provider's redirect back is a cross-site navigation; it holds only a random id, while `state`, `nonce` and the PKCE verifier stay in Rowbit's memory, and each login can be finished once, within 10 minutes. After sign-in, the callback answers with a page that moves on to the queue itself, because browsers don't send a `SameSite=Strict` cookie on a redirect chain that started at another site.
 
 **Without `reviewers.oidc`,** `rowbit serve` keeps v0.1's shared password and typed name, but only on a loopback address. It refuses to listen anywhere else, so the password never crosses a network. This is for trying Rowbit on one machine.
