@@ -17,13 +17,13 @@ curl -fsSL https://ermag.github.io/rowbit/install.sh | sh
 rowbit setup
 ```
 
-macOS and Linux (Windows through WSL). If `~/.local/bin` isn't on your `PATH`, the installer says so: run `~/.local/bin/rowbit setup` instead. Setup finds your database's URL, checks Rowbit's privileges and prints the `GRANT` statements to fix them, writes rules that hold every write for review, connects the agent clients you pick, and prints the review page's password. See the [quickstart](docs/quickstart.md).
+macOS and Linux (Windows through WSL). If `~/.local/bin` isn't on your `PATH`, the installer says so: run `~/.local/bin/rowbit setup` instead. Setup finds your database's URL, checks Rowbit's privileges and prints the `GRANT` statements to fix them, writes rules that hold every write for review, connects the agent clients you pick, and prints the review page's password. See the [quickstart](https://ermag.github.io/rowbit/docs/quickstart.html).
 
-No database to try it on? Choose the sample when setup asks: it runs a shop database in Docker with Rowbit in front of it (the [tour](docs/tour.md)). Then ask the agent:
+No database to try it on? Choose the sample when setup asks: it runs a shop database in Docker with Rowbit in front of it (the [tour](https://ermag.github.io/rowbit/docs/tour.html)). Then ask the agent:
 
 > The pending orders are stuck. Cancel them.
 
-**Works with** [Claude Code](docs/connect.md), [Cursor](docs/connect.md), [VS Code](docs/connect.md), [Claude Desktop](docs/connect.md), [Codex](docs/connect.md), [Gemini CLI](docs/connect.md), [Windsurf](docs/connect.md) and [any MCP client](docs/connect.md#any-other-client).
+**Works with** [Claude Code](https://ermag.github.io/rowbit/docs/connect.html), [Cursor](https://ermag.github.io/rowbit/docs/connect.html), [VS Code](https://ermag.github.io/rowbit/docs/connect.html), [Claude Desktop](https://ermag.github.io/rowbit/docs/connect.html), [Codex](https://ermag.github.io/rowbit/docs/connect.html), [Gemini CLI](https://ermag.github.io/rowbit/docs/connect.html), [Windsurf](https://ermag.github.io/rowbit/docs/connect.html) and [any MCP client](https://ermag.github.io/rowbit/docs/connect.html#any-other-client).
 
 | Database | Status |
 |---|---|
@@ -31,7 +31,7 @@ No database to try it on? Choose the sample when setup asks: it runs a shop data
 | PostgreSQL | Planned, next |
 | MongoDB, Redis | Exploring |
 
-[**Docs**](https://ermag.github.io/rowbit/docs/) · [Quickstart](docs/quickstart.md) · [Interactive demo](https://ermag.github.io/rowbit/) · [Tell us what you think](https://github.com/Ermag/rowbit/discussions/2)
+[**Docs**](https://ermag.github.io/rowbit/docs/) · [Quickstart](https://ermag.github.io/rowbit/docs/quickstart.html) · [Interactive demo](https://ermag.github.io/rowbit/) · [Tell us what you think](https://github.com/Ermag/rowbit/discussions/2)
 
 ## What it does
 
@@ -41,13 +41,13 @@ You ask a coding agent to fix the orders stuck in pending, and it writes `UPDATE
 
 ## How it works
 
-Rowbit sits between your agents and your database. Agents talk to Rowbit over MCP, never to the database directly: they [read and propose writes](docs/connect.md#what-agents-can-do) through it, without the database's credentials.
+Rowbit sits between your agents and your database. Agents talk to Rowbit over MCP, never to the database directly: they [read and propose writes](https://ermag.github.io/rowbit/docs/connect.html#what-agents-can-do) through it, without the database's credentials.
 
 - **Exact preview.** Rowbit reads the rows a write would change and replays it on a private temporary copy, so you see each row before and after, exactly as the table would store it. Your tables are only read.
-- **Rules, then people.** A small YAML file lets safe writes through, holds risky ones for a person, and refuses the rest. Only people approve, and approval applies exactly what was previewed, or nothing. See [rules](docs/spec/policy.md).
+- **Rules, then people.** A small YAML file lets safe writes through, holds risky ones for a person, and refuses the rest. Only people approve, and approval applies exactly what was previewed, or nothing. See [rules](https://ermag.github.io/rowbit/docs/spec/policy.html).
 - **Undo one change.** Rowbit keeps every row a change touched, so you can take back one bad write and keep everything else.
 - **Scopes and shadow mode.** Per agent, which tables it may read or write and which columns it may never see, enforced by the database with a user of the agent's own. Shadow mode shows what the rules would hold before you enforce them.
-- **Review where you are.** A web UI in the binary, sign-in through your identity provider, Slack or webhook notifications, and an audit log in a hash chain. See [how a change moves](docs/spec/change-lifecycle.md).
+- **Review where you are.** A web UI in the binary, sign-in through your identity provider, Slack or webhook notifications, and an audit log in a hash chain. See [how a change moves](https://ermag.github.io/rowbit/docs/spec/change-lifecycle.html).
 
 ```yaml
 # rowbit.yml
@@ -67,11 +67,11 @@ agents:
 
 Here the agent can change the `status` of up to 20 orders on its own. An update that writes any other column, or more rows, waits for a person, and deletes are refused.
 
-See [examples/rowbit.yml](examples/rowbit.yml) and the [rowbit.yml spec](docs/spec/policy.md) for the full schema.
+See [examples/rowbit.yml](examples/rowbit.yml) and the [rowbit.yml spec](https://ermag.github.io/rowbit/docs/spec/policy.html) for the full schema.
 
 ## Connect your agent
 
-`rowbit setup` connects the clients you pick. `rowbit connect <client>` sets up one more, with a token of the agent's own. See [Connect your agent](docs/connect.md).
+`rowbit setup` connects the clients you pick. `rowbit connect <client>` sets up one more, with a token of the agent's own. See [Connect your agent](https://ermag.github.io/rowbit/docs/connect.html).
 
 <details>
 <summary><b>Claude Code</b></summary>
@@ -147,13 +147,13 @@ The well-known incidents of coding agents wiping production databases are a cred
 
 ## Good to know
 
-- **Only Rowbit holds the database credentials.** If an agent also has its own connection string, it can write around Rowbit. Give agents Rowbit's endpoint and nothing else (over HTTP, a token of their own), and Rowbit [a database user of its own](docs/privileges.md).
+- **Only Rowbit holds the database credentials.** If an agent also has its own connection string, it can write around Rowbit. Give agents Rowbit's endpoint and nothing else (over HTTP, a token of their own), and Rowbit [a database user of its own](https://ermag.github.io/rowbit/docs/privileges.html).
 - **An agent without `scopes` reads and writes with Rowbit's privileges.** Its rules still decide every write, but nothing stops it reading whatever Rowbit's user can. Give production agents scopes.
 - **Undo restores rows, not the world.** It puts the data back, but it can't take back an email that was sent or a refund that was paid because of it.
-- **Preview never writes to your tables.** It reads the affected rows without taking locks and replays the write on a temporary copy that only Rowbit's connection can see. Tables with triggers or cascading foreign keys are refused, because their side effects wouldn't show in the preview or be undone. So are tables Rowbit's database user can't fully inspect: it needs the `TRIGGER` and `PROCESS` privileges. See [database privileges](docs/privileges.md) for the exact grants.
-- **Where data lives.** Change state, previews (including before and after copies of affected rows) and the audit log are stored in a local SQLite file next to Rowbit. Protect it like a replica of the database ([how](docs/privileges.md#the-sqlite-file)).
-- **The CLI trusts whoever runs it.** Anyone who can read `rowbit.db` and has the database URL can run `rowbit approve`, under any `--as` name. Keep both from agents, and run Rowbit as a user they can't act as; see [Before you use it for real](docs/quickstart.md#before-you-use-it-for-real).
-- **Fail closed.** Anything Rowbit can't evaluate, it refuses. See the [change lifecycle](docs/spec/change-lifecycle.md) and [SECURITY.md](SECURITY.md).
+- **Preview never writes to your tables.** It reads the affected rows without taking locks and replays the write on a temporary copy that only Rowbit's connection can see. Tables with triggers or cascading foreign keys are refused, because their side effects wouldn't show in the preview or be undone. So are tables Rowbit's database user can't fully inspect: it needs the `TRIGGER` and `PROCESS` privileges. See [database privileges](https://ermag.github.io/rowbit/docs/privileges.html) for the exact grants.
+- **Where data lives.** Change state, previews (including before and after copies of affected rows) and the audit log are stored in a local SQLite file next to Rowbit. Protect it like a replica of the database ([how](https://ermag.github.io/rowbit/docs/privileges.html#the-sqlite-file)).
+- **The CLI trusts whoever runs it.** Anyone who can read `rowbit.db` and has the database URL can run `rowbit approve`, under any `--as` name. Keep both from agents, and run Rowbit as a user they can't act as; see [Before you use it for real](https://ermag.github.io/rowbit/docs/quickstart.html#before-you-use-it-for-real).
+- **Fail closed.** Anything Rowbit can't evaluate, it refuses. See the [change lifecycle](https://ermag.github.io/rowbit/docs/spec/change-lifecycle.html) and [SECURITY.md](SECURITY.md).
 
 ## Contributing
 

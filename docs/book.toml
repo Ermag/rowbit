@@ -12,6 +12,11 @@ src = "src"
 git-repository-url = "https://github.com/Ermag/rowbit"
 site-url = "/rowbit/docs/"
 no-section-label = true
+# The home page's colours, and links back to it: docs/theme/.
+default-theme = "navy"
+preferred-dark-theme = "navy"
+additional-css = ["theme/rowbit.css"]
+additional-js = ["theme/rowbit.js"]
 
 [output.html.search]
 enable = true
