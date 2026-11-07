@@ -126,6 +126,11 @@ pub async fn run(a: SetupArgs) -> anyhow::Result<()> {
 
     connect::check_name(&a.name)?;
     let dir = place::home()?.join(&a.name);
+    anyhow::ensure!(
+        !std::fs::symlink_metadata(&dir).is_ok_and(|m| m.file_type().is_symlink()),
+        "{} is a link (`rowbit demo` keeps one to its directory there); give this setup another name with --name",
+        dir.display()
+    );
     let resuming = place::has_rowbit_files(&dir);
     if resuming {
         say(&format!(
@@ -341,10 +346,17 @@ pub async fn run(a: SetupArgs) -> anyhow::Result<()> {
         "Agents can read every table {} can. Limit what each one sees with scopes: https://ermag.github.io/rowbit/docs/spec/policy.html#scopes",
         found.account
     ));
-    if dir != place::home()?.join("default") {
+    let dir_flag = if dir != place::home()?.join("default") {
+        format!(" --dir {}", quoted(&dir))
+    } else {
+        String::new()
+    };
+    say(&format!(
+        "Add Rowbit to another project: cd into it and run rowbit connect claude-code{dir_flag} (or cursor, codex, ...)."
+    ));
+    if !dir_flag.is_empty() {
         say(&format!(
-            "Other commands find this setup with --dir {}.",
-            quoted(&dir)
+            "Other commands find this setup with{dir_flag}, or without it when it's your only one."
         ));
     }
     if !found.own_user {

@@ -1,11 +1,24 @@
 # Connect your agent
 
-Agents reach Rowbit over MCP. [`rowbit setup`](quickstart.md) connects the clients you pick as it sets Rowbit up, and connects more when run again. `rowbit connect` sets up one client, as one agent from `rowbit.yml`. Run it where `rowbit serve` runs, or pass `--dir` (in the demo, inside `rowbit-demo/`):
+Agents reach Rowbit over MCP. [`rowbit setup`](quickstart.md) connects the clients you pick as it sets Rowbit up, and connects more when run again. `rowbit connect` sets up one client, as one agent from `rowbit.yml`:
 
 ```sh
 rowbit connect                  # lists the clients Rowbit knows, and which are installed
 rowbit connect claude-code
 ```
+
+## Add Rowbit to a project you already have
+
+Set Rowbit up once with `rowbit setup` (or try it with the demo), then go to your project and connect your agent there:
+
+```sh
+cd ~/projects/my-app
+rowbit connect claude-code
+```
+
+Rowbit finds its setup on its own: the folder's `rowbit.yml` if it has one, else `~/.rowbit/default`, else your only setup in `~/.rowbit` or the demo, and says which it used. With several and no `default`, it lists them and asks for `--dir`. For Claude Code the entry applies to this project only, so other projects don't see Rowbit; `--scope user` adds it everywhere. Each project you connect gets a token of its own, so connecting a second project doesn't sign out the first, and `rowbit agents` lists them all.
+
+Rowbit doesn't write `.mcp.json` (Claude Code's project scope), since that file is meant to be committed and would carry the token.
 
 | Client | `rowbit connect …` | What it changes |
 |---|---|---|
@@ -22,7 +35,7 @@ With `mcp.http: true` in `rowbit-server.yml` (the demo has it), the client gets 
 `rowbit connect` keeps a backup of any file it changes (`<file>.rowbit-backup`), refuses a file it can't parse, and replaces nothing without being told:
 
 - `--force` replaces an entry of the same name; `--name <name>` adds another.
-- `--new-token` replaces the agent's token. An agent has one token, so this signs out the client that had the old one. After `rowbit demo` connected a client, adding another (or using an install button) takes `--print --new-token`. To connect two clients at once, give each its own agent in `rowbit.yml`.
+- Each client entry gets a token of its own, named for the client and, for Claude Code, the project: "Claude Code in ~/projects/my-app". Connecting the same place again (with `--force`) replaces only that one. `rowbit agents` lists them, and `rowbit agents revoke <id>` signs out all of an agent's.
 - `--agent <id>` picks the agent when `rowbit.yml` lists more than one.
 - `--print` changes nothing in the client and prints what to add by hand, with the token.
 

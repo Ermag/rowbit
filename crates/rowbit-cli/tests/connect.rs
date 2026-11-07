@@ -104,17 +104,17 @@ fn cursor_gets_the_address_and_a_token_of_its_own() {
     assert!(header.starts_with("Bearer rbt_"), "{file}");
     assert!(out.contains(&header[header.len() - 4..]), "{out}");
 
-    // The entry exists, and the agent already has a token.
+    // The entry exists: replacing it takes --force, and replaces its token.
     let (ok, out) = c.run(&["connect", "cursor"]);
     assert!(!ok && out.contains("--force"), "{out}");
-    let (ok, out) = c.run(&["connect", "cursor", "--force"]);
-    assert!(!ok && out.contains("--new-token"), "{out}");
     assert_eq!(
         std::fs::read_to_string(c.home.join(".cursor/mcp.json")).unwrap(),
         file
     );
-    let (ok, out) = c.run(&["connect", "cursor", "--force", "--new-token"]);
+    let (ok, out) = c.run(&["connect", "cursor", "--force"]);
     assert!(ok, "{out}");
+    let (_, agents) = c.run(&["agents"]);
+    assert_eq!(agents.matches("  Cursor: made").count(), 1, "{agents}");
     assert_ne!(
         std::fs::read_to_string(c.home.join(".cursor/mcp.json")).unwrap(),
         file
@@ -153,7 +153,7 @@ fn claude_code_is_set_up_with_its_own_command() {
     assert!(!ok && out.contains("committed"), "{out}");
     let (ok, out) = c.run(&["connect", "claude-code"]);
     assert!(ok, "{out}");
-    assert!(out.contains("Start Claude Code there: cd "), "{out}");
+    assert!(out.contains("Start Claude Code here"), "{out}");
     assert!(!out.contains("workspace"), "{out}");
     let calls = std::fs::read_to_string(&log).unwrap();
     assert!(calls.starts_with("mcp get rowbit\n"), "{calls}");
@@ -264,4 +264,72 @@ fn lists_clients_and_prints_an_address() {
     );
     let token = token_in(&out);
     assert_eq!(token.len(), 4 + 43, "{out}");
+}
+
+#[test]
+fn a_project_folder_finds_the_setup_in_rowbit_home() {
+    let c = Case::new("anywhere");
+    c.http();
+    let log = c.fake_claude();
+    // The app is a folder of its own; Rowbit's files are elsewhere.
+    let app = c.dir.parent().unwrap().join("app");
+    std::fs::create_dir_all(&app).unwrap();
+    let in_app = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_rowbit"))
+            .args(args)
+            .current_dir(&app)
+            .env("HOME", &c.home)
+            .env("PATH", format!("{}:/usr/bin:/bin", c.bin.display()))
+            .env_remove("ROWBIT_DATABASE_URL")
+            .env_remove("ROWBIT_DIR")
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+        )
+    };
+    let (ok, out) = in_app(&["connect", "claude-code"]);
+    assert!(!ok && out.contains("rowbit setup"), "{out}");
+    // Listing clients needs no setup.
+    assert!(in_app(&["connect"]).0);
+
+    // One setup, not called default: found, and named.
+    let shop = c.home.join(".rowbit/shop");
+    std::fs::create_dir_all(&shop).unwrap();
+    for f in ["rowbit.yml", "rowbit-server.yml"] {
+        std::fs::copy(c.dir.join(f), shop.join(f)).unwrap();
+    }
+    std::fs::write(shop.join("env"), "ROWBIT_DATABASE_URL=mysql://u:p@h/shop\n").unwrap();
+    std::fs::set_permissions(
+        shop.join("env"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o600),
+    )
+    .unwrap();
+    let (ok, out) = in_app(&["connect", "claude-code"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("using shop in ~/.rowbit/shop"), "{out}");
+    assert!(out.contains("Start Claude Code here"), "{out}");
+    assert!(
+        std::fs::read_to_string(&log)
+            .unwrap()
+            .contains("mcp add --scope local")
+    );
+    let (_, agents) = in_app(&["agents"]);
+    assert!(agents.contains("Claude Code in "), "{agents}");
+
+    // Two, and neither the default: Rowbit asks which.
+    std::fs::create_dir_all(c.home.join(".rowbit/other")).unwrap();
+    for f in ["rowbit.yml", "env"] {
+        std::fs::copy(shop.join(f), c.home.join(".rowbit/other").join(f)).unwrap();
+    }
+    let (ok, out) = in_app(&["changes"]);
+    assert!(
+        !ok && out.contains("--dir") && out.contains("shop in ~/.rowbit/shop"),
+        "{out}"
+    );
 }

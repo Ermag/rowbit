@@ -811,15 +811,34 @@ async fn main() -> anyhow::Result<()> {
                 }
                 None => {
                     let store = store.open()?;
+                    let connections = store.connection_tokens()?;
+                    let used = |u: Option<i64>| {
+                        u.map(|u| format!("last used {}", review::when(u)))
+                            .unwrap_or_else(|| "never used".into())
+                    };
                     for agent in policy.agents.keys() {
-                        match store.agent_token_times(agent)? {
-                            None => println!("{agent}  no token"),
-                            Some((created, used)) => println!(
-                                "{agent}  token made {}, {}",
+                        let mine: Vec<_> =
+                            connections.iter().filter(|t| &t.agent == agent).collect();
+                        let manual = store.agent_token_times(agent)?;
+                        if manual.is_none() && mine.is_empty() {
+                            println!("{agent}  no token");
+                            continue;
+                        }
+                        println!("{agent}");
+                        if let Some((created, last)) = manual {
+                            println!(
+                                "  the agent's own token (rowbit agents token, or rowbit connect before 0.2.3): made {}, {}",
                                 review::when(created),
-                                used.map(|u| format!("last used {}", review::when(u)))
-                                    .unwrap_or_else(|| "never used".into())
-                            ),
+                                used(last)
+                            );
+                        }
+                        for t in mine {
+                            println!(
+                                "  {}: made {}, {}",
+                                t.label,
+                                review::when(t.created_ms),
+                                used(t.used_ms)
+                            );
                         }
                     }
                 }

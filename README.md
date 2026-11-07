@@ -107,7 +107,7 @@ Adds Rowbit to `~/.cursor/mcp.json`. Restart Cursor.
 rowbit connect vscode
 ```
 
-Or, with `rowbit demo` or `rowbit serve` running, [add it to VS Code](https://insiders.vscode.dev/redirect/mcp/install?name=rowbit&inputs=%5B%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22rowbit_token%22%2C%22description%22%3A%22Rowbit%20agent%20token%20%28from%3A%20rowbit%20connect%20vscode%20--print%20--new-token%29%22%2C%22password%22%3Atrue%7D%5D&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22http%3A%2F%2F127.0.0.1%3A8080%2Fmcp%22%2C%22headers%22%3A%7B%22Authorization%22%3A%22Bearer%20%24%7Binput%3Arowbit_token%7D%22%7D%7D) and paste the token from `rowbit connect vscode --print --new-token` when VS Code asks (an agent has one token, so this signs out a client the demo connected).
+Or, with `rowbit demo` or `rowbit serve` running, [add it to VS Code](https://insiders.vscode.dev/redirect/mcp/install?name=rowbit&inputs=%5B%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22rowbit_token%22%2C%22description%22%3A%22Rowbit%20agent%20token%20%28from%3A%20rowbit%20connect%20vscode%20--print%29%22%2C%22password%22%3Atrue%7D%5D&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22http%3A%2F%2F127.0.0.1%3A8080%2Fmcp%22%2C%22headers%22%3A%7B%22Authorization%22%3A%22Bearer%20%24%7Binput%3Arowbit_token%7D%22%7D%7D) and paste the token from `rowbit connect vscode --print` when VS Code asks.
 
 </details>
 

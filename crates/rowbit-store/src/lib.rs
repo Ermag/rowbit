@@ -140,6 +140,55 @@ pub enum DeliveryOutcome {
     Failed { error: String },
 }
 
+/// A token `rowbit connect` made for one client entry: an agent may have
+/// one per place it is connected, each labelled with where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectionToken {
+    pub agent: String,
+    /// Which client, and where: "Claude Code in ~/projects/app".
+    pub label: String,
+    pub created_ms: i64,
+    pub used_ms: Option<i64>,
+}
+
+const CONNECTION: &str = "connection.";
+
+/// Every connection token, by its hash.
+fn connection_tokens(conn: &Connection) -> Result<Vec<(String, ConnectionToken)>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT key, value FROM settings WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key",
+    )?;
+    let rows = stmt.query_map([CONNECTION], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (key, value) = row?;
+        let t: ConnectionToken =
+            serde_json::from_str(&value).map_err(|e| StoreError::Corrupt(format!("{key}: {e}")))?;
+        out.push((key[CONNECTION.len()..].to_owned(), t));
+    }
+    Ok(out)
+}
+
+/// Removes the connection tokens `remove` picks, inside a transaction.
+fn revoke_connections(
+    tx: &rusqlite::Transaction<'_>,
+    remove: impl Fn(&ConnectionToken) -> bool,
+) -> Result<bool, StoreError> {
+    let mut any = false;
+    for (hash, t) in connection_tokens(tx)? {
+        if remove(&t) {
+            tx.execute(
+                "DELETE FROM settings WHERE key IN (?1, ?2)",
+                params![format!("token.{hash}"), format!("{CONNECTION}{hash}")],
+            )?;
+            any = true;
+        }
+    }
+    Ok(any)
+}
+
 /// Removes `agent`'s token and its times, inside a transaction.
 fn revoke_token(tx: &rusqlite::Transaction<'_>, agent: &str) -> Result<bool, StoreError> {
     let old: Option<String> = tx
@@ -645,14 +694,80 @@ impl Store {
         Ok(token)
     }
 
-    /// Removes `agent`'s MCP token. Returns whether it had one.
+    /// Removes every MCP token of `agent`'s, the one `rowbit agents token`
+    /// made and every connection's. Returns whether it had any.
     pub fn revoke_agent_token(&mut self, agent: &str) -> Result<bool, StoreError> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let had = revoke_token(&tx, agent)?;
+        let had_connections = revoke_connections(&tx, |t| t.agent == agent)?;
+        tx.commit()?;
+        Ok(had || had_connections)
+    }
+
+    /// Makes a new MCP token for one client entry of `agent`'s, replacing
+    /// the one with the same label, and returns it. The agent's other
+    /// tokens keep working. Only its SHA-256 is kept.
+    pub fn issue_connection_token(
+        &mut self,
+        agent: &str,
+        label: &str,
+    ) -> Result<String, StoreError> {
+        use base64::Engine as _;
+        let mut bytes = [0u8; 32];
+        getrandom::fill(&mut bytes).expect("the system has a random source");
+        let token = format!(
+            "rbt_{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+        );
+        let hash = hex(&Sha256::digest(token.as_bytes()));
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        revoke_connections(&tx, |t| t.agent == agent && t.label == label)?;
+        let info = ConnectionToken {
+            agent: agent.to_owned(),
+            label: label.to_owned(),
+            created_ms: now_ms(),
+            used_ms: None,
+        };
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2), (?3, ?4)",
+            params![
+                format!("token.{hash}"),
+                agent,
+                format!("{CONNECTION}{hash}"),
+                serde_json::to_string(&info).expect("serializes"),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(token)
+    }
+
+    /// Removes the token of `agent`'s connection with this label. Returns
+    /// whether there was one.
+    pub fn revoke_connection_token(
+        &mut self,
+        agent: &str,
+        label: &str,
+    ) -> Result<bool, StoreError> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let had = revoke_connections(&tx, |t| t.agent == agent && t.label == label)?;
         tx.commit()?;
         Ok(had)
+    }
+
+    /// Every connection's token, by agent and label.
+    pub fn connection_tokens(&self) -> Result<Vec<ConnectionToken>, StoreError> {
+        let mut out: Vec<ConnectionToken> = connection_tokens(&self.conn)?
+            .into_iter()
+            .map(|(_, t)| t)
+            .collect();
+        out.sort_by(|a, b| (&a.agent, &a.label).cmp(&(&b.agent, &b.label)));
+        Ok(out)
     }
 
     /// The agent a token belongs to, and notes that it was used. `None` for
@@ -662,6 +777,14 @@ impl Store {
         let Some(agent) = self.setting(&format!("token.{hash}"))? else {
             return Ok(None);
         };
+        let key = format!("{CONNECTION}{hash}");
+        if let Some(value) = self.setting(&key)? {
+            let mut info: ConnectionToken = serde_json::from_str(&value)
+                .map_err(|e| StoreError::Corrupt(format!("{key}: {e}")))?;
+            info.used_ms = Some(now_ms());
+            self.set_setting(&key, &serde_json::to_string(&info).expect("serializes"))?;
+            return Ok(Some(agent));
+        }
         self.set_setting(
             &format!("agent.{agent}.token_used_ms"),
             &now_ms().to_string(),
