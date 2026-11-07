@@ -67,14 +67,155 @@ pub fn init(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> {
             anyhow::ensure!(dir.is_dir(), "{} isn't a directory", dir.display());
             Some(dir)
         }
-        None if Path::new("rowbit.yml").exists() => None,
-        None => home()
-            .ok()
-            .map(|h| h.join("default"))
-            .filter(|d| is_setup(d)),
+        // A folder with Rowbit's own files in it is Rowbit's.
+        None if ["rowbit.yml", "rowbit-server.yml", "rowbit.db"]
+            .iter()
+            .any(|f| Path::new(f).exists()) =>
+        {
+            None
+        }
+        None => {
+            let found = home().map(|h| setups(&h)).unwrap_or_default();
+            match pick(&found) {
+                Picked::One(s) => {
+                    if s.name != "default" {
+                        eprintln!("rowbit: using {}", s.describe());
+                    }
+                    Some(s.dir.clone())
+                }
+                Picked::Several if needs_files(&args) => anyhow::bail!(
+                    "Rowbit has several setups and none is the default; pick one with --dir:\n{}",
+                    found
+                        .iter()
+                        .map(|s| format!("  {}", s.describe()))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ),
+                Picked::None if needs_files(&args) => anyhow::bail!(
+                    "no Rowbit setup here: no rowbit.yml in this folder and none in ~/.rowbit. \
+                     Set one up with `rowbit setup` (or try the sample with `rowbit setup --sample`), \
+                     or point at one with --dir <folder>"
+                ),
+                _ => None,
+            }
+        }
     };
     let _ = DIR.set(dir);
     Ok(args)
+}
+
+/// A setup `rowbit setup` or `rowbit demo` made, found without `--dir`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    /// Its name in `~/.rowbit`, or `demo`.
+    pub name: String,
+    pub dir: PathBuf,
+}
+
+impl Found {
+    pub fn describe(&self) -> String {
+        let shown = tilde(&self.dir);
+        if self.name == "demo" {
+            format!("the demo in {shown}")
+        } else {
+            format!("{} in {shown}", self.name)
+        }
+    }
+}
+
+/// `path` with the home directory written as `~`.
+pub fn tilde(path: &Path) -> String {
+    match std::env::var_os("HOME").map(PathBuf::from) {
+        Some(home) if !home.as_os_str().is_empty() => match path.strip_prefix(&home) {
+            Ok(rest) if rest.as_os_str().is_empty() => "~".into(),
+            Ok(rest) => format!("~/{}", rest.display()),
+            Err(_) => path.display().to_string(),
+        },
+        _ => path.display().to_string(),
+    }
+}
+
+/// Every setup in `rowbit_home` (`~/.rowbit`), by name, and the demo:
+/// the one `~/.rowbit/demo` links to, or else `~/rowbit-demo`, where
+/// `rowbit setup --sample` run from the home directory puts it.
+pub fn setups(rowbit_home: &Path) -> Vec<Found> {
+    let mut found = Vec::new();
+    let mut demo = None;
+    if let Ok(entries) = std::fs::read_dir(rowbit_home) {
+        let mut entries: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+        entries.sort();
+        for dir in entries {
+            let Some(name) = dir.file_name().and_then(|n| n.to_str()).map(str::to_owned) else {
+                continue;
+            };
+            if is_setup(&dir) {
+                found.push(Found { name, dir });
+            } else if name == DEMO_LINK && crate::demo::is_demo(&dir) {
+                demo = Some(dir.canonicalize().unwrap_or(dir));
+            }
+        }
+    }
+    let demo = demo.or_else(|| {
+        let d = rowbit_home.parent()?.join("rowbit-demo");
+        crate::demo::is_demo(&d).then_some(d)
+    });
+    if let Some(dir) = demo {
+        found.push(Found {
+            name: "demo".into(),
+            dir,
+        });
+    }
+    found
+}
+
+/// The link in `~/.rowbit` to the demo's directory, which `rowbit demo`
+/// makes and `rowbit demo clean` removes.
+pub const DEMO_LINK: &str = "demo";
+
+#[derive(Debug, PartialEq, Eq)]
+enum Picked<'a> {
+    One(&'a Found),
+    Several,
+    None,
+}
+
+/// The default setup if there is one, else the only one.
+fn pick(found: &[Found]) -> Picked<'_> {
+    if let Some(d) = found.iter().find(|s| s.name == "default") {
+        return Picked::One(d);
+    }
+    match found {
+        [one] => Picked::One(one),
+        [] => Picked::None,
+        _ => Picked::Several,
+    }
+}
+
+/// Whether the command reads a setup's files, so finding none is an error
+/// worth stopping for. `ping`, `policy`, `server` and `connect` with no
+/// client name (it lists them) work without one, and so does a command
+/// told where its files are (`--policy`, `ROWBIT_STORE`, ...).
+fn needs_files(args: &[OsString]) -> bool {
+    let named = args.iter().any(|a| {
+        let a = a.to_string_lossy();
+        ["--policy", "--store", "--config"]
+            .iter()
+            .any(|f| a == *f || a.starts_with(&format!("{f}=")))
+    }) || ["ROWBIT_POLICY", "ROWBIT_STORE", "ROWBIT_SERVER_CONFIG"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some());
+    if named {
+        return false;
+    }
+    let (command, _) = command(args);
+    match command.as_deref() {
+        None | Some("ping" | "policy" | "server" | "help") => false,
+        Some("connect") => args
+            .iter()
+            .skip(2)
+            .any(|a| a == "--print" || !a.to_string_lossy().starts_with('-')),
+        Some(_) => !args.iter().any(|a| a == "--help" || a == "-h"),
+    }
 }
 
 /// The subcommand, and whether a `--dir` came before it.
@@ -135,7 +276,7 @@ pub fn file(path: &mut PathBuf, default: &str) {
 /// the flag nor the environment set it.
 pub fn database_url() -> anyhow::Result<Option<String>> {
     let Some(dir) = dir() else { return Ok(None) };
-    read_env_file(&dir.join(ENV_FILE))
+    Ok(read_env_file(&dir.join(ENV_FILE))?.or_else(|| crate::demo::database_url(dir)))
 }
 
 /// The database URL a command uses. `--url` wins. Otherwise, in a setup's

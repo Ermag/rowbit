@@ -103,6 +103,46 @@ struct Entry {
 }
 
 /// The agent's workspace, if `dir` is a demo directory that has one.
+/// Whether `dir` is a demo's directory.
+pub fn is_demo(dir: &Path) -> bool {
+    dir.join(MARKER).is_file()
+}
+
+/// Points `~/.rowbit/demo` at the demo's directory, so commands run
+/// elsewhere find it. Leaves a setup called `demo` alone.
+fn link_demo(dir: &Path) {
+    let Ok(home) = crate::place::home() else {
+        return;
+    };
+    let link = home.join(crate::place::DEMO_LINK);
+    match std::fs::symlink_metadata(&link) {
+        Ok(m) if m.file_type().is_symlink() => {
+            if std::fs::read_link(&link).ok().as_deref() == Some(dir) {
+                return;
+            }
+            let _ = std::fs::remove_file(&link);
+        }
+        Ok(_) => return,
+        Err(_) => {}
+    }
+    if std::fs::create_dir_all(&home).is_ok() {
+        let _ = std::os::unix::fs::symlink(dir, &link);
+    }
+}
+
+/// Removes `~/.rowbit/demo` if it points at `dir`.
+fn unlink_demo(dir: &Path) {
+    let Ok(home) = crate::place::home() else {
+        return;
+    };
+    let link = home.join(crate::place::DEMO_LINK);
+    let points_here = std::fs::symlink_metadata(&link).is_ok_and(|m| m.file_type().is_symlink())
+        && std::fs::read_link(&link).ok().as_deref() == Some(dir);
+    if points_here {
+        let _ = std::fs::remove_file(&link);
+    }
+}
+
 pub fn workspace(dir: &Path) -> Option<PathBuf> {
     let w = dir.join(WORKSPACE);
     (dir.join(MARKER).is_file() && w.is_dir()).then_some(w)
@@ -166,6 +206,7 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
         .with_context(|| format!("finding {}", dir.display()))?;
     let workspace = dir.join(WORKSPACE);
     std::fs::create_dir_all(&workspace).context("creating the agent's workspace")?;
+    link_demo(&dir);
     let address = crate::ServerArgs {
         config: dir.join("rowbit-server.yml"),
     }
@@ -291,6 +332,9 @@ pub async fn run(a: DemoArgs) -> anyhow::Result<()> {
         "For the CLI, in {shown}: export ROWBIT_DATABASE_URL={}",
         marker.database_url
     ));
+    say(
+        "To try it from a project of yours instead, cd into it and run: rowbit connect claude-code (or cursor, codex, ...)",
+    );
     say(
         "Ctrl-C stops the review page; the database keeps running. `rowbit demo clean` removes it all.",
     );
@@ -510,6 +554,9 @@ fn clean(dir: &Path) -> anyhow::Result<()> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e).with_context(|| format!("removing {f}")),
         }
+    }
+    if let Ok(canonical) = dir.canonicalize() {
+        unlink_demo(&canonical);
     }
     // The agent's workspace goes only if it's empty: what's in it is yours.
     let _ = std::fs::remove_dir(&workspace);

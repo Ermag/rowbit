@@ -547,6 +547,53 @@ fn agent_tokens_are_kept_as_hashes_and_replaced() {
 }
 
 #[test]
+fn each_connection_has_a_token_of_its_own() {
+    let mut store = Store::open_in_memory().unwrap();
+    let manual = store.issue_agent_token("bot").unwrap();
+    let app = store
+        .issue_connection_token("bot", "Claude Code in ~/app")
+        .unwrap();
+    let web = store
+        .issue_connection_token("bot", "Claude Code in ~/web")
+        .unwrap();
+    // Each works, and none signs another out.
+    for t in [&manual, &app, &web] {
+        assert_eq!(store.agent_for_token(t).unwrap().as_deref(), Some("bot"));
+    }
+    let list = store.connection_tokens().unwrap();
+    assert_eq!(
+        list.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(),
+        ["Claude Code in ~/app", "Claude Code in ~/web"]
+    );
+    assert!(list.iter().all(|t| t.used_ms.is_some()));
+
+    // Connecting the same place again replaces only that one.
+    let app2 = store
+        .issue_connection_token("bot", "Claude Code in ~/app")
+        .unwrap();
+    assert_eq!(store.agent_for_token(&app).unwrap(), None);
+    assert_eq!(
+        store.agent_for_token(&app2).unwrap().as_deref(),
+        Some("bot")
+    );
+    assert_eq!(store.agent_for_token(&web).unwrap().as_deref(), Some("bot"));
+    assert_eq!(store.connection_tokens().unwrap().len(), 2);
+
+    assert!(
+        store
+            .revoke_connection_token("bot", "Claude Code in ~/web")
+            .unwrap()
+    );
+    assert_eq!(store.agent_for_token(&web).unwrap(), None);
+
+    // Revoking the agent signs out every one.
+    assert!(store.revoke_agent_token("bot").unwrap());
+    assert_eq!(store.agent_for_token(&manual).unwrap(), None);
+    assert_eq!(store.agent_for_token(&app2).unwrap(), None);
+    assert!(store.connection_tokens().unwrap().is_empty());
+}
+
+#[test]
 fn settings_are_listed_by_prefix_and_deleted() {
     let mut store = Store::open_in_memory().unwrap();
     store.set_setting("agent.b.password", "2").unwrap();

@@ -765,8 +765,9 @@ pub struct ConnectArgs {
     /// Have the client start `rowbit mcp` itself, even with mcp.http on
     #[arg(long)]
     stdio: bool,
-    /// Replace the agent's token, signing out the client that has the old one
-    #[arg(long)]
+    /// No longer needed: each client entry gets a token of its own, and
+    /// connecting the same place again replaces only that one
+    #[arg(long, hide = true)]
     new_token: bool,
     /// Replace an entry of the same name in the client
     #[arg(long)]
@@ -924,10 +925,16 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
             a.name
         );
     }
+    let mut label = connection_label(client, a.scope, &env.cwd);
+    if a.print {
+        // Added by hand, maybe somewhere else: don't sign out an entry
+        // `rowbit connect` added here.
+        label.push_str(" (printed)");
+    }
     let server = if http {
         Server::Http {
             url: format!("{}/mcp", address.base()),
-            token: issue_token(&a, &agent)?,
+            token: issue_token(&a, &agent, &label)?,
         }
     } else {
         stdio_server(&a, &agent)?
@@ -944,8 +951,8 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
                 let _ = a
                     .store
                     .open()
-                    .and_then(|mut s| Ok(s.revoke_agent_token(&agent)?));
-                eprintln!("rowbit: {agent}'s new token is revoked; it has none now");
+                    .and_then(|mut s| Ok(s.revoke_connection_token(&agent, &label)?));
+                eprintln!("rowbit: the new token for {label} is revoked");
             }
             return Err(e);
         }
@@ -993,11 +1000,20 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
     match client {
         // `rowbit demo` says where to open the client itself.
         _ if a.dir.is_some() => {}
-        Client::ClaudeCode if a.scope == Scope::Local => println!(
-            "It applies only in {}. Start Claude Code there: {}",
-            env.cwd.display(),
-            client.open_in(&env.cwd, &env)
-        ),
+        Client::ClaudeCode if a.scope == Scope::Local => {
+            let here = std::env::current_dir().ok().as_deref() == Some(env.cwd.as_path());
+            if here {
+                println!(
+                    "It applies in this folder only. Start Claude Code here, or restart it if it's open, and ask it to use Rowbit."
+                )
+            } else {
+                println!(
+                    "It applies only in {}. Start Claude Code there: {}",
+                    env.cwd.display(),
+                    client.open_in(&env.cwd, &env)
+                )
+            }
+        }
         Client::ClaudeCode | Client::Gemini | Client::Codex => {}
         _ => println!("Restart {} to load it.", client.label()),
     }
@@ -1105,20 +1121,32 @@ fn pick_agent(a: &ConnectArgs) -> anyhow::Result<String> {
     }
 }
 
-/// One token per agent: a new one signs out whoever has the old one, so
-/// that takes --new-token.
-fn issue_token(a: &ConnectArgs, agent: &str) -> anyhow::Result<String> {
+/// A token for this client entry: one per client and place, so connecting
+/// the agent in another project leaves the others signed in, and
+/// connecting the same place again replaces only its own.
+fn issue_token(a: &ConnectArgs, agent: &str, label: &str) -> anyhow::Result<String> {
     let mut store = rowbit_store::Store::open(&a.store.store)
         .with_context(|| format!("opening {}", a.store.store.display()))?;
-    anyhow::ensure!(
-        a.new_token || store.agent_token_times(agent)?.is_none(),
-        "{agent} already has a token, which another client may be using; pass --new-token to replace it (that client is signed out), or give this client its own agent in rowbit.yml"
-    );
-    Ok(store.issue_agent_token(agent)?)
+    Ok(store.issue_connection_token(agent, label)?)
+}
+
+/// Which client, and where it uses Rowbit: "Claude Code in ~/app".
+pub fn connection_label(client: Client, scope: Scope, cwd: &Path) -> String {
+    match (client, scope) {
+        (Client::ClaudeCode, Scope::Local) => {
+            format!("{} in {}", client.label(), crate::place::tilde(cwd))
+        }
+        (Client::ClaudeCode, _) => format!("{}, every project", client.label()),
+        _ => client.label().to_owned(),
+    }
 }
 
 fn stdio_server(a: &ConnectArgs, agent: &str) -> anyhow::Result<Server> {
-    let here = a.dir.clone().unwrap_or_else(|| PathBuf::from("."));
+    let here = a
+        .dir
+        .clone()
+        .or_else(|| crate::place::dir().map(Path::to_owned))
+        .unwrap_or_else(|| PathBuf::from("."));
     let url = match crate::place::pick_url(a.url.clone())? {
         Some(url) => Some(url),
         None => crate::demo::database_url(&here),
@@ -1158,7 +1186,7 @@ fn print_address(a: &ConnectArgs) -> anyhow::Result<()> {
         "turn on mcp.http in rowbit-server.yml for an address to give a client, or name a client for its stdio setup"
     );
     let agent = pick_agent(a)?;
-    let token = issue_token(a, &agent)?;
+    let token = issue_token(a, &agent, &format!("{} (printed)", a.name))?;
     println!("URL:    {}/mcp", address.base());
     println!("Header: Authorization: Bearer {token}");
     Ok(())
