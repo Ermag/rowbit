@@ -114,7 +114,7 @@ With `mcp.http: true`, `rowbit serve` also serves agents at `<public_url>/mcp` o
 
 Each agent signs in with a token of its own, sent as `Authorization: Bearer <token>`:
 
-- `rowbit agents token <id>` makes a new token for an agent listed in `rowbit.yml`, prints it once, and keeps only its SHA-256 hash in the state file. Making a new one replaces the old. `rowbit agents revoke <id>` removes it. `rowbit agents` lists which agents have a token and when it was last used.
+- `rowbit agents token <id>` makes a new token for an agent listed in `rowbit.yml`, prints it once, and keeps only its SHA-256 hash in the state file. Making a new one replaces the old. `rowbit connect` makes one per client entry instead, labelled with where it is (see [rowbit connect](setup.md#rowbit-connect)), so an agent can be connected in several places at once. `rowbit agents` lists each agent's tokens, each with an id and when it was last used. `rowbit agents revoke <agent>` removes all of the agent's tokens, `--connection <id>` one of them, and `--single` only the one `rowbit agents token` made.
 - Tokens are 32 random bytes, written as `rbt_` and 43 characters of base64url.
 - The agent's identity is the token's agent, never anything in the request. A missing, unknown or revoked token, or a token for an agent no longer in `rowbit.yml`, gets `401` and nothing else. Failed sign-ins are slowed down as on the review page.
 - `/mcp` answers only requests addressed to the configured host, and refuses any request with an `Origin` header that isn't `public_url`, so a web page can't reach it from someone's browser.

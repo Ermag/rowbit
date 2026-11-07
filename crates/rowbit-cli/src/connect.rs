@@ -765,7 +765,8 @@ pub struct ConnectArgs {
     /// Have the client start `rowbit mcp` itself, even with mcp.http on
     #[arg(long)]
     stdio: bool,
-    /// Replace the agent's token, signing out the client that has the old one
+    /// Also revoke the agent's single token from before 0.2.3 (each client
+    /// entry now gets a token of its own)
     #[arg(long)]
     new_token: bool,
     /// Replace an entry of the same name in the client
@@ -924,10 +925,19 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
             a.name
         );
     }
+    let mut label = connection_label(client, a.scope, &env.cwd);
+    if a.print {
+        // Added by hand, maybe somewhere else: each printed token is a
+        // connection of its own, which replaces none.
+        label.push_str(&format!(" (printed {})", printed_at()));
+    }
+    let mut issued = None;
     let server = if http {
+        let (token, id) = issue_token(&a, &agent, &label)?;
+        issued = Some(id);
         Server::Http {
             url: format!("{}/mcp", address.base()),
-            token: issue_token(&a, &agent)?,
+            token,
         }
     } else {
         stdio_server(&a, &agent)?
@@ -939,17 +949,36 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
     let applied = match apply(client, &env, &a.name, &server, a.scope, a.force) {
         Ok(applied) => applied,
         Err(e) => {
-            if http {
-                // Nothing holds the new token; don't leave it valid.
+            if let Some(id) = &issued {
+                // Nothing holds the new token; don't leave it valid. An
+                // entry from before keeps its own.
                 let _ = a
                     .store
                     .open()
-                    .and_then(|mut s| Ok(s.revoke_agent_token(&agent)?));
-                eprintln!("rowbit: {agent}'s new token is revoked; it has none now");
+                    .and_then(|mut s| Ok(s.revoke_connection(&agent, id)?));
+                eprintln!(
+                    "rowbit: the new token is revoked; an entry that was there before still works"
+                );
             }
             return Err(e);
         }
     };
+    if let Some(id) = &issued {
+        let mut store = a.store.open()?;
+        // The entry holding the new token is written: the one it replaced
+        // goes.
+        store.retire_older_connections(&agent, &label, id)?;
+        if store.agent_token_times(&agent)?.is_some() {
+            if a.new_token {
+                store.revoke_single_token(&agent)?;
+                println!("{agent}'s single token from before is revoked.");
+            } else {
+                println!(
+                    "{agent} also has a single token from before 0.2.3, which still works. If no client uses it any more: rowbit agents revoke {agent} --single"
+                );
+            }
+        }
+    }
     if applied.tightened {
         println!(
             "{} was readable by other users; it is now yours only, since it holds the agent's credentials.",
@@ -993,11 +1022,23 @@ pub fn run(a: ConnectArgs) -> anyhow::Result<Option<Connected>> {
     match client {
         // `rowbit demo` says where to open the client itself.
         _ if a.dir.is_some() => {}
-        Client::ClaudeCode if a.scope == Scope::Local => println!(
-            "It applies only in {}. Start Claude Code there: {}",
-            env.cwd.display(),
-            client.open_in(&env.cwd, &env)
-        ),
+        Client::ClaudeCode if a.scope == Scope::Local => {
+            let canonical = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_owned());
+            let here = std::env::current_dir()
+                .ok()
+                .is_some_and(|d| canonical(&d) == canonical(&env.cwd));
+            if here {
+                println!(
+                    "It applies in this folder only. Start Claude Code here, or restart it if it's open, and ask it to use Rowbit."
+                )
+            } else {
+                println!(
+                    "It applies only in {}. Start Claude Code there: {}",
+                    env.cwd.display(),
+                    client.open_in(&env.cwd, &env)
+                )
+            }
+        }
         Client::ClaudeCode | Client::Gemini | Client::Codex => {}
         _ => println!("Restart {} to load it.", client.label()),
     }
@@ -1105,20 +1146,41 @@ fn pick_agent(a: &ConnectArgs) -> anyhow::Result<String> {
     }
 }
 
-/// One token per agent: a new one signs out whoever has the old one, so
-/// that takes --new-token.
-fn issue_token(a: &ConnectArgs, agent: &str) -> anyhow::Result<String> {
+/// A token for this client entry: one per client and place, so connecting
+/// the agent in another project leaves the others signed in, and
+/// connecting the same place again replaces only its own.
+fn issue_token(a: &ConnectArgs, agent: &str, label: &str) -> anyhow::Result<(String, String)> {
     let mut store = rowbit_store::Store::open(&a.store.store)
         .with_context(|| format!("opening {}", a.store.store.display()))?;
-    anyhow::ensure!(
-        a.new_token || store.agent_token_times(agent)?.is_none(),
-        "{agent} already has a token, which another client may be using; pass --new-token to replace it (that client is signed out), or give this client its own agent in rowbit.yml"
-    );
-    Ok(store.issue_agent_token(agent)?)
+    Ok(store.issue_connection_token(agent, label)?)
+}
+
+/// When a token was printed, to tell printed tokens apart.
+fn printed_at() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    rowbit_engine::rfc3339(secs)
+}
+
+/// Which client, and where it uses Rowbit: "Claude Code in ~/app".
+pub fn connection_label(client: Client, scope: Scope, cwd: &Path) -> String {
+    match (client, scope) {
+        (Client::ClaudeCode, Scope::Local) => {
+            format!("{} in {}", client.label(), crate::place::tilde(cwd))
+        }
+        (Client::ClaudeCode, _) => format!("{}, every project", client.label()),
+        _ => client.label().to_owned(),
+    }
 }
 
 fn stdio_server(a: &ConnectArgs, agent: &str) -> anyhow::Result<Server> {
-    let here = a.dir.clone().unwrap_or_else(|| PathBuf::from("."));
+    let here = a
+        .dir
+        .clone()
+        .or_else(|| crate::place::dir().map(Path::to_owned))
+        .unwrap_or_else(|| PathBuf::from("."));
     let url = match crate::place::pick_url(a.url.clone())? {
         Some(url) => Some(url),
         None => crate::demo::database_url(&here),
@@ -1158,7 +1220,7 @@ fn print_address(a: &ConnectArgs) -> anyhow::Result<()> {
         "turn on mcp.http in rowbit-server.yml for an address to give a client, or name a client for its stdio setup"
     );
     let agent = pick_agent(a)?;
-    let token = issue_token(a, &agent)?;
+    let (token, _) = issue_token(a, &agent, &format!("{} (printed {})", a.name, printed_at()))?;
     println!("URL:    {}/mcp", address.base());
     println!("Header: Authorization: Bearer {token}");
     Ok(())
