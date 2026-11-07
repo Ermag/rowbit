@@ -170,6 +170,7 @@ def main():
         sys.exit("broken links:\n  " + "\n  ".join(errors))
     shutil.copy(DOCS / "SUMMARY.md", build / "src" / "SUMMARY.md")
     shutil.copy(DOCS / "book.toml", build / "book.toml")
+    shutil.copytree(DOCS / "theme", build / "theme")
 
     subprocess.run(["mdbook", "build", str(build), "-d", str(out / "docs")], check=True)
     for page, md in markdown.items():

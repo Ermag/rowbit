@@ -1,0 +1,60 @@
+/* The home page's palette and pixel title, so the docs read as the same
+   site. Body text stays in mdBook's readable fonts. */
+@import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;600&display=swap");
+
+.navy {
+  --bg: #120e28;
+  --fg: #f2ebff;
+  --sidebar-bg: #1c1640;
+  --sidebar-fg: #d9d0f5;
+  --sidebar-non-existant: #6b5fb0;
+  --sidebar-active: #ffc24b;
+  --sidebar-spacer: #4a3e90;
+  --scrollbar: #4a3e90;
+  --icons: #a397d6;
+  --icons-hover: #ffc24b;
+  --links: #6cc4ff;
+  --inline-code-color: #4fe0a8;
+  --theme-popup-bg: #1c1640;
+  --theme-popup-border: #4a3e90;
+  --theme-hover: #2a2160;
+  --quote-bg: #1c1640;
+  --quote-border: #4a3e90;
+  --table-border-color: #4a3e90;
+  --table-header-bg: #2a2160;
+  --table-alternate-bg: #18123a;
+  --searchbar-border-color: #4a3e90;
+  --searchbar-bg: #1c1640;
+  --searchbar-fg: #f2ebff;
+  --searchresults-header-fg: #a397d6;
+  --searchresults-border-color: #4a3e90;
+  --search-mark-bg: #ffc24b;
+}
+
+.navy .content h1,
+.navy .content h2,
+.navy .content h3 {
+  font-family: "Pixelify Sans", "Trebuchet MS", system-ui, sans-serif;
+  font-weight: 600;
+}
+
+.rowbit-home {
+  font-family: "Press Start 2P", "Courier New", monospace;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: var(--fg) !important;
+  text-decoration: none !important;
+}
+.rowbit-home:hover { color: #ffc24b !important; }
+.rowbit-home .rowbit-docs { color: var(--icons); font-size: 10px; margin-left: 0.6em; }
+
+.rowbit-nav {
+  display: flex;
+  gap: 1.2em;
+  align-items: center;
+  font-size: 1.4rem;
+  margin-right: 0.8em;
+}
+.rowbit-nav a { color: var(--icons) !important; text-decoration: none !important; }
+.rowbit-nav a:hover { color: var(--icons-hover) !important; }
+@media (max-width: 620px) { .rowbit-nav { display: none; } }
