@@ -76,6 +76,9 @@ pub fn init(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> {
         }
         // `status` lists every setup unless told which.
         None if command.as_deref() == Some("status") => None,
+        // Told where its files are: no setup found elsewhere may lend its
+        // database URL to them.
+        None if names_files(&args) => None,
         None => {
             let found = home().map(|h| setups(&h)).unwrap_or_default();
             match pick(&found) {
@@ -174,6 +177,19 @@ pub fn setups(rowbit_home: &Path) -> Vec<Found> {
 /// makes and `rowbit demo clean` removes.
 pub const DEMO_LINK: &str = "demo";
 
+/// Whether the command is told where its files are: `--policy`,
+/// `--store`, `--config` or their variables.
+fn names_files(args: &[OsString]) -> bool {
+    args.iter().any(|a| {
+        let a = a.to_string_lossy();
+        ["--policy", "--store", "--config"]
+            .iter()
+            .any(|f| a == *f || a.starts_with(&format!("{f}=")))
+    }) || ["ROWBIT_POLICY", "ROWBIT_STORE", "ROWBIT_SERVER_CONFIG"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum Picked<'a> {
     One(&'a Found),
@@ -198,15 +214,7 @@ fn pick(found: &[Found]) -> Picked<'_> {
 /// client name (it lists them) work without one, and so does a command
 /// told where its files are (`--policy`, `ROWBIT_STORE`, ...).
 fn needs_files(args: &[OsString]) -> bool {
-    let named = args.iter().any(|a| {
-        let a = a.to_string_lossy();
-        ["--policy", "--store", "--config"]
-            .iter()
-            .any(|f| a == *f || a.starts_with(&format!("{f}=")))
-    }) || ["ROWBIT_POLICY", "ROWBIT_STORE", "ROWBIT_SERVER_CONFIG"]
-        .iter()
-        .any(|v| std::env::var_os(v).is_some());
-    if named {
+    if names_files(args) {
         return false;
     }
     let (command, _) = command(args);
