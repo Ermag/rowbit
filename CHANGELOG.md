@@ -2,7 +2,30 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
-## Unreleased
+## 0.2.3 (2026-11-08)
+
+First-run fixes: add Rowbit to a project you already have with `rowbit connect claude-code` run in it, see what Rowbit is connected to with `rowbit status` and the review page's Setup view, and click the links Rowbit prints.
+
+```sh
+cd ~/projects/my-app
+rowbit connect claude-code
+rowbit status
+```
+
+### Upgrading from 0.2.2
+
+- `rowbit connect` gives each client entry a token of its own instead of one per agent. An agent's single token from 0.2.2 keeps working; `rowbit agents` lists it with the new ones, and `rowbit agents revoke <agent> --single` removes it once no client uses it. `rowbit agents revoke <agent>` still revokes every token.
+- Re-run `rowbit demo` once if you want commands run outside its folder to find it (it now links `~/.rowbit/demo` to its folder); a demo at `~/rowbit-demo` is found without that.
+
+### Added
+
+- `rowbit connect <client>` works from any folder: it uses the folder's own Rowbit files, else `~/.rowbit/default`, else your only setup or the demo, and says which. With several it lists them and asks for `--dir`; with none it says to run `rowbit setup`. Every other command finds its setup the same way.
+- Each client entry gets its own token, labelled with where it is ("Claude Code in ~/projects/my-app"), so connecting a second project no longer signs out the first. `rowbit agents` lists them with an id; `rowbit agents revoke <agent> --connection <id>` signs out one.
+- `rowbit status` lists every setup on the machine: the database each guards (never its password), whether its review page answers, how many changes are held, each agent's rules and where it is connected.
+- The review page says which database it guards in its header, and a Setup view shows the database, Rowbit's folder, sign-in, the agents, their rules and connections.
+- Addresses Rowbit prints are clickable links in terminals that support them (Ghostty, iTerm2, WezTerm, kitty, VS Code, Windows Terminal and others); `ROWBIT_HYPERLINKS=0` or `1` overrides. `rowbit demo` opens the review page in the browser once it is up (`--no-open` skips it).
+- Agents give the review link with its address as the link text, so it is clickable and shows where it goes.
+- The docs look like the home page and link back to it; the README links to the docs on the site.
 
 ### Fixed
 
