@@ -4,6 +4,7 @@ mod grants;
 mod place;
 mod review;
 mod setup;
+mod term;
 
 use std::path::PathBuf;
 
@@ -399,7 +400,10 @@ async fn serve(
         mcp: config.mcp_http.then_some(database),
     };
     let address = address.trim_end_matches('/');
-    eprintln!("rowbit: review page on {address}/");
+    eprintln!(
+        "rowbit: review page on {}",
+        term::link_err(&format!("{address}/"))
+    );
     if config.mcp_http {
         eprintln!("rowbit: agents over MCP at {address}/mcp, each with its own token");
     }

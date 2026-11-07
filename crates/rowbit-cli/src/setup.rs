@@ -12,6 +12,7 @@ use rowbit_mysql::grants::{self, Account, Grant, Object};
 
 use crate::connect::{self, Client, Env, Scope};
 use crate::place;
+use crate::term;
 
 /// What Rowbit's own user needs on each database, as in docs/privileges.md.
 const NEEDED: [&str; 6] = [
@@ -313,10 +314,12 @@ pub async fn run(a: SetupArgs) -> anyhow::Result<()> {
     }
     match &password {
         Some(p) => say(&format!(
-            "Review page: {address}    password: {p}    (shown this once)"
+            "Review page: {}    password: {p}    (shown this once)",
+            term::link(&address)
         )),
         None => say(&format!(
-            "Review page: {address}    (password as set before)"
+            "Review page: {}    (password as set before)",
+            term::link(&address)
         )),
     }
     for (client, scope) in &connected {
@@ -343,8 +346,9 @@ pub async fn run(a: SetupArgs) -> anyhow::Result<()> {
     }
     say("Writes wait for you on the review page until you add rules to rowbit.yml.");
     say(&format!(
-        "Agents can read every table {} can. Limit what each one sees with scopes: https://ermag.github.io/rowbit/docs/spec/policy.html#scopes",
-        found.account
+        "Agents can read every table {} can. Limit what each one sees with scopes: {}",
+        found.account,
+        term::link("https://ermag.github.io/rowbit/docs/spec/policy.html#scopes")
     ));
     let dir_flag = if dir != place::home()?.join("default") {
         format!(" --dir {}", quoted(&dir))
