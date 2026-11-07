@@ -478,6 +478,7 @@ async fn approving_through_the_review_page(var: &str, table: &str) {
     let page = rowbit_web::router(
         w.engine.clone(),
         rowbit_web::Web {
+            setup: serde_json::Value::Null,
             sign_in: rowbit_web::SignIn::Password {
                 hash: rowbit_web::hash_password(&rowbit_web::new_password()),
             },

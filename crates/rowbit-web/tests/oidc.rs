@@ -222,6 +222,7 @@ async fn rowbit(p: &Provider) -> axum::Router {
     rowbit_web::router(
         engine,
         rowbit_web::Web {
+            setup: serde_json::Value::Null,
             sign_in: rowbit_web::SignIn::Oidc(Box::new(login)),
             hosts: vec![HOST.into()],
             secure: false,

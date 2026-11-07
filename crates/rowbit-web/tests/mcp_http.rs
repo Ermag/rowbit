@@ -45,6 +45,7 @@ async fn server(url: &str) -> Server {
     let router = rowbit_web::router(
         engine,
         rowbit_web::Web {
+            setup: serde_json::Value::Null,
             sign_in: rowbit_web::SignIn::Password {
                 hash: rowbit_web::hash_password(&rowbit_web::new_password()),
             },
