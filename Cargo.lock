@@ -2038,7 +2038,7 @@ dependencies = [
 
 [[package]]
 name = "rowbit-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -2061,7 +2061,7 @@ dependencies = [
 
 [[package]]
 name = "rowbit-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -2070,7 +2070,7 @@ dependencies = [
 
 [[package]]
 name = "rowbit-engine"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "getrandom 0.3.4",
  "mysql_async",
@@ -2087,7 +2087,7 @@ dependencies = [
 
 [[package]]
 name = "rowbit-mcp"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axum",
  "http",
@@ -2107,7 +2107,7 @@ dependencies = [
 
 [[package]]
 name = "rowbit-mysql"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "mysql_async",
  "rowbit-core",
@@ -2120,7 +2120,7 @@ dependencies = [
 
 [[package]]
 name = "rowbit-policy"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_norway",
@@ -2129,7 +2129,7 @@ dependencies = [
 
 [[package]]
 name = "rowbit-store"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.3.4",
@@ -2143,7 +2143,7 @@ dependencies = [
 
 [[package]]
 name = "rowbit-web"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "argon2",
  "axum",

@@ -2,7 +2,14 @@
 
 Written by hand. Each release says what changed for someone running Rowbit, not every commit.
 
-## Unreleased
+## 0.2.2 (2026-11-07)
+
+Set up on your database: `rowbit setup` checks your database's URL and Rowbit's grants, writes rules that hold every write, and connects your agents; TLS to the database; a container image and an MCP Registry listing.
+
+```sh
+curl -fsSL https://ermag.github.io/rowbit/install.sh | sh
+rowbit setup
+```
 
 ### Upgrading from 0.2.1
 

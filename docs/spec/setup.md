@@ -1,6 +1,6 @@
 # Installing and setting up
 
-Status: v0.2.1; `rowbit setup` and where commands find their files are v0.2.2.
+Status: v0.2.2.
 
 How Rowbit gets onto a machine and in front of an agent: the release and its install script, `rowbit setup` for a database of your own, `rowbit demo` for trying it, `rowbit connect` for pointing an agent client at it, the skill that teaches agents to use it, and the home page and docs site that explain it. None of this changes [`rowbit.yml`](policy.md), [`rowbit-server.yml`](server.md) or the state file. The one change to the [change lifecycle](change-lifecycle.md) is the review link in held results (see [Agent tools](change-lifecycle.md#agent-tools-mcp)).
 
