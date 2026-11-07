@@ -5,13 +5,18 @@
   import Deliveries from './Deliveries.svelte';
   import Log from './Log.svelte';
   import Queue from './Queue.svelte';
+  import Setup from './Setup.svelte';
   import Shadow from './Shadow.svelte';
 
   let reviewer = $state('');
+  let guarding = $state(null);
   let route = $state(location.hash);
 
   onMount(() => {
-    api.me().then((s) => (reviewer = s.reviewer));
+    api.me().then((s) => {
+      reviewer = s.reviewer;
+      api.setup().then((s) => (guarding = s.database)).catch(() => {});
+    });
     const onHash = () => (route = location.hash);
     addEventListener('hashchange', onHash);
     return () => removeEventListener('hashchange', onHash);
@@ -32,7 +37,13 @@
     <a href="#/log" class:active={route === '#/log'}>Log</a>
     <a href="#/shadow" class:active={route === '#/shadow'}>Shadow</a>
     <a href="#/notifications" class:active={route === '#/notifications'}>Notifications</a>
+    <a href="#/setup" class:active={route === '#/setup'}>Setup</a>
   </nav>
+  {#if guarding}
+    <a class="guarding" href="#/setup" title="What this Rowbit is connected to">
+      Guarding <code>{guarding.database}</code> on <code>{guarding.host}:{guarding.port}</code> as <code>{guarding.user}</code>
+    </a>
+  {/if}
   <span class="who">
     {#if reviewer}{reviewer} <button class="link" onclick={signOut}>Sign out</button>{/if}
   </span>
@@ -49,6 +60,8 @@
     <Shadow />
   {:else if route === '#/notifications'}
     <Deliveries />
+  {:else if route === '#/setup'}
+    <Setup />
   {:else}
     <Queue />
   {/if}

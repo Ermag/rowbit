@@ -49,6 +49,7 @@ impl Page {
             router: rowbit_web::router(
                 engine.clone(),
                 rowbit_web::Web {
+                    setup: serde_json::Value::Null,
                     sign_in: rowbit_web::SignIn::Password { hash },
                     hosts: vec![HOST.to_owned()],
                     secure: false,
@@ -349,6 +350,8 @@ async fn other_hosts_are_refused_and_the_ui_needs_a_session() {
     assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
     let (status, _) = page.api("/api/changes").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = page.api("/api/setup").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // Found by a browser test: with `Referrer-Policy: no-referrer`, browsers
     // send `Origin: null` on the page's own forms, so the origin check
@@ -383,6 +386,14 @@ async fn other_hosts_are_refused_and_the_ui_needs_a_session() {
     );
     let (_, me) = page.api("/api/session").await;
     assert_eq!(me["reviewer"], "philip");
+    // The Setup view: every agent in rowbit.yml, and nothing held yet.
+    let (status, setup) = page.api("/api/setup").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(setup["held"], 0);
+    assert!(
+        setup["agents"].as_array().is_some_and(|a| !a.is_empty()),
+        "{setup}"
+    );
     let (status, js) = page.get_path(HOST, "/assets/app.js").await;
     assert_eq!(status, StatusCode::OK);
     assert!(!js.is_empty());

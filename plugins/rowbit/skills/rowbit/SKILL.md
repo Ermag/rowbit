@@ -31,7 +31,7 @@ Send one `INSERT`, `UPDATE` or `DELETE` (or one schema change) to `propose_write
 The result has a `state`:
 
 - `applied`: done. Tell the person what changed (table, row count).
-- `held`: waiting for a person. **Give them the `review_url` from the result**, say in a sentence what the write changes and why, and stop. Don't wait in a loop; they may take a while. If they ask, check it later with `change_status`.
+- `held`: waiting for a person. **Give them the `review_url` from the result as a link that shows the URL itself** (`<http://127.0.0.1:8080/changes/4>`, never a link with other text), so they can click it and see where it goes, say in a sentence what the write changes and why, and stop. Don't wait in a loop; they may take a while. If they ask, check it later with `change_status`.
 - `rejected`: refused by a rule or by a person, with a `reason`. Tell the person the reason. Don't try again in another form.
 - `failed`: Rowbit couldn't preview or apply it; the reason says why. Fix a genuine mistake (a typo, a wrong column) once; otherwise report it.
 - `approved` means a person approved it and Rowbit is applying it; `undone` means a person took an applied change back.

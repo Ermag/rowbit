@@ -65,6 +65,8 @@ Reviewers sign in to the web UI through an OpenID Connect provider: Google Works
 - `reviewers.allow` decides who may sign in: an exact `emails` entry, an email in one of the `domains`, or membership of one of the `groups` (the token's `groups` claim). Anyone else is refused, and an empty `allow` refuses everyone.
 - The audit log records the reviewer as `human:<email>`.
 
+Everyone who can sign in also sees the Setup view: the database's host, port, user and name, Rowbit's folder, this identity provider, the notification targets' names and each agent connection's label (see [What Rowbit is connected to](setup.md#what-rowbit-is-connected-to)). No secrets, but more than which changes are held.
+
 Sessions live in memory, so restarting `rowbit serve` signs everyone out. Signing in gives the same session as v0.1: an `HttpOnly`, `SameSite=Strict` cookie (and `Secure` behind HTTPS), valid for 12 hours or until the process stops, and a per-session token every action must send. The short-lived cookie that brings the browser back to its login is `SameSite=Lax`, since the provider's redirect back is a cross-site navigation; it holds only a random id, while `state`, `nonce` and the PKCE verifier stay in Rowbit's memory, and each login can be finished once, within 10 minutes. After sign-in, the callback answers with a page that moves on to the queue itself, because browsers don't send a `SameSite=Strict` cookie on a redirect chain that started at another site.
 
 **Without `reviewers.oidc`,** `rowbit serve` keeps v0.1's shared password and typed name, but only on a loopback address. It refuses to listen anywhere else, so the password never crosses a network. This is for trying Rowbit on one machine.
@@ -114,7 +116,7 @@ With `mcp.http: true`, `rowbit serve` also serves agents at `<public_url>/mcp` o
 
 Each agent signs in with a token of its own, sent as `Authorization: Bearer <token>`:
 
-- `rowbit agents token <id>` makes a new token for an agent listed in `rowbit.yml`, prints it once, and keeps only its SHA-256 hash in the state file. Making a new one replaces the old. `rowbit agents revoke <id>` removes it. `rowbit agents` lists which agents have a token and when it was last used.
+- `rowbit agents token <id>` makes a new token for an agent listed in `rowbit.yml`, prints it once, and keeps only its SHA-256 hash in the state file. Making a new one replaces the old. `rowbit connect` makes one per client entry instead, labelled with where it is (see [rowbit connect](setup.md#rowbit-connect)), so an agent can be connected in several places at once. `rowbit agents` lists each agent's tokens, each with an id and when it was last used. `rowbit agents revoke <agent>` removes all of the agent's tokens, `--connection <id>` one of them, and `--single` only the one `rowbit agents token` made.
 - Tokens are 32 random bytes, written as `rbt_` and 43 characters of base64url.
 - The agent's identity is the token's agent, never anything in the request. A missing, unknown or revoked token, or a token for an agent no longer in `rowbit.yml`, gets `401` and nothing else. Failed sign-ins are slowed down as on the review page.
 - `/mcp` answers only requests addressed to the configured host, and refuses any request with an `Origin` header that isn't `public_url`, so a web page can't reach it from someone's browser.

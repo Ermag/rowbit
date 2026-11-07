@@ -4,6 +4,8 @@ mod grants;
 mod place;
 mod review;
 mod setup;
+mod status;
+mod term;
 
 use std::path::PathBuf;
 
@@ -197,6 +199,12 @@ enum Command {
     /// write, connects the agent clients you pick and sets the review
     /// page's password. Keeps its files in ~/.rowbit/<name>.
     Setup(setup::SetupArgs),
+    /// What Rowbit is connected to: each setup's database, review page,
+    /// agents and where they're connected
+    ///
+    /// Lists every setup in ~/.rowbit and the demo, or with --dir (or in a
+    /// folder of Rowbit's) that one. Reads files only.
+    Status(status::StatusArgs),
 }
 
 /// Only Rowbit's state file: for commands that don't touch the database,
@@ -349,6 +357,7 @@ async fn serve(
     set_password: bool,
     server: &ServerArgs,
     setup: &Setup,
+    open_browser: bool,
 ) -> anyhow::Result<()> {
     let config = server.load()?;
     let listen = config.listen(listen);
@@ -392,21 +401,53 @@ async fn serve(
     engine.set_review_address(&address)?;
     let engine = std::sync::Arc::new(engine);
     tokio::spawn(rowbit_web::notify::Notifier::new(engine.clone(), config.notify.clone()).run());
+    let setup_json = serde_json::json!({
+        "database": database_url(&setup.url)
+            .ok()
+            .and_then(|u| rowbit_engine::overview::Database::from_url(&u)),
+        "dir": setup
+            .policy
+            .canonicalize()
+            .ok()
+            .and_then(|p| p.parent().map(place::tilde)),
+        "review_page": format!("{}/", address.trim_end_matches('/')),
+        "mcp": config.mcp_http.then(|| format!("{}/mcp", address.trim_end_matches('/'))),
+        "sign_in": match &sign_in {
+            rowbit_web::SignIn::Oidc(_) => format!(
+                "through {}",
+                config.oidc.as_ref().map(|o| o.issuer.as_str()).unwrap_or("an identity provider")
+            ),
+            _ => "page password, this machine only".to_owned(),
+        },
+        "notify": config.notify.iter().map(|n| n.name.clone()).collect::<Vec<_>>(),
+        "version": env!("CARGO_PKG_VERSION"),
+    });
     let web = rowbit_web::Web {
+        setup: setup_json,
         sign_in,
         hosts: config.public_host().into_iter().collect(),
         secure: config.https(),
         mcp: config.mcp_http.then_some(database),
     };
     let address = address.trim_end_matches('/');
-    eprintln!("rowbit: review page on {address}/");
+    eprintln!(
+        "rowbit: review page on {}",
+        term::link_err(&format!("{address}/"))
+    );
     if config.mcp_http {
         eprintln!("rowbit: agents over MCP at {address}/mcp, each with its own token");
     }
     for n in &config.notify {
         eprintln!("rowbit: held changes are announced to {}", n.name);
     }
-    rowbit_web::serve(engine, web, listen).await?;
+    let page = format!("{address}/");
+    rowbit_web::serve_then(engine, web, listen, move |_| {
+        // Bound: whatever answers is this server, not another left running.
+        if open_browser {
+            term::open_browser(&page);
+        }
+    })
+    .await?;
     Ok(())
 }
 
@@ -482,7 +523,7 @@ fn place_files(command: &mut Command) -> anyhow::Result<()> {
             command: GrantsCommand::Diff { admin } | GrantsCommand::Apply { admin, .. },
         } => admin.place()?,
         Command::Connect(args) => args.place(),
-        Command::Demo(_) | Command::Setup(_) | Command::Ping { .. } => {}
+        Command::Demo(_) | Command::Setup(_) | Command::Ping { .. } | Command::Status(_) => {}
     }
     Ok(())
 }
@@ -506,8 +547,19 @@ fn mysql_database(url: &str) -> anyhow::Result<String> {
 enum AgentsCommand {
     /// Make a new token for an agent, replacing any it had, and print it once
     Token { agent: String },
-    /// Remove an agent's token
-    Revoke { agent: String },
+    /// Sign an agent out: every token it has, or one
+    ///
+    /// `rowbit agents` lists each token with its id.
+    Revoke {
+        agent: String,
+        /// Only this connection's token, by the id `rowbit agents` shows
+        #[arg(long, conflicts_with = "single")]
+        connection: Option<String>,
+        /// Only the single token from `rowbit agents token` (or
+        /// `rowbit connect` before 0.2.3)
+        #[arg(long)]
+        single: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -777,7 +829,7 @@ async fn main() -> anyhow::Result<()> {
             set_password,
             server,
             setup,
-        } => serve(listen, set_password, &server, &setup).await?,
+        } => serve(listen, set_password, &server, &setup, false).await?,
         Command::Agents {
             command,
             policy,
@@ -801,27 +853,69 @@ async fn main() -> anyhow::Result<()> {
                     );
                     println!("{token}");
                 }
-                Some(AgentsCommand::Revoke { agent }) => {
+                Some(AgentsCommand::Revoke {
+                    agent,
+                    connection,
+                    single,
+                }) => {
                     let mut store = store.open()?;
-                    if store.revoke_agent_token(&agent)? {
-                        println!("{agent}'s token is revoked");
+                    if let Some(id) = connection {
+                        match store.revoke_connection(&agent, &id)? {
+                            Some(label) => println!("{agent}'s token for {label} is revoked"),
+                            None => anyhow::bail!(
+                                "{agent} has no connection {id}; `rowbit agents` lists them with their ids"
+                            ),
+                        }
+                    } else if single {
+                        if store.revoke_single_token(&agent)? {
+                            println!("{agent}'s single token is revoked");
+                        } else {
+                            println!("{agent} had no single token");
+                        }
+                    } else if store.revoke_agent_token(&agent)? {
+                        println!("every token of {agent}'s is revoked");
                     } else {
                         println!("{agent} had no token");
                     }
                 }
                 None => {
                     let store = store.open()?;
+                    let connections = store.connection_tokens()?;
+                    let used = |u: Option<i64>| {
+                        u.map(|u| format!("last used {}", review::when(u)))
+                            .unwrap_or_else(|| "never used".into())
+                    };
                     for agent in policy.agents.keys() {
-                        match store.agent_token_times(agent)? {
-                            None => println!("{agent}  no token"),
-                            Some((created, used)) => println!(
-                                "{agent}  token made {}, {}",
+                        let mine: Vec<_> =
+                            connections.iter().filter(|t| &t.agent == agent).collect();
+                        let manual = store.agent_token_times(agent)?;
+                        if manual.is_none() && mine.is_empty() {
+                            println!("{agent}  no token");
+                            continue;
+                        }
+                        println!("{agent}");
+                        if let Some((created, last)) = manual {
+                            println!(
+                                "  {:<10} {}: made {}, {}",
+                                "--single",
+                                rowbit_engine::overview::OWN_TOKEN,
                                 review::when(created),
-                                used.map(|u| format!("last used {}", review::when(u)))
-                                    .unwrap_or_else(|| "never used".into())
-                            ),
+                                used(last)
+                            );
+                        }
+                        for t in mine {
+                            println!(
+                                "  {:<10} {}: made {}, {}",
+                                t.id,
+                                t.label,
+                                review::when(t.created_ms),
+                                used(t.used_ms)
+                            );
                         }
                     }
+                    println!(
+                        "\nSign one out: rowbit agents revoke <agent> --connection <id> (or --single); all of an agent's: rowbit agents revoke <agent>"
+                    );
                 }
             }
         }
@@ -866,6 +960,7 @@ async fn main() -> anyhow::Result<()> {
             connect::run(args)?;
         }
         Command::Setup(args) => setup::run(args).await?,
+        Command::Status(args) => status::run(args)?,
         Command::Ping { url } => {
             let adapter = rowbit_mysql::MySqlAdapter::new(&database_url(&url)?)?;
             let info = adapter.server_info().await?;

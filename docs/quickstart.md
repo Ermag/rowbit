@@ -57,7 +57,9 @@ Then ask for a change. Whatever it is, Rowbit previews it on a copy and holds it
 
 ## 4. Review it
 
-Open the review page and sign in with the password setup printed and your name, which the audit log records. It shows the held change with each row before and after. Approve it, and Rowbit writes exactly those rows, or nothing if any changed since the preview. Undo takes one change back.
+Open the review page and sign in with the password setup printed and your name, which the audit log records. It shows the held change with each row before and after. Approve it, and Rowbit writes exactly those rows, or nothing if any changed since the preview. Undo takes one change back. Its header says which database it guards, and its Setup view shows the database, the agents and where each is connected; `rowbit status` shows the same for every setup on this machine.
+
+To use Rowbit in another project, `cd` into it and run `rowbit connect claude-code` (or another client); see [Connect your agent](connect.md#add-rowbit-to-a-project-you-already-have).
 
 The same from a terminal:
 

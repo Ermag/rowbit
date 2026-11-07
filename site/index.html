@@ -265,7 +265,7 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
     <div>
       <h1>ROWBIT</h1>
       <p class="tag">A safety net for AI agents that write to your database. <em>Preview</em> every write, let a person <em>approve</em> the risky ones, <em>undo</em> any single change.</p>
-      <div class="meta"><span>v0.2.2</span><span>MCP server for MariaDB &amp; MySQL</span><span>Open source, AGPL-3.0</span><span><a href="https://github.com/Ermag/rowbit">GitHub</a></span></div>
+      <div class="meta"><span>v0.2.2</span><span>MCP server for MariaDB &amp; MySQL</span><span>Open source, AGPL-3.0</span><span><a href="docs/quickstart.html">Docs</a></span><span><a href="https://github.com/Ermag/rowbit">GitHub</a></span></div>
     </div>
   </header>
 
@@ -293,7 +293,7 @@ footer { color: var(--muted); font-size: 14px; text-align: center; }
     <div class="extras">
       <div class="frame">
         <div class="eyebrow">Already running Rowbit?</div>
-        <p class="p">Setup connects the clients you pick. To add VS Code from here, use the button and paste the token from <code>rowbit connect vscode --print --new-token</code> when VS Code asks (an agent has one token, so this signs out the other client). The button assumes the default <code>127.0.0.1:8080</code>.</p>
+        <p class="p">Setup connects the clients you pick. To add VS Code from here, use the button and paste the token from <code>rowbit connect vscode --print</code> when VS Code asks. The button assumes the default <code>127.0.0.1:8080</code>.</p>
         <a class="btn sm" id="vscode" href="#">▶ ADD TO VS CODE</a>
       </div>
       <div class="frame">
@@ -467,7 +467,7 @@ document.querySelectorAll('.copy').forEach(b => b.addEventListener('click', asyn
 }));
 // A link is the same for everyone, so it can't carry an agent's token:
 // VS Code asks for it, as a password, when the server is added.
-const vsInputs = [{ type: 'promptString', id: 'rowbit_token', description: 'Rowbit agent token (from: rowbit connect vscode --print --new-token)', password: true }];
+const vsInputs = [{ type: 'promptString', id: 'rowbit_token', description: 'Rowbit agent token (from: rowbit connect vscode --print)', password: true }];
 const vsConfig = { type: 'http', url: 'http://127.0.0.1:8080/mcp', headers: { Authorization: 'Bearer ${input:rowbit_token}' } };
 $('#vscode').href = 'https://insiders.vscode.dev/redirect/mcp/install?name=rowbit&inputs=' +
   encodeURIComponent(JSON.stringify(vsInputs)) + '&config=' + encodeURIComponent(JSON.stringify(vsConfig));

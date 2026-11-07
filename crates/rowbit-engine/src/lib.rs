@@ -26,6 +26,8 @@ use rowbit_policy::{
 };
 use rowbit_store::{AuditEvent, Change, ChangeId, NewDelivery, Review, Store, StoreError};
 pub use rowbit_store::{Delivery, DeliveryOutcome};
+
+pub mod overview;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -563,6 +565,12 @@ impl Engine {
     pub fn agent_for_token(&self, token: &str) -> Result<Option<String>, EngineError> {
         let agent = self.store().agent_for_token(token)?;
         Ok(agent.filter(|a| self.policy.agents.contains_key(a)))
+    }
+
+    /// Each agent in `rowbit.yml`, its rules in brief and where it is
+    /// connected.
+    pub fn agents_overview(&self) -> Result<Vec<overview::Agent>, EngineError> {
+        Ok(overview::agents(&self.policy, &self.store())?)
     }
 
     /// Checks the whole audit log; see [`Store::verify`].

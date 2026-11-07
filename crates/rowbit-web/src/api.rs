@@ -481,6 +481,28 @@ pub(crate) async fn verify(State(app): State<App>, headers: HeaderMap) -> Respon
     }
 }
 
+/// What this Rowbit guards and who is connected: the Setup view.
+pub(crate) async fn setup(State(app): State<App>, headers: HeaderMap) -> Response {
+    if let Err(r) = signed_in(&app, &headers) {
+        return r.into_response();
+    }
+    let agents = match app.engine.agents_overview() {
+        Ok(a) => a,
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let held = match app.engine.held() {
+        Ok(h) => h.len(),
+        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let mut out = (*app.setup).clone();
+    if !out.is_object() {
+        out = json!({});
+    }
+    out["agents"] = json!(agents);
+    out["held"] = json!(held);
+    Json(out).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,6 +8,8 @@ fn rowbit(args: &[&str], dir: &std::path::Path) -> (bool, String) {
         .args(args)
         .current_dir(dir)
         .env("ROWBIT_DATABASE_URL", "mysql://nobody@127.0.0.1:1/none")
+        // No setups of the person running the tests.
+        .env("HOME", dir)
         .env_remove("ROWBIT_SERVER_CONFIG")
         .output()
         .unwrap();
@@ -29,6 +31,7 @@ fn dir(name: &str) -> std::path::PathBuf {
 #[test]
 fn no_network_listening_without_an_identity_provider() {
     let d = dir("net");
+    std::fs::write(d.join("rowbit.yml"), "version: 0\nagents: {}\n").unwrap();
     let (ok, out) = rowbit(&["serve", "--listen", "0.0.0.0:0"], &d);
     assert!(!ok, "{out}");
     assert!(out.contains("identity provider"), "{out}");
@@ -72,12 +75,19 @@ fn agent_tokens_are_shown_once_and_revocable() {
     assert_eq!(token.len(), 47);
     let (ok, out) = rowbit(&["agents"], &d);
     assert!(
-        ok && out.contains("refund-bot  token made") && out.contains("never used"),
+        ok && out.contains("refund-bot\n  --single   single token") && out.contains("never used"),
         "{out}"
     );
     assert!(!out.contains(&token));
+    let (ok, out) = rowbit(
+        &["agents", "revoke", "refund-bot", "--connection", "abcdef12"],
+        &d,
+    );
+    assert!(!ok && out.contains("no connection"), "{out}");
+    let (ok, out) = rowbit(&["agents", "revoke", "refund-bot", "--single"], &d);
+    assert!(ok && out.contains("single token is revoked"), "{out}");
     let (ok, out) = rowbit(&["agents", "revoke", "refund-bot"], &d);
-    assert!(ok && out.contains("revoked"), "{out}");
+    assert!(ok && out.contains("had no token"), "{out}");
     let (_, out) = rowbit(&["agents"], &d);
     assert!(out.contains("refund-bot  no token"), "{out}");
 }

@@ -12,6 +12,7 @@ use rowbit_mysql::grants::{self, Account, Grant, Object};
 
 use crate::connect::{self, Client, Env, Scope};
 use crate::place;
+use crate::term;
 
 /// What Rowbit's own user needs on each database, as in docs/privileges.md.
 const NEEDED: [&str; 6] = [
@@ -126,6 +127,11 @@ pub async fn run(a: SetupArgs) -> anyhow::Result<()> {
 
     connect::check_name(&a.name)?;
     let dir = place::home()?.join(&a.name);
+    anyhow::ensure!(
+        !std::fs::symlink_metadata(&dir).is_ok_and(|m| m.file_type().is_symlink()),
+        "{} is a link (`rowbit demo` keeps one to its directory there); give this setup another name with --name",
+        dir.display()
+    );
     let resuming = place::has_rowbit_files(&dir);
     if resuming {
         say(&format!(
@@ -308,10 +314,12 @@ pub async fn run(a: SetupArgs) -> anyhow::Result<()> {
     }
     match &password {
         Some(p) => say(&format!(
-            "Review page: {address}    password: {p}    (shown this once)"
+            "Review page: {}    password: {p}    (shown this once)",
+            term::link(&address)
         )),
         None => say(&format!(
-            "Review page: {address}    (password as set before)"
+            "Review page: {}    (password as set before)",
+            term::link(&address)
         )),
     }
     for (client, scope) in &connected {
@@ -338,13 +346,21 @@ pub async fn run(a: SetupArgs) -> anyhow::Result<()> {
     }
     say("Writes wait for you on the review page until you add rules to rowbit.yml.");
     say(&format!(
-        "Agents can read every table {} can. Limit what each one sees with scopes: https://ermag.github.io/rowbit/docs/spec/policy.html#scopes",
-        found.account
+        "Agents can read every table {} can. Limit what each one sees with scopes: {}",
+        found.account,
+        term::link("https://ermag.github.io/rowbit/docs/spec/policy.html#scopes")
     ));
-    if dir != place::home()?.join("default") {
+    let dir_flag = if dir != place::home()?.join("default") {
+        format!(" --dir {}", quoted(&dir))
+    } else {
+        String::new()
+    };
+    say(&format!(
+        "Add Rowbit to another project: cd into it and run rowbit connect claude-code{dir_flag} (or cursor, codex, ...)."
+    ));
+    if !dir_flag.is_empty() {
         say(&format!(
-            "Other commands find this setup with --dir {}.",
-            quoted(&dir)
+            "Other commands find this setup with{dir_flag}, or without it when it's your only one."
         ));
     }
     if !found.own_user {
