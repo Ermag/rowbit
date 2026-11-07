@@ -386,13 +386,26 @@ async fn proposing_again_withdraws_the_older_held_copy(var: &str, table: &str) {
     let old = engine.status("refund-bot", first.id).unwrap();
     assert_eq!(old.state, State::Rejected);
     assert_eq!(old.review_url, None);
+    // The agent that looks at the old copy learns why it was withdrawn.
+    let because = format!("proposed again as #{}", second.id);
+    assert_eq!(old.reason.as_deref(), Some(because.as_str()));
     let history = engine.history(first.id).unwrap();
-    let note = history.iter().find(|e| e.event == "Superseded").unwrap();
+    let events: Vec<_> = history
+        .iter()
+        .rev()
+        .take(2)
+        .map(|e| e.event.as_str())
+        .collect();
     assert_eq!(
-        note.detail.as_deref(),
-        Some(format!("proposed again as #{}", second.id).as_str())
+        events,
+        ["Superseded", "Withdraw"],
+        "noted after the withdraw"
     );
-    assert_eq!(history.last().unwrap().event, "Withdraw");
+    assert_eq!(
+        history.last().unwrap().detail.as_deref(),
+        Some(because.as_str())
+    );
+    assert_eq!(rowbit_engine::superseded_by(&history), Some(second.id));
     assert!(engine.verify().unwrap().is_ok());
 
     let hash = engine.change(first.id).unwrap().review_hash.unwrap();

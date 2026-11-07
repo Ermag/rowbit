@@ -566,3 +566,54 @@ fn settings_are_listed_by_prefix_and_deleted() {
     // Characters LIKE would treat as wildcards are literal.
     assert!(store.settings_with_prefix("agent_").unwrap().is_empty());
 }
+
+#[test]
+fn a_superseded_copy_is_withdrawn_and_noted_together() {
+    let mut store = Store::open_in_memory().unwrap();
+    let (id, _) = previewed(&mut store);
+    store
+        .transition(
+            id,
+            &Event::PolicyHeld { reason: "r".into() },
+            &Actor::Policy("default".into()),
+            None,
+        )
+        .unwrap();
+    // Only the proposer's name withdraws it.
+    assert!(
+        store
+            .withdraw_superseded(id, "other-bot", "proposed again as #9")
+            .is_err()
+    );
+    assert_eq!(store.get(id).unwrap().state, State::Held);
+    assert!(
+        store
+            .events(id)
+            .unwrap()
+            .iter()
+            .all(|e| e.event != "Superseded")
+    );
+
+    assert!(
+        store
+            .withdraw_superseded(id, "refund-bot", "proposed again as #9")
+            .unwrap()
+    );
+    assert_eq!(store.get(id).unwrap().state, State::Rejected);
+    let events = store.events(id).unwrap();
+    let last: Vec<_> = events
+        .iter()
+        .rev()
+        .take(2)
+        .map(|e| e.event.as_str())
+        .collect();
+    assert_eq!(last, ["Superseded", "Withdraw"]);
+    // No longer held: nothing changes, nothing is noted.
+    assert!(
+        !store
+            .withdraw_superseded(id, "refund-bot", "proposed again as #10")
+            .unwrap()
+    );
+    assert_eq!(store.events(id).unwrap().len(), events.len());
+    assert!(store.verify().unwrap().is_ok());
+}

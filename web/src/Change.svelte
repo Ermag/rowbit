@@ -62,6 +62,7 @@
       <State state={c.state} />
     </div>
     {#if c.reason}<p class="muted">{c.reason}</p>{/if}
+    {#if c.superseded_by}<p><a href="#/changes/{c.superseded_by}">Review #{c.superseded_by} instead</a></p>{/if}
     {#if c.shadowed}<p class="shadow">Shadow mode: {c.shadowed.would} ({c.shadowed.by}). It was applied anyway.</p>{/if}
     <pre>{c.statement}</pre>
 
