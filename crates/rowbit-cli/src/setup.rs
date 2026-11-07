@@ -483,7 +483,7 @@ async fn database(a: &SetupArgs, ask: &Ask, dir: &Path) -> anyhow::Result<(Strin
             }
             Next::Switch(suggested) => {
                 if ask.yes(
-                    &format!("Switch to that user now? Yes once an administrator has run the statements above; no carries on as {}.", checked.account),
+                    "Switch to that user now? Yes once an administrator has run the statements above; no carries on with the user in the URL.",
                     false,
                 )? {
                     previous = Some(url);
