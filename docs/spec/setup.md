@@ -192,7 +192,7 @@ So that a held write ends with the person knowing where to look, `propose_write`
 
 ## What Rowbit is connected to
 
-`rowbit status` lists every setup on this machine: those in `~/.rowbit` and the demo, or with `--dir` (or in a folder of Rowbit's) that one. For each it prints its folder; the database it guards, as database, host, port, user and TLS, never the password; the review page's address and whether something answers there, with the number of held changes; and each agent in `rowbit.yml` with its rules in brief ("holds every write", "3 rules, else holds", shadow mode, scoped) and where it is connected. It reads files only and never connects to the database, so it works when the database is down.
+`rowbit status` lists every setup on this machine: those in `~/.rowbit` and the demo, or with `--dir` (or in a folder of Rowbit's) that one. For each it prints its folder; the database it guards, as database, host, port, user and TLS, never the password; the review page's address and whether a Rowbit review page answers there (two setups on one address can't be told apart), with the number of held changes; and each agent in `rowbit.yml` with its rules in brief ("holds every write", "3 rules, else holds", shadow mode, scoped) and where it is connected. It reads files, opening each state file read-only, and never connects to the database, so it works when the database is down; a state file it can't read is reported as such, never as "not connected". Each connection is listed with its id, and the command to sign one out.
 
 ```
 shop  ~/.rowbit/shop
@@ -207,7 +207,7 @@ demo  ~/rowbit-demo
 
 Where an agent is connected comes from its tokens over HTTP: each entry `rowbit connect` added, by its label, and the token from `rowbit agents token`. An entry for `rowbit mcp` over stdio holds no token, so it isn't listed. A label says where an entry was added; removing the entry by hand in the client leaves the token, and so the line, until `rowbit agents revoke`.
 
-The review page shows the same for its own setup: a line in the header ("Guarding shop on db.internal:3306 as rowbit", linking to the Setup view), and a Setup view with the database, Rowbit's folder, review page and MCP addresses, sign-in, notification targets, the number held, the version, and each agent with its rules and connections, each with when it was made and last used. The page reads it from `/api/setup`, behind the same sign-in as everything else. One review page shows one setup; a page across several databases comes with named connections.
+The review page shows the same for its own setup: a line in the header ("Guarding shop on db.internal:3306 as rowbit", linking to the Setup view), and a Setup view with the database, Rowbit's folder, review page and MCP addresses, sign-in, notification targets, the number held, the version, and each agent with its rules and connections, each with when it was made and last used. The page reads it from `/api/setup`, behind the same sign-in as everything else. So everyone who can review sees it: the database's host, port, user and name, Rowbit's folder, the identity provider, the notification targets' names, and each connection's label, which names a developer's project folder. None of it is a secret, and a reviewer approving a change should know which database it writes to; with OIDC sign-in, keep that in mind when choosing who may review. One review page shows one setup; a page across several databases comes with named connections.
 
 ## Links in the terminal
 

@@ -73,11 +73,12 @@
       {#if a.connections.length}
         <div class="scroll">
           <table>
-            <thead><tr><th>Connected</th><th>Since</th><th>Last used</th></tr></thead>
+            <thead><tr><th>Connected</th><th>Id</th><th>Since</th><th>Last used</th></tr></thead>
             <tbody>
-              {#each a.connections as c (c.label)}
+              {#each a.connections as c (c.id)}
                 <tr>
                   <td>{c.label}</td>
+                  <td><code>{c.id}</code></td>
                   <td class="nowrap">{ago(c.created_ms)}</td>
                   <td class="nowrap">{c.used_ms ? ago(c.used_ms) : 'never'}</td>
                 </tr>
@@ -85,6 +86,7 @@
             </tbody>
           </table>
         </div>
+        <p class="muted">Sign one out: <code>rowbit agents revoke {a.id} --connection &lt;id&gt;</code></p>
       {:else}
         <p class="muted">Not connected over HTTP. Connect a client from your project: <code>rowbit connect claude-code</code></p>
       {/if}

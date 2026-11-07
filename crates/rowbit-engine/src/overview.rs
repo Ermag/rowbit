@@ -80,6 +80,9 @@ impl Agent {
 /// `rowbit connect` made, and the one `rowbit agents token` made.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Connection {
+    /// What `rowbit agents revoke <agent> --connection` takes, or
+    /// `--single` for the single token.
+    pub id: String,
     /// "Claude Code in ~/projects/app"
     pub label: String,
     pub created_ms: i64,
@@ -96,6 +99,7 @@ pub fn agents(policy: &PolicyFile, store: &Store) -> Result<Vec<Agent>, StoreErr
         let mut connections = Vec::new();
         if let Some((created_ms, used_ms)) = store.agent_token_times(id)? {
             connections.push(Connection {
+                id: "--single".into(),
                 label: OWN_TOKEN.into(),
                 created_ms,
                 used_ms,
@@ -106,6 +110,7 @@ pub fn agents(policy: &PolicyFile, store: &Store) -> Result<Vec<Agent>, StoreErr
                 .iter()
                 .filter(|t| &t.agent == id)
                 .map(|t| Connection {
+                    id: t.id.clone(),
                     label: t.label.clone(),
                     created_ms: t.created_ms,
                     used_ms: t.used_ms,

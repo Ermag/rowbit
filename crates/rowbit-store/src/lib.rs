@@ -292,6 +292,17 @@ impl Store {
         Self::init(Connection::open(path)?)
     }
 
+    /// Opens an existing store for reading only: no schema set up, nothing
+    /// written. For `rowbit status`, which looks at other setups' files.
+    pub fn open_read_only(path: &Path) -> Result<Store, StoreError> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(Duration::from_secs(5))?;
+        Ok(Store { conn })
+    }
+
     pub fn open_in_memory() -> Result<Store, StoreError> {
         Self::init(Connection::open_in_memory()?)
     }
