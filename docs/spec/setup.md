@@ -188,7 +188,13 @@ The home page and the README also offer install links for VS Code (`https://insi
 
 ## Review links
 
-So that a held write ends with the person knowing where to look, `propose_write` and `change_status` return `review_url` for a held change: `<public_url>/changes/<id>`, or `http://<listen>/changes/<id>` without a `public_url`, the same link notifications use. `rowbit serve` records that address in the state file when it starts, so `rowbit mcp` over stdio, which shares the file, links to the same place; before `rowbit serve` has ever run, the link uses `http://127.0.0.1:8080`. The server's instructions tell the agent to give the person that link and not to retry the write in another form. The link reveals nothing: the page needs sign-in, and the agent could reach its address already. Opened signed out, it goes through sign-in (carrying only the change's number) and then to that change. See [Agent tools](change-lifecycle.md#agent-tools-mcp).
+So that a held write ends with the person knowing where to look, `propose_write` and `change_status` return `review_url` for a held change: `<public_url>/changes/<id>`, or `http://<listen>/changes/<id>` without a `public_url`, the same link notifications use. `rowbit serve` records that address in the state file when it starts, so `rowbit mcp` over stdio, which shares the file, links to the same place; before `rowbit serve` has ever run, the link uses `http://127.0.0.1:8080`. The server's instructions tell the agent to give the person that link, as a Markdown link so clients that render Markdown make it clickable, and not to retry the write in another form. The link reveals nothing: the page needs sign-in, and the agent could reach its address already. Opened signed out, it goes through sign-in (carrying only the change's number) and then to that change. See [Agent tools](change-lifecycle.md#agent-tools-mcp).
+
+## Links in the terminal
+
+A plain URL in a terminal is only clickable if the terminal spots it, and some open it only on ⌘-click or Ctrl-click. So where Rowbit prints an address for a person (the review page in `setup`, `demo` and `serve`, the docs link in `setup`), it marks it as a link with OSC 8, in terminals known to show those: Ghostty, iTerm2, WezTerm, kitty, VS Code's terminal, Windows Terminal, Hyper, Rio, Warp and VTE-based ones (GNOME Terminal and others). It prints the address as it is when the output isn't a terminal, in Terminal.app, which doesn't support them, and inside tmux or screen, which drop them unless set up to pass them on. `ROWBIT_HYPERLINKS=1` or `0` overrides the choice. The link's text is the address itself, so copying still works.
+
+`rowbit demo` also opens the review page in the browser once it answers, when run in a terminal; `--no-open` skips that.
 
 ## The skill
 
